@@ -1,53 +1,155 @@
-가장 단순한 방법은 두 Orin을 같은 공유기/스위치에 연결하고 ROS 2 DDS로 직접 통신시키는 것입니다. ROS 1처럼 별도 Master나 TCP 서버를 만들 필요는 없습니다. 같은 DDS domain의 노드는 자동으로 서로를 발견합니다. ROS 2 DDS 구조
-1. 두 Orin의 네트워크 확인
-예시:
-리더 Orin:   192.168.10.11
-팔로워 Orin: 192.168.10.12
-리더에서:
-hostname -I
-ping -c 4 192.168.10.12
-팔로워에서:
-hostname -I
-ping -c 4 192.168.10.11
-양쪽 모두 ping이 되어야 합니다. Wi-Fi를 사용한다면 공유기의 AP isolation 또는 client isolation 기능은 꺼져 있어야 합니다.
-2. 양쪽 ROS 환경을 동일하게 설정
-두 Orin의 모든 터미널에서:
+가장 단순한 방법은 두 Orin을 같은 공유기/스위치에 연결하고 ROS 2 DDS로 직접 통신시키는 것입니다. ROS 1처럼 별도 Master나 TCP 서버를 만들 필요는 없습니다. 같은 DDS domain의 노드는 자동으로 서로를 발견합니다.
+
+## 리더와 팔로워의 역할
+
+| 구분 | 리더 Orin | 팔로워 Orin |
+|---|---|---|
+| 네트워크 | 팔로워 IP로 ping | 리더 IP로 ping |
+| DDS 설정 | 리더·팔로워와 동일한 값 설정 | 리더·팔로워와 동일한 값 설정 |
+| 멀티캐스트 시험 | `send` 또는 `receive` | 리더와 반대 역할로 실행 |
+| 협동 노드 | `leader_cooperation` 실행 | `/follower/status` heartbeat 발행 및 주행 노드 연결 |
+| 주요 송신 토픽 | `/leader/cmd_vel`, `/cooperation/target_velocity` | `/follower/status` |
+| 주요 수신 토픽 | `/follower/status` | `/follower/cmd_vel` |
+
+아래 명령에서 `<리더_IP>`와 `<팔로워_IP>`는 각 장비에서 `hostname -I`로 확인한 주소로 바꿉니다.
+
+## 1. 양쪽 공통 준비
+
+리더와 팔로워의 모든 ROS 2 터미널에서 실행합니다.
+
+```bash
 source /opt/ros/humble/setup.bash
-source /path/to/damgc_robot/install/setup.bash
+cd /home/maze/damgc_robot
+source install/local_setup.bash
 
 export ROS_DOMAIN_ID=42
 export ROS_LOCALHOST_ONLY=0
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-핵심은 다음 세 값이 양쪽에서 같아야 한다는 것입니다.
+```
+
+두 장비에서 다음 값이 같아야 합니다.
+
+```bash
 printenv ROS_DOMAIN_ID
 printenv ROS_LOCALHOST_ONLY
 printenv RMW_IMPLEMENTATION
-ROS_DOMAIN_ID가 같은 노드끼리만 서로 발견합니다. 다른 ROS 장비와 섞이지 않도록 팀 전용 번호를 정하면 됩니다. ROS_DOMAIN_ID 설명
-시험에 성공한 다음 위 환경변수를 양쪽 ~/.bashrc에 넣으면 됩니다.
-3. DDS multicast부터 확인
-팔로워 Orin:
-ros2 multicast receive
-리더 Orin:
+```
+
+IP 확인:
+
+```bash
+hostname -I
+```
+
+## 2. 리더 Orin에서 할 일
+
+먼저 팔로워와 네트워크가 연결되는지 확인합니다.
+
+```bash
+ping -c 4 <팔로워_IP>
+```
+
+멀티캐스트 시험에서 리더를 송신자로 사용할 경우:
+
+```bash
 ros2 multicast send
-팔로워에 Hello World!가 표시되어야 합니다. 반대 방향도 시험합니다.
-리더: ros2 multicast receive
-팔로워: ros2 multicast send
-이 명령은 DDS 노드 검색에 필요한 UDP multicast가 두 장비 사이를 통과하는지 확인합니다. ROS 2 multicast 도구
-4. 실제 ROS 토픽 시험
-리더 Orin:
+```
+
+팔로워가 보낸 테스트 토픽을 확인할 경우:
+
+```bash
+ros2 topic echo /test/orin_link_back
+```
+
+DDS 협동 노드를 실행합니다.
+
+```bash
+ros2 launch leader_cooperation leader_cooperation.launch.py
+```
+
+협동 운반을 활성화하고 상태를 확인합니다.
+
+```bash
+ros2 service call /cooperation/enable \
+  std_srvs/srv/SetBool "{data: true}"
+ros2 topic echo /cooperation/state
+```
+
+## 3. 팔로워 Orin에서 할 일
+
+먼저 리더와 네트워크가 연결되는지 확인합니다.
+
+```bash
+ping -c 4 <리더_IP>
+```
+
+멀티캐스트 시험에서 팔로워를 수신자로 사용할 경우:
+
+```bash
+ros2 multicast receive
+```
+
+리더가 발행한 테스트 토픽을 확인합니다.
+
+```bash
+ros2 topic echo /test/orin_link
+```
+
+팔로워 heartbeat와 실제 팔로워 주행 노드를 연결합니다. 현재 저장소에서는 heartbeat 메시지 계약을 `std_msgs/msg/String`으로 정의합니다.
+
+```bash
+ros2 topic pub -r 2 /follower/status \
+  std_msgs/msg/String "{data: 'follower_alive'}"
+```
+
+리더의 명령 토픽 수신 여부는 다음으로 확인합니다.
+
+```bash
+ros2 topic echo /follower/cmd_vel
+```
+
+heartbeat 또는 리더 명령이 timeout되면 리더 협동 노드는 팔로워 속도를 0으로 발행합니다. 실제 운용에서는 위 `ros2 topic pub` 시험 명령 대신 팔로워 상태 노드가 heartbeat를 계속 발행해야 합니다.
+
+## 4. 양방향 DDS 토픽 시험
+
+리더에서 실행:
+
+```bash
 ros2 topic pub -r 2 /test/orin_link \
   std_msgs/msg/String "{data: 'leader_alive'}"
-팔로워 Orin:
+```
+
+팔로워에서 확인:
+
+```bash
 ros2 topic echo /test/orin_link
-다음과 같이 나오면 리더 → 팔로워 통신이 된 것입니다.
-data: leader_alive
-반대 방향도 확인합니다.
-팔로워:
+```
+
+팔로워에서 실행:
+
+```bash
 ros2 topic pub -r 2 /test/orin_link_back \
   std_msgs/msg/String "{data: 'follower_alive'}"
-리더:
+```
+
+리더에서 확인:
+
+```bash
 ros2 topic echo /test/orin_link_back
-5. 프로젝트에 적용
+```
+
+양쪽에서 `leader_alive`, `follower_alive`가 보이면 기본 DDS 통신이 정상입니다.
+
+## 5. 네트워크가 안 될 때 확인
+
+- 두 Orin이 같은 공유기·스위치에 연결되어 있는지 확인합니다.
+- 공유기의 AP isolation 또는 client isolation을 끕니다.
+- `ROS_DOMAIN_ID`, `ROS_LOCALHOST_ONLY`, `RMW_IMPLEMENTATION` 값이 같은지 확인합니다.
+- `ROS_LOCALHOST_ONLY`는 반드시 `0`이어야 합니다.
+- 방화벽이 UDP 멀티캐스트를 차단하지 않는지 확인합니다.
+
+## 프로젝트 통신 구조
+
 통신이 확인되면 다음 구조로 연결합니다.
 리더 Orin
  ├─ /mission/state
