@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>rescue_robot_bringup</name>
+  <version>0.0.0</version>
+  <description>Integrated launch files for the rescue robot.</description>
+  <maintainer email="maze@todo.todo">maze</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>realsense2_camera</exec_depend>
+  <exec_depend>rescue_robot_apriltag</exec_depend>
+  <exec_depend>rescue_robot_description</exec_depend>
+  <exec_depend>rescue_robot_tools</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

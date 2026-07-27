@@ -1,0 +1,9 @@
+build/
+install/
+data/
+log/
+.codex/
+.agents/
+__pycache__/
+*.pyc
+*.csv

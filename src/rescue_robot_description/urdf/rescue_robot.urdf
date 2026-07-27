@@ -1,0 +1,424 @@
+<?xml version="1.0"?>
+<robot name="rescue_robot">
+
+  <!--
+    ROS 좌표축
+    +X : 그리퍼 방향, 로봇 전방
+    +Y : 로봇 왼쪽
+    +Z : 위쪽
+
+    높이 기준
+    지면                  : 0 mm
+    바퀴축 중심           : 60 mm
+    차체 하판 밑면        : 30 mm
+    차체 프레임 최고점   : 180 mm
+    그리퍼 밑면           : 90 mm
+    그리퍼 윗면          : 150 mm
+    IMU 중심             : 100 mm
+    카메라 중심          : 130 mm
+  -->
+
+
+  <!-- 색상 -->
+
+  <material name="white">
+    <color rgba="0.92 0.92 0.92 1.0"/>
+  </material>
+
+  <material name="light_gray">
+    <color rgba="0.65 0.65 0.65 1.0"/>
+  </material>
+
+  <material name="black">
+    <color rgba="0.03 0.03 0.03 1.0"/>
+  </material>
+
+  <material name="green">
+    <color rgba="0.10 0.70 0.20 1.0"/>
+  </material>
+
+
+  <!-- 기본 좌표계 -->
+
+  <link name="base_footprint"/>
+
+  <link name="base_link"/>
+
+  <!-- 바퀴 반지름 60mm이므로 바퀴축은 지면에서 60mm -->
+  <joint name="base_footprint_to_base_link" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0.060" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- ====================================================== -->
+  <!-- 차체 하판 -->
+  <!-- 밑면 30mm, 두께 10mm, 윗면 40mm -->
+  <!-- ====================================================== -->
+
+  <link name="lower_body_plate_link">
+    <visual>
+      <geometry>
+        <box size="0.160 0.170 0.010"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+
+  <joint name="lower_body_plate_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="lower_body_plate_link"/>
+
+    <!-- 절대 중심 높이 35mm - base_link 60mm = -25mm -->
+    <origin xyz="0.080 0 -0.025" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- ====================================================== -->
+  <!-- 차체 세로 프레임 -->
+  <!-- 하판 윗면 40mm부터 최고점 180mm까지 -->
+  <!-- 높이 140mm, 중심 절대 높이 110mm -->
+  <!-- base_link 기준 z = 50mm -->
+  <!-- ====================================================== -->
+
+  <!-- 뒤쪽 왼쪽 세로 프레임 -->
+  <link name="rear_left_post_link">
+    <visual>
+      <geometry>
+        <box size="0.020 0.020 0.140"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+
+  <joint name="rear_left_post_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="rear_left_post_link"/>
+    <origin xyz="0.015 0.075 0.050" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- 뒤쪽 오른쪽 세로 프레임 -->
+  <link name="rear_right_post_link">
+    <visual>
+      <geometry>
+        <box size="0.020 0.020 0.140"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+
+  <joint name="rear_right_post_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="rear_right_post_link"/>
+    <origin xyz="0.015 -0.075 0.050" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- 앞쪽 왼쪽 세로 프레임 -->
+  <link name="front_left_post_link">
+    <visual>
+      <geometry>
+        <box size="0.020 0.020 0.140"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+
+  <joint name="front_left_post_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="front_left_post_link"/>
+    <origin xyz="0.145 0.075 0.050" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- 앞쪽 오른쪽 세로 프레임 -->
+  <link name="front_right_post_link">
+    <visual>
+      <geometry>
+        <box size="0.020 0.020 0.140"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+
+  <joint name="front_right_post_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="front_right_post_link"/>
+    <origin xyz="0.145 -0.075 0.050" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- ====================================================== -->
+  <!-- 센서 장착판 -->
+  <!-- 중심 높이 91mm, 두께 10mm -->
+  <!-- 윗면 96mm -->
+  <!-- ====================================================== -->
+
+  <link name="sensor_plate_link">
+    <visual>
+      <geometry>
+        <box size="0.120 0.140 0.010"/>
+      </geometry>
+      <material name="light_gray"/>
+    </visual>
+  </link>
+
+  <joint name="sensor_plate_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="sensor_plate_link"/>
+
+    <!-- 절대 91mm - base_link 60mm = 31mm -->
+    <origin xyz="0.075 0 0.031" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- ====================================================== -->
+  <!-- 차체 위쪽 연결 프레임 -->
+  <!-- 전체 차체 최고점 180mm -->
+  <!-- ====================================================== -->
+
+  <link name="top_front_bridge_link">
+    <visual>
+      <geometry>
+        <box size="0.020 0.170 0.020"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+
+  <joint name="top_front_bridge_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="top_front_bridge_link"/>
+
+    <!-- 중심 절대 높이 170mm -->
+    <origin xyz="0.145 0 0.110" rpy="0 0 0"/>
+  </joint>
+
+
+  <link name="top_rear_bridge_link">
+    <visual>
+      <geometry>
+        <box size="0.020 0.170 0.020"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+
+  <joint name="top_rear_bridge_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="top_rear_bridge_link"/>
+    <origin xyz="0.015 0 0.110" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- ====================================================== -->
+  <!-- 왼쪽 바퀴 -->
+  <!-- ====================================================== -->
+
+  <link name="left_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+
+      <geometry>
+        <cylinder radius="0.060" length="0.060"/>
+      </geometry>
+
+      <material name="black"/>
+    </visual>
+  </link>
+
+  <joint name="left_wheel_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="left_wheel_link"/>
+
+    <!-- 좌우 바퀴 중심 간 거리 230mm -->
+    <origin xyz="0 0.115 0" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- ====================================================== -->
+  <!-- 오른쪽 바퀴 -->
+  <!-- ====================================================== -->
+
+  <link name="right_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+
+      <geometry>
+        <cylinder radius="0.060" length="0.060"/>
+      </geometry>
+
+      <material name="black"/>
+    </visual>
+  </link>
+
+  <joint name="right_wheel_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="right_wheel_link"/>
+    <origin xyz="0 -0.115 0" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- ====================================================== -->
+  <!-- 그리퍼 중앙 연결부 -->
+  <!-- 밑면 90mm, 높이 60mm, 윗면 150mm -->
+  <!-- 중심 절대 높이 120mm -->
+  <!-- base_link 기준 z = 60mm -->
+  <!-- ====================================================== -->
+
+  <link name="gripper_connector_link">
+    <visual>
+      <geometry>
+        <box size="0.050 0.130 0.060"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+
+  <joint name="gripper_connector_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="gripper_connector_link"/>
+    <origin xyz="0.185 0 0.060" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- 그리퍼 좌우 연결 가로대 -->
+
+  <link name="gripper_bridge_link">
+    <visual>
+      <geometry>
+        <box size="0.020 0.190 0.060"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+
+  <joint name="gripper_bridge_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="gripper_bridge_link"/>
+    <origin xyz="0.215 0 0.060" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- ====================================================== -->
+  <!-- 왼쪽 그리퍼 암 -->
+  <!-- ====================================================== -->
+
+  <link name="left_gripper_arm_link">
+    <visual>
+      <geometry>
+        <box size="0.090 0.025 0.060"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+
+  <joint name="left_gripper_arm_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="left_gripper_arm_link"/>
+    <origin xyz="0.265 0.070 0.060" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- 왼쪽 그리퍼 안쪽 끝부분 -->
+
+  <link name="left_gripper_tip_link">
+    <visual>
+      <geometry>
+        <box size="0.025 0.045 0.060"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+
+  <joint name="left_gripper_tip_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="left_gripper_tip_link"/>
+    <origin xyz="0.305 0.0475 0.060" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- ====================================================== -->
+  <!-- 오른쪽 그리퍼 암 -->
+  <!-- ====================================================== -->
+
+  <link name="right_gripper_arm_link">
+    <visual>
+      <geometry>
+        <box size="0.090 0.025 0.060"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+
+  <joint name="right_gripper_arm_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="right_gripper_arm_link"/>
+    <origin xyz="0.265 -0.070 0.060" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- 오른쪽 그리퍼 안쪽 끝부분 -->
+
+  <link name="right_gripper_tip_link">
+    <visual>
+      <geometry>
+        <box size="0.025 0.045 0.060"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+
+  <joint name="right_gripper_tip_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="right_gripper_tip_link"/>
+    <origin xyz="0.305 -0.0475 0.060" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- ====================================================== -->
+  <!-- RealSense 카메라 -->
+  <!-- 카메라 중심 절대 높이 130mm -->
+  <!-- base_link 기준 z = 70mm -->
+  <!-- ====================================================== -->
+
+  <link name="camera_link">
+    <visual>
+      <geometry>
+        <box size="0.025 0.090 0.025"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_link"/>
+    <origin xyz="0 0 0.070" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- ====================================================== -->
+  <!-- BNO055 IMU -->
+  <!-- IMU 중심 절대 높이 100mm -->
+  <!-- base_link 기준 z = 40mm -->
+  <!-- ====================================================== -->
+
+  <link name="imu_link">
+    <visual>
+      <geometry>
+        <box size="0.025 0.025 0.008"/>
+      </geometry>
+      <material name="green"/>
+    </visual>
+  </link>
+
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0.040" rpy="0 0 0"/>
+  </joint>
+
+</robot>
