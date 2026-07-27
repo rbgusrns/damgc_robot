@@ -15,5 +15,6 @@
     pose_estimation_method: pnp
     tag:
       ids: [0]
-      frames: ["tag36h11:0"]
+      # TF frame IDs are global; ROS namespaces do not prefix them.
+      frames: ["leader/tag36h11:0"]
       sizes: [0.050]

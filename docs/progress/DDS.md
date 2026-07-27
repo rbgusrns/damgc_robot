@@ -257,6 +257,104 @@ Reliability: RELIABLE
 | 협동 상태 | `COOPERATING` |
 | 속도 명령 연결 | `leader_cooperation` → `velocity_guard` 확인 |
 
+## 7. 팔로워 Orin 기준 실제 실행 절차
+
+이 저장소를 실행하는 팔로워 Orin의 주소는 `192.168.0.7`, 리더 Orin은
+`192.168.0.6`입니다. 팔로워에서 `hostname -I`로 주소를 먼저 확인합니다.
+
+### 7.1 팔로워 환경 설정 및 빌드
+
+새 터미널마다 ROS overlay까지 source해야 `follower_control` 패키지를 찾을 수
+있습니다. `ros2_dds_env.sh`만 source하면 DDS 변수만 설정되고 workspace 패키지는
+등록되지 않습니다.
+
+```bash
+cd ~/damgc_robot
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install --packages-select follower_control
+source install/local_setup.bash
+source scripts/ros2_dds_env.sh
+```
+
+확인:
+
+```bash
+ros2 pkg list | grep '^follower_control$'
+printenv ROS_DOMAIN_ID ROS_LOCALHOST_ONLY RMW_IMPLEMENTATION
+```
+
+### 7.2 네트워크 및 multicast 확인
+
+```bash
+ping -c 4 192.168.0.6
+ros2 multicast receive
+```
+
+리더에서 동시에 `ros2 multicast send`를 실행했을 때 팔로워에 `Hello World!`가
+출력되어야 합니다. ping은 성공하지만 multicast가 실패하면 AP/client isolation,
+방화벽의 UDP multicast 차단을 확인합니다.
+
+### 7.3 팔로워 heartbeat와 watchdog 실행
+
+팔로워에서는 수동 `ros2 topic pub /follower/status` 대신 다음 노드를 계속 실행합니다.
+
+```bash
+ros2 launch follower_control velocity_guard.launch.py
+```
+
+이 노드는 다음을 수행합니다.
+
+| 방향 | 토픽 | 타입 | 설명 |
+|---|---|---|---|
+| 팔로워 → 리더 | `/follower/status` | `std_msgs/msg/String` | 50 Hz heartbeat (`READY`/`ACTIVE`) |
+| 리더 → 팔로워 | `/follower/cmd_vel` | `geometry_msgs/msg/Twist` | reliable 속도 명령 |
+| 팔로워 내부 | `/follower/safe_cmd_vel` | `geometry_msgs/msg/Twist` | 제한·watchdog 후 모터 bridge 입력 |
+
+리더 명령이 `0.3초` 이상 끊기면 `/follower/safe_cmd_vel`은 0속도가 됩니다.
+속도 제한은 선속도 `0.25 m/s`, 각속도 `0.8 rad/s`입니다. 실제 운용에서는
+STM32 bridge가 `/follower/safe_cmd_vel`을 구독해야 합니다.
+
+팔로워에서 수신 토픽을 확인합니다.
+
+```bash
+ros2 topic echo /follower/status
+ros2 topic echo /follower/cmd_vel
+ros2 topic echo /follower/safe_cmd_vel
+```
+
+리더의 `/follower/status` echo에서 `READY`가 반복되면 heartbeat가 연결된 상태입니다.
+리더 명령이 들어오는 동안에는 `ACTIVE`로 바뀔 수 있습니다.
+
+### 7.4 실제 협동 운반 시작
+
+팔로워에서 `velocity_guard` 터미널을 계속 열어둔 상태로 리더에서 실행합니다.
+
+```bash
+ros2 launch leader_cooperation leader_cooperation.launch.py
+ros2 service call /cooperation/enable \
+  std_srvs/srv/SetBool "{data: true}"
+```
+
+리더가 `/leader/cmd_vel`을 발행해야 실제 `/follower/cmd_vel`이 전달됩니다.
+협동 활성화만 하고 리더 명령을 보내지 않으면 팔로워는 정지해야 합니다.
+
+리더에서 확인:
+
+```bash
+ros2 topic echo /cooperation/state
+ros2 topic echo /follower/status
+```
+
+팔로워에서 확인:
+
+```bash
+ros2 topic info /follower/cmd_vel -v
+ros2 topic echo /follower/safe_cmd_vel
+```
+
+`/cooperation/state`가 `COOPERATING`이고 `/follower/status`가 계속 수신되며,
+`/follower/safe_cmd_vel`이 리더 명령에 따라 변하면 DDS 협동 통신이 완료된 것입니다.
+
 ## 프로젝트 통신 구조
 
 통신이 확인되면 다음 구조로 연결합니다.

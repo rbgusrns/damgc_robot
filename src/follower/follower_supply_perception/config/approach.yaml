@@ -3,8 +3,8 @@
 # gripper operating distance.
 /follower/apriltag_approach:
   ros__parameters:
-    source_frame: follower_camera_optical_frame
-    tag_frame_pattern: "tag36h11:{id}"
+    source_frame: follower/follower_camera_optical_frame
+    tag_frame_pattern: "follower/tag36h11:{id}"
     target_tag_id: 0
     allowed_tag_ids: [0, 1, 2]
     selection_mode: priority

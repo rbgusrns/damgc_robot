@@ -62,7 +62,7 @@ def generate_launch_description() -> LaunchDescription:
                 "video_device": video_device,
                 "framerate": 30.0,
                 "io_method": "mmap",
-                "frame_id": "follower_camera_optical_frame",
+                "frame_id": "follower/follower_camera_optical_frame",
                 "pixel_format": "mjpeg2rgb",
                 "av_device_format": "YUV422P",
                 "image_width": 640,

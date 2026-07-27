@@ -66,8 +66,10 @@ class AprilTagApproachNode(Node):
 
     def _declare_parameters(self) -> None:
         """Declare all startup-only configuration parameters."""
-        self.declare_parameter("source_frame", "follower_camera_optical_frame")
-        self.declare_parameter("tag_frame_pattern", "tag36h11:{id}")
+        self.declare_parameter(
+            "source_frame", "follower/follower_camera_optical_frame"
+        )
+        self.declare_parameter("tag_frame_pattern", "follower/tag36h11:{id}")
         self.declare_parameter("target_tag_id", 0)
         self.declare_parameter("allowed_tag_ids", [0, 1, 2])
         self.declare_parameter("selection_mode", "priority")
