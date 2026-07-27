@@ -1,0 +1,16 @@
+/follower/apriltag/apriltag:
+  ros__parameters:
+    image_transport: raw
+    family: 36h11
+    size: 0.050
+    max_hamming: 0
+
+    detector:
+      threads: 4
+      decimate: 1.0
+      blur: 0.0
+      refine: true
+      sharpening: 0.25
+      debug: false
+
+    pose_estimation_method: "pnp"

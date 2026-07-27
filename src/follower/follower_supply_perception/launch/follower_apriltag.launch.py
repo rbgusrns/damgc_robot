@@ -1,0 +1,111 @@
+"""Launch the complete follower USB camera and AprilTag perception pipeline."""
+
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+
+
+def generate_launch_description() -> LaunchDescription:
+    """Create the reproducible camera, rectification, tag, and approach pipeline."""
+    video_device = LaunchConfiguration("video_device")
+    camera_info_url = LaunchConfiguration("camera_info_url")
+    apriltag_config = LaunchConfiguration("apriltag_config")
+    approach_config = LaunchConfiguration("approach_config")
+
+    package_share = FindPackageShare("follower_supply_perception")
+    default_apriltag_config = PathJoinSubstitution(
+        [package_share, "config", "apriltag.yaml"]
+    )
+    default_approach_config = PathJoinSubstitution(
+        [package_share, "config", "approach.yaml"]
+    )
+    default_camera_info = [
+        "file://",
+        PathJoinSubstitution(
+            [package_share, "config", "follower_usb_camera.yaml"]
+        ),
+    ]
+
+    arguments = [
+        DeclareLaunchArgument(
+            "video_device",
+            default_value="/dev/video0",
+            description="V4L2 USB camera device",
+        ),
+        DeclareLaunchArgument(
+            "camera_info_url",
+            default_value=default_camera_info,
+            description="Camera calibration URL used by usb_cam",
+        ),
+        DeclareLaunchArgument(
+            "apriltag_config",
+            default_value=default_apriltag_config,
+            description="Absolute path to the apriltag_ros parameter YAML",
+        ),
+        DeclareLaunchArgument(
+            "approach_config",
+            default_value=default_approach_config,
+            description="Absolute path to the approach-state parameter YAML",
+        ),
+    ]
+
+    usb_camera = Node(
+        package="usb_cam",
+        executable="usb_cam_node_exe",
+        namespace="/follower/camera",
+        name="usb_cam",
+        output="screen",
+        parameters=[
+            {
+                "video_device": video_device,
+                "framerate": 30.0,
+                "io_method": "mmap",
+                "frame_id": "follower_camera_optical_frame",
+                "pixel_format": "mjpeg2rgb",
+                "av_device_format": "YUV422P",
+                "image_width": 640,
+                "image_height": 480,
+                "camera_name": "follower_usb_camera",
+                "camera_info_url": camera_info_url,
+            }
+        ],
+    )
+
+    rectify = Node(
+        package="image_proc",
+        executable="rectify_node",
+        namespace="/follower/camera",
+        name="rectify_node",
+        output="screen",
+        remappings=[
+            ("image", "image_raw"),
+            ("camera_info", "camera_info"),
+            ("image_rect", "image_rect"),
+        ],
+    )
+
+    apriltag = Node(
+        package="apriltag_ros",
+        executable="apriltag_node",
+        namespace="/follower/apriltag",
+        name="apriltag",
+        output="screen",
+        parameters=[apriltag_config],
+        remappings=[
+            ("image_rect", "/follower/camera/image_rect"),
+            ("camera_info", "/follower/camera/camera_info"),
+        ],
+    )
+
+    approach = Node(
+        package="follower_supply_perception",
+        executable="apriltag_approach_node",
+        namespace="/follower",
+        name="apriltag_approach",
+        output="screen",
+        parameters=[approach_config],
+    )
+
+    return LaunchDescription(arguments + [usb_camera, rectify, apriltag, approach])

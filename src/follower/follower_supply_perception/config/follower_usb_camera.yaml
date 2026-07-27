@@ -1,0 +1,26 @@
+image_width: 640
+image_height: 480
+camera_name: follower_usb_camera
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [428.37374,   0.     , 365.82626,
+           0.     , 421.97669, 196.55999,
+           0.     ,   0.     ,   1.     ]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [-0.306573, 0.073785, 0.006517, -0.005485, 0.000000]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1., 0., 0.,
+         0., 1., 0.,
+         0., 0., 1.]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [332.95392,   0.     , 382.35232,   0.     ,
+           0.     , 368.74911, 188.1861 ,   0.     ,
+           0.     ,   0.     ,   1.     ,   0.     ]

@@ -1,0 +1,18 @@
+# Trial values for initial AprilTag integration only.
+# Tune them with the real camera/tag geometry; target_distance is not a confirmed
+# gripper operating distance.
+/follower/apriltag_approach:
+  ros__parameters:
+    source_frame: follower_camera_optical_frame
+    tag_frame_pattern: "tag36h11:{id}"
+    target_tag_id: 0
+    allowed_tag_ids: [0, 1, 2]
+    selection_mode: priority
+    target_distance: 0.15
+    distance_tolerance: 0.02
+    lateral_tolerance: 0.02
+    angle_tolerance_deg: 5.0
+    tag_timeout: 0.3
+    stable_time: 0.8
+    publish_rate: 20.0
+    filter_window: 5
