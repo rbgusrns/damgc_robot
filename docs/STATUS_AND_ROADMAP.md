@@ -25,7 +25,7 @@
 | AprilTag 물품 인식·정밀 접근 | 부분 완료 | 양 로봇 검출과 팔로워 상태 판정 완료, `base_link` 변환·저속 제어 없음 |
 | 그리퍼 물품 파지 | 확인 필요 | URDF 형상만 있고 제어 코드·실물 시험 근거 없음 |
 | 경량 물품 단독 운반 | 미구현 | 접근·파지·주행 연결 없음 |
-| 중량 물품 협동 운반 | 미구현 | Orin 간 상태·명령과 협동 제어 없음 |
+| 중량 물품 협동 운반 | 부분 완료 | 리더 DDS 상태·속도 게이트 구현, 팔로워 heartbeat/하드웨어 주행 시험 필요 |
 | 지도·생존자·로봇 상태 시각화 | 부분 완료 | URDF/RViz와 카메라 확인만 가능, 통합 화면 없음 |
 
 ## 현재 저장소에서 재현 가능한 범위
@@ -112,10 +112,10 @@
 
 ## 계획 인터페이스와 현재 구현의 관계
 
-계획의 `/leader/cmd_vel`, `/follower/cmd_vel`, 로봇별 odometry·IMU,
-`/follower/status`, `/cooperation/*`, `/mission/state`는 **목표 인터페이스**다.
-현재 저장소에서 확인되는 것은 카메라·AprilTag 토픽과
-`/follower/supply/*`, `/follower/alignment/state`뿐이다.
+계획의 로봇별 odometry·IMU와 실제 배터리·fault 구조화 상태는 아직 목표
+인터페이스다. 리더 저장소에는 `leader_cooperation` 패키지가 추가되어
+`/follower/cmd_vel`, `/cooperation/*`, `/mission/state`의 리더 측 발행과
+`/follower/status` heartbeat 구독을 제공한다.
 
 메시지 타입, QoS, 발행 주기, timeout, 담당 노드와 fault 동작이 확정되기 전까지
 목표 인터페이스를 구현 완료로 표시하지 않는다. 자세한 구분은

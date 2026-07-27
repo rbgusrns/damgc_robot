@@ -18,7 +18,7 @@ AprilTag 상대 위치로 정렬한 뒤 중량 물품의 협동 운반을 지원
 두 로봇 모두 Jetson Orin과 ROS 2 Humble을 사용하고, 각 로봇의 STM32가
 모터·엔코더·BNO055·그리퍼의 실시간 제어를 담당하는 것이 목표입니다.
 
-현재 구현은 두 로봇의 인식 파이프라인을 각각 제공하는 단계입니다. 두 로봇 사이의 네트워크 통신이나 실제 주행 명령 전달은 아직 구현되어 있지 않습니다.
+현재 구현은 두 로봇의 인식 파이프라인과 리더 측 DDS 협력 명령 게이트를 제공합니다. 실제 팔로워 하드웨어 주행과 Orin 간 현장 시험은 아직 남아 있습니다.
 
 ```mermaid
 flowchart LR
@@ -52,10 +52,10 @@ AprilTag·정렬 상태 부분만 구현되어 있습니다.
 | `/follower/cmd_vel` | 팔로워 속도 명령 | 미구현 |
 | `/leader/odom`, `/follower/odom` | 로봇별 wheel odometry | 미구현 |
 | `/leader/imu`, `/follower/imu` | 로봇별 BNO055 IMU | 미구현 |
-| `/follower/status` | 배터리·그리퍼·fault·통신 상태 | 미구현 |
-| `/cooperation/state` | 협동 운반 상태 | 미구현 |
-| `/cooperation/target_velocity` | 협동 운반 공통 속도 | 미구현 |
-| `/mission/state` | 전체 임무 상태 | 미구현 |
+| `/follower/status` | 팔로워 heartbeat (현재 `std_msgs/String`) | 리더 구독 구현 |
+| `/cooperation/state` | 협동 운반 상태 (`std_msgs/String`) | 리더 발행 구현 |
+| `/cooperation/target_velocity` | 협동 운반 공통 속도 (`geometry_msgs/Twist`) | 리더 발행 구현 |
+| `/mission/state` | 전체 임무 상태 (`std_msgs/String`) | 리더 발행 구현 |
 
 ### Orin–STM32
 
@@ -155,6 +155,12 @@ image_proc/rectify_node → /follower/camera/image_rect
 상태 이름과 임계값의 정확한 정의는 `src/follower/follower_supply_perception/docs/`를 기준으로 관리합니다.
 
 ## 향후 연결 지점
+
+리더 DDS 게이트는 `leader_cooperation/leader_cooperation_node`로 제공됩니다.
+`/cooperation/enable` (`std_srvs/SetBool`)을 `true`로 호출하고 팔로워 heartbeat가
+신선할 때만 `/leader/cmd_vel`을 `/follower/cmd_vel`과
+`/cooperation/target_velocity`로 전달합니다. heartbeat 또는 명령이 timeout되면
+0 속도를 발행하며, fault 상태는 재-enable 전에 정지 상태를 유지합니다.
 
 상위 행동 노드는 `/follower/alignment/state`와 상대 위치 토픽을 구독해 정밀 접근
 후보 명령을 만들 수 있습니다. 다만 상태 문자열을 바로 모터 명령으로 변환하지 않고,

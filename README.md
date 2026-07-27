@@ -102,6 +102,20 @@ ros2 run tf2_ros tf2_echo camera_color_optical_frame tag36h11:0
 AprilTag 확인 시 실제 태그 ID 0과 5 cm 크기의 `tag36h11` 태그를 카메라 앞에
 두어야 검출 결과와 태그 TF가 출력됩니다.
 
+## 리더 DDS 협력 통신
+
+리더 Orin에서 별도 터미널로 실행합니다. 기본 상태는 정지(`IDLE`)입니다.
+
+```bash
+ros2 launch leader_cooperation leader_cooperation.launch.py
+ros2 service call /cooperation/enable std_srvs/srv/SetBool "{data: true}"
+```
+
+팔로워가 `/follower/status` (`std_msgs/msg/String`) heartbeat를 발행하고,
+리더의 `/leader/cmd_vel`이 들어오는 동안에만 `/follower/cmd_vel`로 전달됩니다.
+heartbeat 또는 명령이 끊기면 0 속도로 정지합니다. 상세 계약은
+[leader_cooperation README](src/leader/leader_cooperation/README.md)를 참고합니다.
+
 ## 팔로워 인식 파이프라인
 
 ```bash
