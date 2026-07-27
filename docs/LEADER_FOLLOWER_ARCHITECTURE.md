@@ -2,7 +2,7 @@
 
 ## 역할
 
-리더는 깊이 카메라와 로봇 모델을 포함한 기준 인식 플랫폼입니다. 팔로워는 USB 카메라로 AprilTag를 인식하고,
+리더 Orin은 깊이 카메라와 로봇 모델을 포함한 기준 인식 플랫폼입니다. 팔로워는 USB 카메라로 AprilTag를 인식하고,
 태그와의 상대 위치를 바탕으로 공급 대상에 접근할 준비가 되었는지 판단합니다.
 
 현재 구현은 두 로봇의 인식 파이프라인을 각각 제공하는 단계입니다. 두 로봇 사이의 네트워크 통신이나 실제 주행 명령 전달은 아직 구현되어 있지 않습니다.
@@ -25,16 +25,34 @@ flowchart LR
 
 `rescue_robot_bringup/camera_apriltag.launch.py`는 다음 노드를 실행합니다.
 
-1. `realsense2_camera`: `/leader/camera` 네임스페이스의 RGB/depth 영상 발행
+1. `realsense2_camera`: `/leader/camera` 네임스페이스의 RGB/depth 영상과 RealSense 센서 TF 발행
 2. `robot_state_publisher`: `rescue_robot.urdf` 기반 TF 발행
 3. `camera_info_qos_bridge.py`: CameraInfo QoS 연결 보조
 4. `image_proc/rectify_node`: RGB 영상 보정
 5. `apriltag_ros/apriltag_node`: `/leader/apriltag` 네임스페이스에서 태그 검출
 
+기본 카메라 설정은 RGB/depth 모두 `640x480 @ 30Hz`이며, launch 인자
+`enable_depth:=false`로 Depth를 끌 수 있습니다. AprilTag 설정은 `tag36h11`, ID `0`,
+태그 크기 `0.050 m`입니다.
+
 ```bash
 ros2 topic echo --once /leader/apriltag/detections
 ros2 run tf2_ros tf2_echo camera_color_optical_frame tag36h11:0
 ```
+
+RGB 보정 영상은 `/leader/camera/color/image_rect`, Depth 원본 보정 영상은
+`/leader/camera/depth/image_rect_raw`에서 확인합니다. 리더의 Depth 중앙 영역 측정은
+다음 명령으로 실행하며, 저장 경로는 필요하면 파라미터로 지정합니다.
+
+```bash
+ros2 run rescue_robot_tools depth_to_csv.py --ros-args \
+  -p output_path:=/home/maze/damgc_robot/data/depth_distance.csv
+```
+
+URDF의 `camera_link`와 RealSense가 발행하는 `camera_color_optical_frame`은 현재
+별도 프레임입니다. 따라서 리더 URDF 모델의 카메라 형상과 RealSense 센서 TF가
+자동으로 하나의 TF 체인으로 연결된다고 보장하지 않으며, 실물 장착 기준의 정적 TF가
+필요하면 별도로 추가해야 합니다.
 
 ## 팔로워 파이프라인
 
