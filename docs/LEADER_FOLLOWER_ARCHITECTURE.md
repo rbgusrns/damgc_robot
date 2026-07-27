@@ -1,27 +1,85 @@
 # 리더·팔로워 구조
 
+## 문서 관점
+
+이 문서는 [개발 계획서](Plan.md)의 **목표 구조**와 저장소에서 확인되는
+**현재 구현**을 함께 설명합니다. 계획 토픽을 적어 놓았다는 것과 실제 노드가
+발행·구독한다는 것은 다릅니다. 완료 여부는
+[개발 현황 및 로드맵](STATUS_AND_ROADMAP.md)을 기준으로 판단합니다.
+
 ## 역할
 
-리더 Orin은 깊이 카메라와 로봇 모델을 포함한 기준 인식 플랫폼입니다. 팔로워는 USB 카메라로 AprilTag를 인식하고,
-태그와의 상대 위치를 바탕으로 공급 대상에 접근할 준비가 되었는지 판단합니다.
+탐색·리더 로봇은 D435 기반 3차원 지도와 생존자 위치를 만들고, Nav2 주행,
+물품 선택, 단독 운반과 협동 운반의 공통 명령을 담당합니다.
+
+운반 보조·팔로워 로봇은 리더의 임무 요청을 받아 물품으로 이동하고,
+AprilTag 상대 위치로 정렬한 뒤 중량 물품의 협동 운반을 지원합니다.
+
+두 로봇 모두 Jetson Orin과 ROS 2 Humble을 사용하고, 각 로봇의 STM32가
+모터·엔코더·BNO055·그리퍼의 실시간 제어를 담당하는 것이 목표입니다.
 
 현재 구현은 두 로봇의 인식 파이프라인을 각각 제공하는 단계입니다. 두 로봇 사이의 네트워크 통신이나 실제 주행 명령 전달은 아직 구현되어 있지 않습니다.
 
 ```mermaid
 flowchart LR
-    subgraph L[Leader]
-        Lcam[RealSense D435] --> Lrect[image_proc rectify] --> Ltag[apriltag_ros]
-        Ltf[robot_description TF] --> Ltag
+    subgraph L["탐색·리더 로봇"]
+        Lcam["RealSense D435"] --> Lperception["Visual SLAM·nvblox / 사람·AprilTag 인식"]
+        Lperception --> Lmission["Mission Coordinator"]
+        Lmission --> Lnav["Nav2·정밀 접근·협동 제어"]
+        Lnav <--> Lstm["STM32 모터·엔코더·IMU·그리퍼"]
     end
-    subgraph F[Follower]
-        Fcam[USB camera] --> Frect[image_proc rectify] --> Ftag[apriltag_ros] --> Fapproach[apriltag_approach_node] --> Fstate[접근·정렬 상태]
+    subgraph F["운반 보조·팔로워 로봇"]
+        Fcam["AprilTag 카메라"] --> Fapproach["상대 pose·정렬 상태"]
+        Fapproach --> Fcontrol["팔로워 주행·협동 제어"]
+        Fcontrol <--> Fstm["STM32 모터·엔코더·IMU·그리퍼"]
     end
-    Ltag -. 물리적 태그 관측 .-> Ftag
+    Lmission <-->|"ROS 2 임무·상태·공통 속도"| Fcontrol
 ```
 
-점선은 리더가 배치한/바라보는 태그를 팔로워가 카메라로 관측한다는 뜻이며, 현재 ROS 토픽으로 리더와 팔로워가 직접 연결된다는 뜻은 아닙니다.
+실선 전체는 목표 구조입니다. 현재는 리더의 D435·AprilTag와 팔로워의
+AprilTag·정렬 상태 부분만 구현되어 있습니다.
 
-## 리더 파이프라인
+## 목표 인터페이스
+
+### Orin–Orin
+
+계획서에서 정한 이름은 다음과 같습니다. 메시지 타입, QoS, 발행 주기, timeout,
+담당 노드와 fault 동작은 통합 전에 별도 인터페이스 계약으로 고정해야 합니다.
+
+| 목표 이름 | 용도 | 현재 상태 |
+| --- | --- | --- |
+| `/leader/cmd_vel` | 리더 속도 명령 | 미구현 |
+| `/follower/cmd_vel` | 팔로워 속도 명령 | 미구현 |
+| `/leader/odom`, `/follower/odom` | 로봇별 wheel odometry | 미구현 |
+| `/leader/imu`, `/follower/imu` | 로봇별 BNO055 IMU | 미구현 |
+| `/follower/status` | 배터리·그리퍼·fault·통신 상태 | 미구현 |
+| `/cooperation/state` | 협동 운반 상태 | 미구현 |
+| `/cooperation/target_velocity` | 협동 운반 공통 속도 | 미구현 |
+| `/mission/state` | 전체 임무 상태 | 미구현 |
+
+### Orin–STM32
+
+계획 기준으로 Orin은 좌우 바퀴 목표 속도와 그리퍼 명령을 내리고, STM32는
+엔코더, 실제 바퀴 속도, BNO055 yaw, 그리퍼·fault 상태를 반환합니다. 속도 명령과
+상태 보고의 목표 주기는 각각 50 Hz입니다.
+
+구현 전 확정할 항목은 패킷 버전, 단위, byte order, sequence·timestamp, checksum,
+timeout, 재연결, watchdog과 비상정지 우선순위입니다.
+
+### TF와 namespace
+
+토픽은 `/leader`, `/follower` namespace를 사용하지만 TF frame ID는 ROS namespace가
+자동으로 분리해 주지 않습니다. 현재 리더 URDF에는 `base_link`, `camera_link`,
+`imu_link`가 있고 팔로워 카메라에는 `follower_camera_optical_frame`이 있습니다.
+
+두 로봇을 같은 ROS graph에서 실행하기 전에 다음을 고정해야 합니다.
+
+1. 리더와 팔로워의 `base_link`, `odom`, 센서 frame이 충돌하지 않는 이름 규칙
+2. 각 `base_link`에서 실제 camera optical frame과 `imu_link`까지의 정적 TF
+3. 계획의 `map → odom → base_link` 체인에서 각 변환을 발행하는 단일 노드
+4. AprilTag pose를 그리퍼 TCP 기준으로 변환하는 체인
+
+## 현재 리더 파이프라인
 
 `rescue_robot_bringup/camera_apriltag.launch.py`는 다음 노드를 실행합니다.
 
@@ -54,7 +112,7 @@ URDF의 `camera_link`와 RealSense가 발행하는 `camera_color_optical_frame`�
 자동으로 하나의 TF 체인으로 연결된다고 보장하지 않으며, 실물 장착 기준의 정적 TF가
 필요하면 별도로 추가해야 합니다.
 
-## 팔로워 파이프라인
+## 현재 팔로워 파이프라인
 
 ```text
 /follower/camera/image_raw
@@ -98,5 +156,18 @@ image_proc/rectify_node → /follower/camera/image_rect
 
 ## 향후 연결 지점
 
-상위 행동 노드는 `/follower/alignment/state`와 상대 위치 토픽을 구독하여 주행·정지·그리퍼 동작을 결정할 수 있습니다.
-실제 동작 전에는 `base_link` 기준 좌표 변환, 속도 제한, 통신 끊김 시 정지, STM32/그리퍼 인터페이스를 확정해야 합니다.
+상위 행동 노드는 `/follower/alignment/state`와 상대 위치 토픽을 구독해 정밀 접근
+후보 명령을 만들 수 있습니다. 다만 상태 문자열을 바로 모터 명령으로 변환하지 않고,
+다음 안전 경계를 거쳐야 합니다.
+
+```text
+AprilTag pose·상태
+  → 차체/TCP 기준 변환
+  → 저속 접근 제어와 속도 제한
+  → 장애물·TF stale·통신 watchdog·E-stop 검사
+  → /follower/cmd_vel
+  → Orin–STM32 bridge
+```
+
+계획 순서상 3주차에는 TF, odometry·IMU, 기본 주행과 E-stop을 먼저 만들고,
+4주차에 AprilTag 저속 정렬과 파지 전 단계를 연결합니다.

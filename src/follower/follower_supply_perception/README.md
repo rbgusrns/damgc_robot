@@ -5,6 +5,12 @@
 Jetson Orin Nano의 ROS 2 Humble 환경에서 AprilTag 상대 위치를 사용해 공급 대상의
 접근·정렬 상태를 판단하기 위한 Python 패키지입니다.
 
+프로젝트 계획상 이 패키지는 팔로워의 “AprilTag 기반 상대 위치 보정”과
+물품 정밀 접근 입력을 담당합니다. 전체 목표와 현재 통합 순서는
+[`docs/Plan.md`](../../../docs/Plan.md)와
+[`docs/STATUS_AND_ROADMAP.md`](../../../docs/STATUS_AND_ROADMAP.md)를 따릅니다.
+이 패키지의 상태 출력만으로 계획의 정밀 접근·주행·파지가 완료된 것은 아닙니다.
+
 현재 단계에서는 `ament_python` 구조, 순수 Python 상태 로직, TF 기반 상태 판단
 노드, 시험용 YAML, 카메라 없는 단위 테스트와 전체/상태 전용 launch를 준비했습니다.
 확정된 요구사항은

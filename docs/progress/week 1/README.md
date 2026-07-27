@@ -1,5 +1,11 @@
 # 1차 진행상황 한눈에 보기
 
+> 이 폴더는 첫 번째 구현·시험 묶음의 **과거 실행 근거**다. 프로젝트 전체 일정과
+> 완료 여부는 [개발 계획서](../../Plan.md)와
+> [개발 현황 및 로드맵](../../STATUS_AND_ROADMAP.md)을 우선한다.
+> 일부 AprilTag 작업은 계획의 2~4주차 항목을 선행 구현한 것이며, 1주차의 모든
+> 종료 조건을 달성했다는 뜻은 아니다.
+
 ## 현재 상태 한 줄 요약
 
 **카메라 인식과 접근 상태 판정까지 완료했으며, 실제 로봇 이동·STM32·그리퍼 제어는 아직 연결하지 않았다.**
@@ -101,22 +107,24 @@ AprilTag 검출 및 상대 위치 TF 계산
 
 ## 다음 작업 순서
 
-1. 태그를 직접 좌우·전후로 움직여 상태와 좌표 부호를 검증한다.
-2. `base_link → camera optical frame`의 실제 위치와 회전을 측정한다.
-3. 그리퍼 기준 목표 거리와 허용 오차를 다시 정한다.
-4. 정지·속도 제한·TF 유실 watchdog을 포함한 주행 제어 노드를 만든다.
-5. `cmd_vel`을 Jetson–STM32 통신 및 좌우 모터 명령과 연결한다.
-6. wheel odometry와 IMU를 확인한 뒤 RViz2에서 실제 이동을 검증한다.
-7. 물체 감지와 안전 interlock을 포함한 그리퍼 동작을 연결한다.
+계획상 현재는 3주차이므로 다음 순서를 사용한다.
+
+1. 두 Orin 빌드·네트워크·시간 동기화와 namespace를 확인한다.
+2. 다중 로봇 TF frame 규칙과 `base_link → camera optical frame → gripper TCP`를 확정한다.
+3. Orin–STM32 패킷, timeout, 비상정지와 `/leader|follower/cmd_vel` 경로를 고정한다.
+4. wheel odometry와 BNO055를 연결하고 `robot_localization` 출력을 검증한다.
+5. 리더의 정적 지도 기반 Nav2 목표점 이동과 팔로워 원격 주행을 시험한다.
+6. 사람 탐지 ROI와 aligned depth로 카메라 기준 3차원 위치를 출력한다.
+7. 태그 물리 시험과 목표 거리 재측정은 4주차 저속 정렬 연결 전에 완료한다.
 
 ## 통합 전에 통일할 항목
 
-- 사용자와 작업공간: `/home/maze/jisu_ws`, `/home/kde/ros2_ws`
+- 작업공간: 사용자별 절대 경로를 코드에 넣지 않고 `damgc_robot` 저장소 루트를 기준으로 사용
 - 역할 namespace: `/leader`, `/follower`
-- 카메라 기준 frame과 `base_link` 연결
-- 최종 주행 토픽: `/cmd_vel` 또는 `/leader/cmd_vel`
-- STM32 통신 방식과 wheel odometry 메시지 형식
-- IMU 실제 토픽 이름
+- 로봇별 TF frame 이름과 카메라 optical frame–`base_link` 연결
+- 최종 주행 토픽: `/leader/cmd_vel`, `/follower/cmd_vel`
+- STM32 패킷, wheel odometry와 IMU 메시지·단위·주기
+- 통신 단절 watchdog과 하드웨어·소프트웨어 비상정지 우선순위
 
 `0.15 m` 목표 거리는 시험용 값이다. 실제 파지 거리로 확정하지 말고 카메라 장착 위치와
 그리퍼 끝점(TCP)을 기준으로 다시 측정해야 한다.

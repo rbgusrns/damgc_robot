@@ -127,7 +127,7 @@ STABILIZING/ALIGNED`이다. 경계값은 허용 범위에 포함한다. 유실, 
 아니다. 실제 카메라 장착과 태그 배치에서 반드시 재측정하고 튜닝한다. 잘못된 값은
 자동으로 보정하지 않고 시작 단계에서 명확한 오류로 거부한다.
 
-## 8. 예정 코드 구조
+## 8. 구현 코드 구조
 
 - `follower_supply_perception/approach_logic.py`
   - 상태 enum, 설정 및 측정 dataclass
@@ -136,8 +136,10 @@ STABILIZING/ALIGNED`이다. 경계값은 허용 범위에 포함한다. 유실, 
   - 파라미터, TF 조회, stale 처리, publisher와 timer
 - `config/approach.yaml`
   - 위 기본값을 담은 ROS 파라미터 파일
-- `launch/supply_alignment.launch.py`
-  - 이 노드만 실행하며 기존 카메라·AprilTag launch는 포함하지 않음
+- `launch/approach_only.launch.py`
+  - 기존 카메라·AprilTag 파이프라인은 별도로 유지하고 상태 노드만 실행
+- `launch/follower_apriltag.launch.py`
+  - USB 카메라, image rectification, AprilTag와 상태 노드를 통합 실행
 - `test/test_approach_logic.py`
   - 상태, 수학, 필터와 태그 선택을 검증하는 ROS 비의존 단위 테스트
 

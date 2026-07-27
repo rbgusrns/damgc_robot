@@ -1,9 +1,26 @@
-# Rescue Robot ROS 2 Workspace
+# 다중 로봇 재난 탐색·구호물품 운반 ROS 2 워크스페이스
 
-이 워크스페이스는 리더 Orin의 로봇 모델·RealSense D435·AprilTag 인식·Depth 측정과
-팔로워의 AprilTag 접근 상태 인식을 함께 관리합니다.
+`damgc_robot`은 소형 로봇 2대로 재난 환경을 탐색하고, 생존자 위치를 찾은 뒤
+구호물품을 단독 또는 협동 운반하기 위한 ROS 2 Humble 워크스페이스입니다.
 
-프로젝트 구조와 GitHub 운영 기록은 [docs/README.md](docs/README.md)에서 확인할 수 있습니다.
+- 탐색·리더 로봇: RealSense D435 기반 인지, 3차원 지도, 자율주행, 임무 조정
+- 운반 보조·팔로워 로봇: AprilTag 기반 상대 위치 보정과 협동 운반 지원
+- 공통 하위 제어: STM32 기반 모터·엔코더·IMU·그리퍼 제어
+
+최종 범위는 [개발 계획서](docs/Plan.md), 현재 완료 범위와 다음 작업은
+[개발 현황 및 로드맵](docs/STATUS_AND_ROADMAP.md)을 기준으로 확인합니다.
+
+## 현재 구현 상태
+
+2026년 7월 27일 기준으로 저장소에서 확인되는 구현은 다음과 같습니다.
+
+- 리더: URDF/RViz 모델, D435 RGB·depth, RGB 보정, AprilTag 검출, 중앙 depth CSV 측정
+- 팔로워: USB 카메라, AprilTag 검출, TF 기반 거리·각도·정렬 상태 판정
+- 아직 없음: Visual SLAM·nvblox, 사람 탐지, Nav2, wheel odometry·IMU 융합,
+  STM32·그리퍼 연동, Mission Coordinator, 리더–팔로워 협동 운반
+
+현재 AprilTag 상태 출력은 주행 명령이 아닙니다. 실제 이동 전에는 로봇 기준 TF,
+속도 제한, 통신 유실 정지와 비상정지 경로를 먼저 연결해야 합니다.
 
 ## 빌드
 
@@ -13,6 +30,10 @@ cd /home/maze/damgc_robot
 colcon build --symlink-install
 source install/local_setup.bash
 ```
+
+다른 경로에 clone했다면 `cd` 경로만 해당 저장소 루트로 바꿉니다. 두 Orin은
+JetPack 6.2.2, Ubuntu 22.04, ROS 2 Humble과 동일한 의존성 버전을 사용하는 것이
+계획의 기준입니다.
 
 실제 장비를 사용할 때는 RealSense D435를 Orin에 연결한 뒤 다음 명령으로 장치가
 인식되는지 먼저 확인합니다.
@@ -81,5 +102,25 @@ ros2 run tf2_ros tf2_echo camera_color_optical_frame tag36h11:0
 AprilTag 확인 시 실제 태그 ID 0과 5 cm 크기의 `tag36h11` 태그를 카메라 앞에
 두어야 검출 결과와 태그 TF가 출력됩니다.
 
-현재 리더에는 주행 제어, 모터/엔코더, 실제 IMU 드라이버, 그리퍼 구동,
-리더-팔로워 통신은 포함되어 있지 않습니다.
+## 팔로워 인식 파이프라인
+
+```bash
+ros2 launch follower_supply_perception follower_apriltag.launch.py
+```
+
+기존 카메라·AprilTag 파이프라인을 유지하고 상태 판정 노드만 실행할 때는:
+
+```bash
+ros2 launch follower_supply_perception approach_only.launch.py
+```
+
+상세 토픽과 상태 정의는
+[리더·팔로워 구조](docs/LEADER_FOLLOWER_ARCHITECTURE.md)에서 확인할 수 있습니다.
+
+## 문서
+
+- [문서 안내](docs/README.md)
+- [프로젝트 개요](docs/PROJECT_OVERVIEW.md)
+- [개발 계획서](docs/Plan.md)
+- [개발 현황 및 로드맵](docs/STATUS_AND_ROADMAP.md)
+- [1차 구현·시험 기록](docs/progress/week%201/README.md)
