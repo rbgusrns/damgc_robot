@@ -7,8 +7,9 @@
 
 1. [개발 계획서](Plan.md) — 2026년 7월 13일~9월 14일의 목표, 역할, 9주 일정과 평가 기준
 2. [개발 현황 및 로드맵](STATUS_AND_ROADMAP.md) — 2026년 7월 27일 기준 구현 상태, 주차 게이트와 우선순위
-3. [프로젝트 개요](PROJECT_OVERVIEW.md) — 현재 저장소 구조, 패키지 역할과 실행 방법
-4. [리더·팔로워 구조](LEADER_FOLLOWER_ARCHITECTURE.md) — 목표 아키텍처와 현재 연결 상태
+3. [Visual SLAM 준비 및 검증 절차](VISUAL_SLAM_SETUP.md) — 현재 입력·TF 점검, rosbag 기록과 SLAM 연동 순서
+4. [프로젝트 개요](PROJECT_OVERVIEW.md) — 현재 저장소 구조, 패키지 역할과 실행 방법
+5. [리더·팔로워 구조](LEADER_FOLLOWER_ARCHITECTURE.md) — 목표 아키텍처와 현재 연결 상태
 
 ## 문서 목록
 

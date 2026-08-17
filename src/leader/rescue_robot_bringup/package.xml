@@ -8,6 +8,8 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <exec_depend>realsense2_camera</exec_depend>
+  <exec_depend>isaac_ros_visual_slam</exec_depend>
+  <exec_depend>nvblox_ros</exec_depend>
   <exec_depend>rescue_robot_apriltag</exec_depend>
   <exec_depend>rescue_robot_description</exec_depend>
   <exec_depend>rescue_robot_tools</exec_depend>

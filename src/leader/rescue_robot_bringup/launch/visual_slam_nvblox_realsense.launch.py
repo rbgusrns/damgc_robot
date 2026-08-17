@@ -1,0 +1,22 @@
+import os
+
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+
+
+def _include(name):
+    path = os.path.join(
+        get_package_share_directory("rescue_robot_bringup"),
+        "launch",
+        name,
+    )
+    return IncludeLaunchDescription(PythonLaunchDescriptionSource(path))
+
+
+def generate_launch_description():
+    return LaunchDescription([
+        _include("visual_slam_realsense.launch.py"),
+        _include("nvblox_realsense.launch.py"),
+    ])

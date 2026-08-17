@@ -10,6 +10,8 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     depth_enabled = LaunchConfiguration("enable_depth")
+    infra_enabled = LaunchConfiguration("enable_infra")
+    imu_enabled = LaunchConfiguration("enable_imu")
     description_share = get_package_share_directory("rescue_robot_description")
     apriltag_share = get_package_share_directory("rescue_robot_apriltag")
     robot_description_path = os.path.join(description_share, "urdf", "rescue_robot.urdf")
@@ -22,6 +24,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument("enable_depth", default_value="true"),
+        DeclareLaunchArgument("enable_infra", default_value="false"),
+        DeclareLaunchArgument("enable_imu", default_value="false"),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(realsense_launch),
             launch_arguments={
@@ -29,9 +33,14 @@ def generate_launch_description():
                 "camera_name": "camera",
                 "enable_color": "true",
                 "enable_depth": depth_enabled,
-                "enable_infra": "false",
-                "enable_infra1": "false",
-                "enable_infra2": "false",
+                "enable_infra": infra_enabled,
+                "enable_infra1": infra_enabled,
+                "enable_infra2": infra_enabled,
+                "enable_gyro": imu_enabled,
+                "enable_accel": imu_enabled,
+                "unite_imu_method": "2",
+                "publish_tf": "true",
+                "tf_publish_rate": "30.0",
                 "rgb_camera.color_profile": "640x480x30",
                 "depth_module.depth_profile": "640x480x30",
             }.items(),
