@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "DAMGC Debug (ST-LINK)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/build/Debug/DAMGC.elf",
+      "servertype": "stlink",
+      "serverpath": "${env:STM32CubeCLT_ROOT}\\STLink-gdb-server\\bin\\ST-LINK_gdbserver.exe",
+      "stm32cubeprogrammer": "${env:STM32CubeCLT_ROOT}\\STM32CubeProgrammer\\bin",
+      "gdbPath": "${env:STM32CubeCLT_ROOT}\\GNU-tools-for-STM32\\bin\\arm-none-eabi-gdb.exe",
+      "device": "STM32G474VE",
+      "interface": "swd",
+      "runToEntryPoint": "main",
+      "preLaunchTask": "cmake: build",
+      "showDevDebugOutput": "raw"
+    }
+  ]
+}

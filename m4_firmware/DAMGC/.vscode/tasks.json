@@ -1,0 +1,73 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "cmake: configure",
+      "type": "process",
+      "command": "${env:STM32CubeCLT_ROOT}\\CMake\\bin\\cmake.exe",
+      "args": [
+        "--preset",
+        "Debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "cmake: build",
+      "type": "process",
+      "command": "${env:STM32CubeCLT_ROOT}\\CMake\\bin\\cmake.exe",
+      "args": [
+        "--build",
+        "--preset",
+        "Debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": [
+        "cmake: configure"
+      ],
+      "dependsOrder": "sequence",
+      "group": {
+        "kind": "build"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "flash: stlink",
+      "type": "process",
+      "command": "${env:STM32CubeCLT_ROOT}\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe",
+      "args": [
+        "-c",
+        "port=SWD",
+        "mode=UR",
+        "reset=HWrst",
+        "-w",
+        "${workspaceFolder}\\build\\Debug\\DAMGC.hex",
+        "-v",
+        "-rst"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": [
+        "cmake: build"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "cmake: build + flash",
+      "dependsOn": [
+        "flash: stlink"
+      ],
+      "dependsOrder": "sequence",
+            "group": {
+        "kind": "build"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

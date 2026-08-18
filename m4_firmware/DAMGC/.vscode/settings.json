@@ -1,0 +1,17 @@
+{
+  "cmake.useCMakePresets": "always",
+  "cmake.configureOnOpen": false,
+  "cmake.configurePreset": "Debug",
+  "cmake.buildPreset": "Debug",
+  "cmake.statusbar.advanced": {
+    "debug": {
+      "visibility": "visible"
+    },
+    "launch": {
+      "visibility": "visible"
+    }
+  },
+  "files.associations": {
+    "*.ioc": "properties"
+  }
+}
