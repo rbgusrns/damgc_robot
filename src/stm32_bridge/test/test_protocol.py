@@ -1,6 +1,13 @@
 import unittest
 
-from stm32_bridge.protocol import FrameParser, IMU_PAYLOAD, WHEEL_PAYLOAD, crc16_ccitt, encode_frame
+from stm32_bridge.protocol import (
+    FrameParser,
+    IMU_PAYLOAD,
+    WHEEL_PAYLOAD,
+    crc16_ccitt,
+    encode_frame,
+    pack_velocity,
+)
 
 
 class ProtocolTest(unittest.TestCase):
@@ -21,6 +28,13 @@ class ProtocolTest(unittest.TestCase):
         parser = FrameParser()
         self.assertEqual(parser.feed(frame), [])
         self.assertEqual(parser.crc_errors, 1)
+
+    def test_velocity_packet_uses_protocol_payload(self):
+        frame = pack_velocity(-120, 340)
+        parser = FrameParser()
+        result = parser.feed(frame)
+        self.assertEqual(result[0][0], 0x01)
+        self.assertEqual(result[0][3], b"\x88\xffT\x01\xc8\x00\x01\x00")
 
 
 if __name__ == "__main__":

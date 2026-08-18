@@ -6,7 +6,7 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from sensor_msgs.msg import Imu
-from std_msgs.msg import String
+from std_msgs.msg import String, UInt32
 
 from . import protocol
 
@@ -14,8 +14,10 @@ from . import protocol
 class Stm32Bridge(Node):
     def __init__(self):
         super().__init__("stm32_bridge")
-        self.declare_parameter("port", "/dev/ttySTM0")
-        self.declare_parameter("baudrate", 921600)
+        # Jetson Orin 40-pin header pins 8/10 are commonly ttyTHS1 on
+        # JetPack 6. Override this parameter if the carrier maps them to THS0.
+        self.declare_parameter("port", "/dev/ttyTHS1")
+        self.declare_parameter("baudrate", 460800)
         self.declare_parameter("frame_id", "odom")
         self.declare_parameter("child_frame_id", "base_link")
         self.declare_parameter("imu_frame_id", "imu_link")
@@ -23,9 +25,15 @@ class Stm32Bridge(Node):
         self.declare_parameter("wheel_separation_m", 0.20)
         self.declare_parameter("ticks_per_revolution", 4096)
         self.declare_parameter("cmd_timeout_ms", 200)
+        self.declare_parameter("reconnect_period_s", 1.0)
         self._serial = None
         self._serial_lock = threading.Lock()
         self._parser = protocol.FrameParser()
+        self._last_rx_time = None
+        self._rx_frames = 0
+        self._rx_sequence_drops = 0
+        self._last_rx_seq = None
+        self._serial_error_logged = False
         self._tx_seq = 0
         self._last_cmd = Twist()
         self._last_cmd_time = 0.0
@@ -37,18 +45,31 @@ class Stm32Bridge(Node):
         self._imu_pub = self.create_publisher(Imu, "imu/data_raw", 20)
         self._odom_pub = self.create_publisher(Odometry, "odom/raw", 20)
         self._state_pub = self.create_publisher(String, "system_state", 10)
+        self._rx_count_pub = self.create_publisher(UInt32, "stm32_rx/frame_count", 10)
+        self._rx_crc_pub = self.create_publisher(UInt32, "stm32_rx/crc_errors", 10)
+        self._rx_drop_pub = self.create_publisher(UInt32, "stm32_rx/sequence_drops", 10)
         self.create_subscription(Twist, "cmd_vel", self._cmd_callback, 20)
         self.create_timer(0.005, self._read_serial)
         self.create_timer(0.02, self._send_velocity)
+        self.create_timer(float(self.get_parameter("reconnect_period_s").value), self._reconnect)
+        self.create_timer(1.0, self._publish_rx_stats)
 
     def _open_serial(self):
         try:
             import serial
             self._serial = serial.Serial(self.get_parameter("port").value,
                                          int(self.get_parameter("baudrate").value), timeout=0)
+            self._serial_error_logged = False
             self.get_logger().info(f"Opened STM32 UART {self._serial.port}")
         except Exception as exc:
-            self.get_logger().error(f"Cannot open STM32 UART: {exc}")
+            self._serial = None
+            if not self._serial_error_logged:
+                self.get_logger().error(f"Cannot open STM32 UART: {exc}")
+                self._serial_error_logged = True
+
+    def _reconnect(self):
+        if self._serial is None or not self._serial.is_open:
+            self._open_serial()
 
     def _cmd_callback(self, msg):
         self._last_cmd = msg
@@ -75,9 +96,26 @@ class Stm32Bridge(Node):
     def _read_serial(self):
         if self._serial is None or not self._serial.is_open:
             return
-        with self._serial_lock:
-            data = self._serial.read(self._serial.in_waiting or 1)
+        try:
+            with self._serial_lock:
+                data = self._serial.read(self._serial.in_waiting or 1)
+        except Exception as exc:
+            self.get_logger().error(f"STM32 UART read failed: {exc}")
+            try:
+                self._serial.close()
+            except Exception:
+                pass
+            return
         for msg_type, seq, flags, payload in self._parser.feed(data):
+            self._rx_frames += 1
+            self._last_rx_time = time.monotonic()
+            if self._last_rx_seq is not None:
+                expected = (self._last_rx_seq + 1) & 0xFFFF
+                if seq != expected:
+                    self._rx_sequence_drops += 1
+                    self.get_logger().warning(
+                        f"STM32 RX sequence gap: expected {expected}, got {seq}")
+            self._last_rx_seq = seq
             try:
                 if msg_type == protocol.IMU_DATA:
                     self._publish_imu(protocol.unpack_imu(payload))
@@ -87,6 +125,16 @@ class Stm32Bridge(Node):
                     self._publish_system(protocol.unpack_system(payload))
             except (struct.error, ValueError) as exc:
                 self.get_logger().warning(f"Invalid STM32 payload type 0x{msg_type:02x}: {exc}")
+
+    def _publish_rx_stats(self):
+        for publisher, value in (
+            (self._rx_count_pub, self._rx_frames),
+            (self._rx_crc_pub, self._parser.crc_errors),
+            (self._rx_drop_pub, self._rx_sequence_drops),
+        ):
+            msg = UInt32()
+            msg.data = value
+            publisher.publish(msg)
 
     def _stamp(self, timestamp_us):
         # Until TIME_SYNC is implemented, use receipt time. The packet timestamp

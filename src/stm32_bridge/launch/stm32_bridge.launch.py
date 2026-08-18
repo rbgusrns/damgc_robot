@@ -6,7 +6,8 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument("port", default_value="/dev/ttySTM0"),
+        DeclareLaunchArgument("port", default_value="/dev/ttyTHS1"),
+        DeclareLaunchArgument("baudrate", default_value="460800"),
         DeclareLaunchArgument("namespace", default_value="leader"),
         Node(
             package="stm32_bridge",
@@ -15,6 +16,7 @@ def generate_launch_description():
             output="screen",
             parameters=[{
                 "port": LaunchConfiguration("port"),
+                "baudrate": LaunchConfiguration("baudrate"),
                 "frame_id": "odom",
                 "child_frame_id": "base_link",
                 "imu_frame_id": "imu_link",
