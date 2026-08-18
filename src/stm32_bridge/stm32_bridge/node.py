@@ -1,0 +1,142 @@
+import struct
+import threading
+import time
+
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
+from rclpy.node import Node
+from sensor_msgs.msg import Imu
+from std_msgs.msg import String
+
+from . import protocol
+
+
+class Stm32Bridge(Node):
+    def __init__(self):
+        super().__init__("stm32_bridge")
+        self.declare_parameter("port", "/dev/ttySTM0")
+        self.declare_parameter("baudrate", 921600)
+        self.declare_parameter("frame_id", "odom")
+        self.declare_parameter("child_frame_id", "base_link")
+        self.declare_parameter("imu_frame_id", "imu_link")
+        self.declare_parameter("wheel_radius_m", 0.0325)
+        self.declare_parameter("wheel_separation_m", 0.20)
+        self.declare_parameter("ticks_per_revolution", 4096)
+        self.declare_parameter("cmd_timeout_ms", 200)
+        self._serial = None
+        self._serial_lock = threading.Lock()
+        self._parser = protocol.FrameParser()
+        self._tx_seq = 0
+        self._last_cmd = Twist()
+        self._last_cmd_time = 0.0
+        self._left_ticks = None
+        self._right_ticks = None
+        self._x = self._y = self._yaw = 0.0
+        self._last_wheel_time = None
+        self._open_serial()
+        self._imu_pub = self.create_publisher(Imu, "imu/data_raw", 20)
+        self._odom_pub = self.create_publisher(Odometry, "odom/raw", 20)
+        self._state_pub = self.create_publisher(String, "system_state", 10)
+        self.create_subscription(Twist, "cmd_vel", self._cmd_callback, 20)
+        self.create_timer(0.005, self._read_serial)
+        self.create_timer(0.02, self._send_velocity)
+
+    def _open_serial(self):
+        try:
+            import serial
+            self._serial = serial.Serial(self.get_parameter("port").value,
+                                         int(self.get_parameter("baudrate").value), timeout=0)
+            self.get_logger().info(f"Opened STM32 UART {self._serial.port}")
+        except Exception as exc:
+            self.get_logger().error(f"Cannot open STM32 UART: {exc}")
+
+    def _cmd_callback(self, msg):
+        self._last_cmd = msg
+        self._last_cmd_time = time.monotonic()
+
+    def _send_velocity(self):
+        if self._serial is None or not self._serial.is_open:
+            return
+        age_ms = (time.monotonic() - self._last_cmd_time) * 1000.0
+        active = age_ms <= float(self.get_parameter("cmd_timeout_ms").value)
+        v = self._last_cmd.linear.x if active else 0.0
+        w = self._last_cmd.angular.z if active else 0.0
+        separation = float(self.get_parameter("wheel_separation_m").value)
+        left = round((v - w * separation / 2.0) * 1000.0)
+        right = round((v + w * separation / 2.0) * 1000.0)
+        flags = 1 if active else 0
+        payload = protocol.CMD_VELOCITY_PAYLOAD.pack(max(-32768, min(32767, left)),
+                                                       max(-32768, min(32767, right)), 200, flags)
+        frame = protocol.encode_frame(protocol.CMD_VELOCITY, self._tx_seq, payload)
+        self._tx_seq = (self._tx_seq + 1) & 0xFFFF
+        with self._serial_lock:
+            self._serial.write(frame)
+
+    def _read_serial(self):
+        if self._serial is None or not self._serial.is_open:
+            return
+        with self._serial_lock:
+            data = self._serial.read(self._serial.in_waiting or 1)
+        for msg_type, seq, flags, payload in self._parser.feed(data):
+            try:
+                if msg_type == protocol.IMU_DATA:
+                    self._publish_imu(protocol.unpack_imu(payload))
+                elif msg_type == protocol.WHEEL_STATE:
+                    self._publish_wheel(protocol.unpack_wheel(payload))
+                elif msg_type == protocol.SYSTEM_STATE:
+                    self._publish_system(protocol.unpack_system(payload))
+            except (struct.error, ValueError) as exc:
+                self.get_logger().warning(f"Invalid STM32 payload type 0x{msg_type:02x}: {exc}")
+
+    def _stamp(self, timestamp_us):
+        # Until TIME_SYNC is implemented, use receipt time. The packet timestamp
+        # remains available for the later clock-offset estimator.
+        return self.get_clock().now().to_msg()
+
+    def _publish_imu(self, data):
+        msg = Imu()
+        msg.header.stamp = self._stamp(data["timestamp_us"])
+        msg.header.frame_id = self.get_parameter("imu_frame_id").value
+        msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z = data["accel"]
+        msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z = data["gyro"]
+        msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w = data["quaternion"]
+        self._imu_pub.publish(msg)
+
+    def _publish_wheel(self, data):
+        radius = float(self.get_parameter("wheel_radius_m").value)
+        separation = float(self.get_parameter("wheel_separation_m").value)
+        tpr = float(self.get_parameter("ticks_per_revolution").value)
+        if self._left_ticks is not None and self._last_wheel_time is not None:
+            dl = (data["left_ticks"] - self._left_ticks) * 2.0 * 3.141592653589793 * radius / tpr
+            dr = (data["right_ticks"] - self._right_ticks) * 2.0 * 3.141592653589793 * radius / tpr
+            ds = (dl + dr) / 2.0
+            self._yaw += (dr - dl) / separation
+            self._x += ds * __import__("math").cos(self._yaw)
+            self._y += ds * __import__("math").sin(self._yaw)
+        self._left_ticks, self._right_ticks = data["left_ticks"], data["right_ticks"]
+        self._last_wheel_time = data["timestamp_us"]
+        msg = Odometry()
+        msg.header.stamp = self._stamp(data["timestamp_us"])
+        msg.header.frame_id = self.get_parameter("frame_id").value
+        msg.child_frame_id = self.get_parameter("child_frame_id").value
+        msg.pose.pose.position.x, msg.pose.pose.position.y = self._x, self._y
+        msg.twist.twist.linear.x = (data["left_mm_s"] + data["right_mm_s"]) / 2000.0
+        msg.twist.twist.angular.z = (data["right_mm_s"] - data["left_mm_s"]) / (separation * 1000.0)
+        self._odom_pub.publish(msg)
+
+    def _publish_system(self, data):
+        msg = String()
+        msg.data = str(data)
+        self._state_pub.publish(msg)
+
+
+def main(args=None):
+    import rclpy
+    rclpy.init(args=args)
+    node = Stm32Bridge()
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()

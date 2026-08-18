@@ -10,6 +10,7 @@
 3. [Visual SLAM 준비 및 검증 절차](VISUAL_SLAM_SETUP.md) — 현재 입력·TF 점검, rosbag 기록과 SLAM 연동 순서
 4. [프로젝트 개요](PROJECT_OVERVIEW.md) — 현재 저장소 구조, 패키지 역할과 실행 방법
 5. [리더·팔로워 구조](LEADER_FOLLOWER_ARCHITECTURE.md) — 목표 아키텍처와 현재 연결 상태
+6. [Orin–STM32 UART 통신 규격](STM32_UART_PROTOCOL.md) — 명령, IMU, 엔코더, 상태 패킷 초안
 
 ## 문서 목록
 
