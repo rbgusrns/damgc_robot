@@ -38,6 +38,7 @@ extern "C" {
 #include "stm32g4xx_ll_pwr.h"
 #include "stm32g4xx_ll_dma.h"
 #include "stm32g4xx_ll_tim.h"
+#include "stm32g4xx_ll_spi.h"
 #include "stm32g4xx_ll_gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -60,6 +61,8 @@ extern "C" {
 
 /* USER CODE END EM */
 
+void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
+
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
 
@@ -68,6 +71,28 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define INA1_Pin LL_GPIO_PIN_12
+#define INA1_GPIO_Port GPIOB
+#define INA2_Pin LL_GPIO_PIN_13
+#define INA2_GPIO_Port GPIOB
+#define INB2_Pin LL_GPIO_PIN_14
+#define INB2_GPIO_Port GPIOB
+#define INB1_Pin LL_GPIO_PIN_15
+#define INB1_GPIO_Port GPIOB
+#define LA_Pin LL_GPIO_PIN_6
+#define LA_GPIO_Port GPIOC
+#define LB_Pin LL_GPIO_PIN_7
+#define LB_GPIO_Port GPIOC
+#define PWMA_Pin LL_GPIO_PIN_8
+#define PWMA_GPIO_Port GPIOA
+#define PWMB_Pin LL_GPIO_PIN_9
+#define PWMB_GPIO_Port GPIOA
+#define RB_Pin LL_GPIO_PIN_3
+#define RB_GPIO_Port GPIOD
+#define RA_Pin LL_GPIO_PIN_4
+#define RA_GPIO_Port GPIOD
+#define SPI1_CS_Pin LL_GPIO_PIN_7
+#define SPI1_CS_GPIO_Port GPIOD
 
 /* USER CODE BEGIN Private defines */
 

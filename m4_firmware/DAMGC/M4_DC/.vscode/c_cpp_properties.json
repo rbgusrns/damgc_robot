@@ -1,0 +1,21 @@
+{
+    "configurations": [
+        {
+            "name": "STM32G474",
+            "includePath": [
+                "${workspaceFolder}/**"
+            ],
+            "defines": [
+                "USE_HAL_DRIVER",
+                "STM32G474xx",
+                "DEBUG"
+            ],
+            "compilerPath": "${env:STM32CubeCLT_ROOT}/GNU-tools-for-STM32/bin/arm-none-eabi-gcc",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "gcc-arm",
+            "compileCommands": "${workspaceFolder}/build/Debug/compile_commands.json"
+        }
+    ],
+    "version": 4
+}

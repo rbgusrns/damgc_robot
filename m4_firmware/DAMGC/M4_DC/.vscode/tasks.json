@@ -1,0 +1,108 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "cmake: configure",
+      "type": "process",
+      "command": "${env:STM32CubeCLT_ROOT}/CMake/bin/cmake.exe",
+      "args": [
+        "--preset",
+        "Debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "cmake: build",
+      "type": "process",
+      "command": "${env:STM32CubeCLT_ROOT}/CMake/bin/cmake.exe",
+      "args": [
+        "--build",
+        "--preset",
+        "Debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": [
+        "cmake: configure"
+      ],
+      "dependsOrder": "sequence",
+      "group": {
+        "kind": "build"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "flash: openocd",
+      "type": "process",
+      "command": "C:/Users/rbgus/AppData/Local/Microsoft/WinGet/Packages/xpack-dev-tools.openocd-xpack_Microsoft.Winget.Source_8wekyb3d8bbwe/xpack-openocd-0.12.0-7/bin/openocd.exe",
+      "args": [
+        "-s",
+        "C:/Users/rbgus/AppData/Local/Microsoft/WinGet/Packages/xpack-dev-tools.openocd-xpack_Microsoft.Winget.Source_8wekyb3d8bbwe/xpack-openocd-0.12.0-7/openocd/scripts",
+        "-f",
+        "interface/cmsis-dap.cfg",
+        "-c",
+        "transport select swd",
+        "-c",
+        "adapter speed 1000",
+        "-f",
+        "target/stm32g4x.cfg",
+        "-c",
+        "program build/Debug/M4_STEP.elf verify reset exit"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": [
+        "cmake: build"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "flash: stlink",
+      "type": "process",
+      "command": "${env:STM32CubeCLT_ROOT}/STM32CubeProgrammer/bin/STM32_Programmer_CLI.exe",
+      "args": [
+        "-c",
+        "port=SWD",
+        "-d",
+        "${workspaceFolder}/build/Debug/M4_STEP.elf",
+        "-v",
+        "-rst"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": [
+        "cmake: build"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "cmake: build + flash",
+      "dependsOn": [
+        "flash: openocd"
+      ],
+      "dependsOrder": "sequence",
+      "group": {
+        "kind": "build"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "cmake: build + flash (ST-Link)",
+      "dependsOn": [
+        "flash: stlink"
+      ],
+      "dependsOrder": "sequence",
+      "group": {
+        "kind": "build"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

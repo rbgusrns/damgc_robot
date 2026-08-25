@@ -56,7 +56,8 @@ ENTRY(Reset_Handler)
 MEMORY
 {
 RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 128K
-FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 512K
+/* Final 2-Kbyte page (0x0807F800) is reserved for BNO055 calibration. */
+FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 510K
 }
 
 /* Highest address of the user mode stack */

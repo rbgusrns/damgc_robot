@@ -99,11 +99,11 @@ def main():
                 if crc16_ccitt(body) != received_crc:
                     crc_errors += 1
                     continue
-                if msg_type != 0x10 or payload_length != IMU_PAYLOAD.size:
-                    continue
                 if previous_sequence is not None and sequence != ((previous_sequence + 1) & 0xFFFF):
                     sequence_gaps += (sequence - previous_sequence - 1) & 0xFFFF
                 previous_sequence = sequence
+                if msg_type != 0x10 or payload_length != IMU_PAYLOAD.size:
+                    continue
                 values = IMU_PAYLOAD.unpack(frame[HEADER.size:-2])
                 timestamp = values[0]
                 accel = values[1:4]
