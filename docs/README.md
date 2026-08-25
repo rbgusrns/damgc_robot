@@ -11,6 +11,7 @@
 4. [프로젝트 개요](PROJECT_OVERVIEW.md) — 현재 저장소 구조, 패키지 역할과 실행 방법
 5. [리더·팔로워 구조](LEADER_FOLLOWER_ARCHITECTURE.md) — 목표 아키텍처와 현재 연결 상태
 6. [Orin–STM32 UART 통신 규격](STM32_UART_PROTOCOL.md) — 명령, IMU, 엔코더, 상태 패킷 초안
+7. [통합 진행 기록](INTEGRATION_STATUS_2026-08-25.md) — STM32·EKF·VSLAM·nvblox 실행 결과와 재현 절차
 
 ## 문서 목록
 

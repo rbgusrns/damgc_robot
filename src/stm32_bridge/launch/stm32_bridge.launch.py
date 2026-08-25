@@ -20,6 +20,9 @@ def generate_launch_description():
                 "frame_id": "odom",
                 "child_frame_id": "base_link",
                 "imu_frame_id": "imu_link",
+                "wheel_radius_m": 0.0635,
+                "wheel_separation_m": 0.23,
+                "ticks_per_revolution": 5131,
             }],
         ),
     ])

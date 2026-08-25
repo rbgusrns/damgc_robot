@@ -69,12 +69,12 @@ Nominal period: 20 ms. Physical constants are 5131 ticks/revolution and a
 Battery and motor-temperature fields are currently zero because those sensors
 are not connected. Nominal period: 100 ms.
 
-## Orin parameters to correct before odometry
+## Orin odometry parameters
 
-The current `damgc_robot/src/stm32_bridge` defaults do not match this robot.
-Set `wheel_radius_m` to `0.0635`, `ticks_per_revolution` to `5131`, and
-`wheel_separation_m` to the measured wheel contact-center distance `0.23`.
-The repository's current `0.0325`, `4096`, and `0.20` defaults do not match.
+The `damgc_robot/src/stm32_bridge` defaults are set to the current robot values:
+`wheel_radius_m=0.0635`, `ticks_per_revolution=5131`, and
+`wheel_separation_m=0.23`. Re-measure the wheel contact-center distance if the
+chassis is changed.
 
 The STM32 sequence is global across IMU, wheel, and system frames. Packet-loss
 diagnostics must therefore update their previous sequence for every valid frame,

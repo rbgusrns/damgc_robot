@@ -1,6 +1,7 @@
 import struct
 import threading
 import time
+from math import cos, sin
 
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
@@ -21,9 +22,12 @@ class Stm32Bridge(Node):
         self.declare_parameter("frame_id", "odom")
         self.declare_parameter("child_frame_id", "base_link")
         self.declare_parameter("imu_frame_id", "imu_link")
-        self.declare_parameter("wheel_radius_m", 0.0325)
-        self.declare_parameter("wheel_separation_m", 0.20)
-        self.declare_parameter("ticks_per_revolution", 4096)
+        # Physical constants from m4_firmware/DAMGC/ORIN_UART_PROTOCOL.md:
+        # 127 mm wheel diameter, 5131 encoder ticks/revolution, and
+        # 230 mm wheel contact-center separation.
+        self.declare_parameter("wheel_radius_m", 0.0635)
+        self.declare_parameter("wheel_separation_m", 0.23)
+        self.declare_parameter("ticks_per_revolution", 5131)
         self.declare_parameter("cmd_timeout_ms", 200)
         self.declare_parameter("reconnect_period_s", 1.0)
         self._serial = None
@@ -148,6 +152,16 @@ class Stm32Bridge(Node):
         msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z = data["accel"]
         msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z = data["gyro"]
         msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w = data["quaternion"]
+        # Initial conservative covariances for EKF integration. Orientation is
+        # intentionally not fused yet because the physical IMU frame mounting
+        # and BNO055 calibration status still need field verification.
+        msg.orientation_covariance[0] = -1.0
+        msg.angular_velocity_covariance[0] = 0.05 ** 2
+        msg.angular_velocity_covariance[4] = 0.05 ** 2
+        msg.angular_velocity_covariance[8] = 0.05 ** 2
+        msg.linear_acceleration_covariance[0] = 0.2 ** 2
+        msg.linear_acceleration_covariance[4] = 0.2 ** 2
+        msg.linear_acceleration_covariance[8] = 0.2 ** 2
         self._imu_pub.publish(msg)
 
     def _publish_wheel(self, data):
@@ -168,8 +182,21 @@ class Stm32Bridge(Node):
         msg.header.frame_id = self.get_parameter("frame_id").value
         msg.child_frame_id = self.get_parameter("child_frame_id").value
         msg.pose.pose.position.x, msg.pose.pose.position.y = self._x, self._y
+        # The planar wheel odometry has no roll/pitch estimate. Publish the
+        # integrated yaw as a normalized planar quaternion instead of leaving
+        # Odometry.orientation at its default identity value.
+        msg.pose.pose.orientation.z = sin(self._yaw / 2.0)
+        msg.pose.pose.orientation.w = cos(self._yaw / 2.0)
         msg.twist.twist.linear.x = (data["left_mm_s"] + data["right_mm_s"]) / 2000.0
         msg.twist.twist.angular.z = (data["right_mm_s"] - data["left_mm_s"]) / (separation * 1000.0)
+        # Initial wheel-odometry covariances for robot_localization. These are
+        # deliberately conservative until repeated distance/rotation tests
+        # provide measured uncertainties.
+        msg.pose.covariance[0] = 0.01 ** 2
+        msg.pose.covariance[7] = 0.01 ** 2
+        msg.pose.covariance[35] = 0.05 ** 2
+        msg.twist.covariance[0] = 0.02 ** 2
+        msg.twist.covariance[35] = 0.05 ** 2
         self._odom_pub.publish(msg)
 
     def _publish_system(self, data):

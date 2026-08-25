@@ -12,12 +12,18 @@
 
 ## 현재 구현 상태
 
-2026년 7월 27일 기준으로 저장소에서 확인되는 구현은 다음과 같습니다.
+2026년 8월 25일 기준으로 저장소에서 확인되는 구현은 다음과 같습니다.
 
 - 리더: URDF/RViz 모델, D435 RGB·depth, RGB 보정, AprilTag 검출, 중앙 depth CSV 측정
 - 팔로워: USB 카메라, AprilTag 검출, TF 기반 거리·각도·정렬 상태 판정
-- 아직 없음: Visual SLAM·nvblox, 사람 탐지, Nav2, wheel odometry·IMU 융합,
-  STM32·그리퍼 연동, Mission Coordinator, 리더–팔로워 협동 운반
+- 추가 구현: STM32 UART binary protocol, IMU·wheel state 수신, `/cmd_vel` UART
+  전달, wheel odometry 원시 계산, 엔코더·IMU/VSLAM dual EKF 융합 설정, 모터
+  속도 PID와 watchdog
+- 확인됨: STM32 wheel/IMU 수신, dual EKF·Visual SLAM·nvblox 동시 실행,
+  정지 상태 dual EKF 안정화, Docker RViz의 카메라 및 3차원 mesh 표시
+- 진행 중: 저속 주행에서 EKF 안정성과 VSLAM tracking 장시간 검증
+- 아직 없음: 사람 탐지, Nav2, 그리퍼 연동, Mission Coordinator, 실물
+  리더–팔로워 협동 운반
 
 현재 AprilTag 상태 출력은 주행 명령이 아닙니다. 실제 이동 전에는 로봇 기준 TF,
 속도 제한, 통신 유실 정지와 비상정지 경로를 먼저 연결해야 합니다.

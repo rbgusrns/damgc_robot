@@ -37,6 +37,9 @@ def generate_launch_description():
             # Use the RealSense camera frame for the first tracking test.
             # A later integration step will connect this frame to base_link.
             "base_frame": "base_link",
+            # robot_localization owns both TF links in the fused setup.
+            "publish_odom_to_base_tf": False,
+            "publish_map_to_odom_tf": False,
             "enable_slam_visualization": True,
             "enable_landmarks_view": True,
             "enable_observations_view": True,

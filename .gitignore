@@ -1,7 +1,10 @@
 build/
 install/
+build_docker/
+install_docker/
 data/
 log/
+log_docker/
 .codex/
 .agents/
 __pycache__/
