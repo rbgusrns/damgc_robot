@@ -3,6 +3,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -12,6 +13,8 @@ def generate_launch_description():
     depth_enabled = LaunchConfiguration("enable_depth")
     infra_enabled = LaunchConfiguration("enable_infra")
     imu_enabled = LaunchConfiguration("enable_imu")
+    approach_enabled = LaunchConfiguration("enable_approach")
+    approach_config = LaunchConfiguration("approach_config")
     description_share = get_package_share_directory("rescue_robot_description")
     apriltag_share = get_package_share_directory("rescue_robot_apriltag")
     robot_description_path = os.path.join(description_share, "urdf", "rescue_robot.urdf")
@@ -26,6 +29,11 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_depth", default_value="true"),
         DeclareLaunchArgument("enable_infra", default_value="false"),
         DeclareLaunchArgument("enable_imu", default_value="false"),
+        DeclareLaunchArgument("enable_approach", default_value="false"),
+        DeclareLaunchArgument(
+            "approach_config",
+            default_value=os.path.join(apriltag_share, "config", "approach.yaml"),
+        ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(realsense_launch),
             launch_arguments={
@@ -80,6 +88,15 @@ def generate_launch_description():
                 ("image_rect", "/leader/camera/color/image_rect"),
                 ("camera_info", "/leader/camera/color/camera_info"),
             ],
+            output="screen",
+        ),
+        Node(
+            package="rescue_robot_apriltag",
+            executable="apriltag_approach_node",
+            namespace="leader",
+            name="apriltag_approach",
+            parameters=[approach_config],
+            condition=IfCondition(approach_enabled),
             output="screen",
         ),
     ])

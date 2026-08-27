@@ -1,0 +1,22 @@
+# Initial Leader camera-frame state-estimation values for integration testing.
+# target_distance and the tolerances are not confirmed gripper/TCP geometry.
+# tag_timeout=1.0 is a conservative trial value. A 10 s Leader measurement saw
+# about 29.98 Hz tag TF, 0.166787 s maximum sample gap, and 0.067281 s maximum
+# timestamp age. Re-measure under sustained load before treating it as final.
+/leader/apriltag_approach:
+  ros__parameters:
+    source_frame: camera_color_optical_frame
+    tag_frame_pattern: "leader/tag36h11:{id}"
+    target_tag_id: 0
+    allowed_tag_ids: [0, 1, 2]
+    selection_mode: priority
+
+    target_distance: 0.15
+    distance_tolerance: 0.02
+    lateral_tolerance: 0.02
+    angle_tolerance_deg: 5.0
+
+    tag_timeout: 1.0
+    stable_time: 0.8
+    publish_rate: 20.0
+    filter_window: 5
