@@ -332,6 +332,14 @@ ros2 node list | sort
 ros2 launch rescue_robot_bringup camera_apriltag.launch.py \
   enable_approach:=true
 ```
+### RGB 영상 화면 실행
+
+```bash
+cd /home/maze/damgc_robot
+ros2 run rqt_image_view rqt_image_view
+```
+
+
 
 상태판단 없이 기존 pipeline만 실행하려면 `enable_approach:=false`를 지정하거나 해당
 인자를 생략한다.
