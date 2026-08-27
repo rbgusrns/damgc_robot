@@ -339,7 +339,10 @@ cd /home/maze/damgc_robot
 ros2 run rqt_image_view rqt_image_view
 ```
 
-
+## 상태판단 확인
+```bash
+ros2 topic echo /leader/alignment/state
+```
 
 상태판단 없이 기존 pipeline만 실행하려면 `enable_approach:=false`를 지정하거나 해당
 인자를 생략한다.
