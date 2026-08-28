@@ -15,7 +15,7 @@
     그리퍼 밑면           : 90 mm
     그리퍼 윗면          : 150 mm
     IMU 중심             : 100 mm
-    카메라 중심          : 130 mm
+    카메라 중심          : base_link 기준 실측 장착값 z = 130 mm
   -->
 
 
@@ -380,8 +380,7 @@
 
   <!-- ====================================================== -->
   <!-- RealSense 카메라 -->
-  <!-- 카메라 중심 절대 높이 130mm -->
-  <!-- base_link 기준 z = 70mm -->
+  <!-- 카메라 중심 실측 장착값: base_link 기준 x=42mm, y=0mm, z=130mm -->
   <!-- ====================================================== -->
 
   <link name="camera_link">
@@ -396,7 +395,7 @@
   <joint name="camera_joint" type="fixed">
     <parent link="base_link"/>
     <child link="camera_link"/>
-    <origin xyz="0 0 0.070" rpy="0 0 0"/>
+    <origin xyz="0.042 0 0.130" rpy="0 0 0"/>
   </joint>
 
 
