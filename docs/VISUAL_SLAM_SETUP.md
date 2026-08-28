@@ -161,6 +161,47 @@ ros2 topic hz /leader/camera/depth/image_rect_raw
 ros2 topic hz /nvblox_node/mesh
 ```
 
+## 방향키 저속 주행
+
+### 전체 mapping stack 한 번에 실행
+
+다음 실행기는 STM32 bridge와 RealSense를 호스트에서 시작하고, Isaac ROS 개발
+컨테이너를 준비한 뒤 dual EKF, VSLAM, nvblox, RViz를 실행한다. 필요한 토픽이 준비되면
+현재 터미널이 방향키 조종기로 바뀐다. Ctrl-C로 조종을 종료하면 실행기가 시작한
+프로세스도 함께 정리한다.
+
+```bash
+cd /home/maze/damgc_robot
+./scripts/run_vslam_mapping.sh
+```
+
+처음 컨테이너를 만드는 경우 이미지 준비 때문에 시간이 걸릴 수 있고, 컨테이너용
+터미널 하나가 별도로 열린다. 실행별 로그는 `log/vslam_mapping_날짜_시간/`에 저장된다.
+최초 실행 시에만 `docker/vslam_mapping.Dockerfile`로 VSLAM, nvblox와 dual EKF
+런타임을 포함한 `damgc-vslam-mapping:humble` 이미지를 만든다. 이후 실행은 같은
+이미지를 재사용하므로 컨테이너마다 ROS 패키지를 다시 설치하지 않는다.
+
+### 방향키 노드만 실행
+
+호스트에서 STM32 bridge를 실행한 다음, 별도 터미널에서 방향키 teleop을 실행한다.
+방향키를 누르고 있는 동안에만 `/leader/cmd_vel`을 발행하며, 키 반복 입력이 0.25초
+끊기면 자동으로 0속도를 발행한다. Space는 즉시 정지하고 Ctrl-C는 종료한다.
+
+```bash
+source /opt/ros/humble/setup.bash
+source /home/maze/damgc_robot/install/setup.bash
+ros2 run rescue_robot_bringup arrow_key_teleop.py
+```
+
+기본 속도는 직진 0.12 m/s, 회전 0.35 rad/s이다. 첫 바닥 주행 전에 바퀴를 띄운
+상태에서 전후진과 좌우 회전 방향을 확인한다. 필요한 경우 더 낮은 속도로 실행한다.
+
+```bash
+ros2 run rescue_robot_bringup arrow_key_teleop.py --ros-args \
+  -p linear_speed:=0.08 \
+  -p angular_speed:=0.25
+```
+
 확인된 nvblox 출력 토픽:
 
 ```text

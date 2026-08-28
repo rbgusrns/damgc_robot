@@ -12,6 +12,7 @@
 5. [리더·팔로워 구조](LEADER_FOLLOWER_ARCHITECTURE.md) — 목표 아키텍처와 현재 연결 상태
 6. [Orin–STM32 UART 통신 규격](STM32_UART_PROTOCOL.md) — 명령, IMU, 엔코더, 상태 패킷 초안
 7. [통합 진행 기록](INTEGRATION_STATUS_2026-08-25.md) — STM32·EKF·VSLAM·nvblox 실행 결과와 재현 절차
+8. [VSLAM 키보드 매핑 진행 기록](VSLAM_MAPPING_PROGRESS_2026-08-28.md) — 원클릭 실행, 방향키 주행, 영구 Docker 이미지와 실제 통합 검증
 
 ## 문서 목록
 
