@@ -5,6 +5,7 @@ import os
 
 
 def generate_launch_description():
+    headless = os.environ.get("DAMGC_VSLAM_HEADLESS", "0") == "1"
     description_share = get_package_share_directory("rescue_robot_description")
     robot_description_path = os.path.join(
         description_share, "urdf", "rescue_robot.urdf")
@@ -40,9 +41,11 @@ def generate_launch_description():
             # robot_localization owns both TF links in the fused setup.
             "publish_odom_to_base_tf": False,
             "publish_map_to_odom_tf": False,
-            "enable_slam_visualization": True,
-            "enable_landmarks_view": True,
-            "enable_observations_view": True,
+            # Debug renderings are optional; odometry/status and rosbag output
+            # remain active in headless mode.
+            "enable_slam_visualization": not headless,
+            "enable_landmarks_view": not headless,
+            "enable_observations_view": not headless,
             "camera_optical_frames": [
                 "camera_infra1_optical_frame",
                 "camera_infra2_optical_frame",

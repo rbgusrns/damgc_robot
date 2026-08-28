@@ -12,16 +12,32 @@ LOG_DIR="${REPO_ROOT}/log/vslam_mapping_${RUN_ID}"
 LAUNCHER_PID_FILE="${RUNTIME_ROOT}/launcher.pid"
 CONTAINER_VSLAM_PID_FILE="/tmp/damgc_vslam_mapping_vslam.pid"
 CONTAINER_RVIZ_PID_FILE="/tmp/damgc_vslam_mapping_rviz.pid"
+CONTAINER_BAG_PID_FILE="/tmp/damgc_vslam_mapping_bag.pid"
+BAG_DIR="${REPO_ROOT}/data/vslam_mapping_${RUN_ID}"
+CONTAINER_BAG_DIR="/workspaces/isaac_ros-dev/data/vslam_mapping_${RUN_ID}"
 
 HOST_PIDS=()
 CONTAINER_STARTED_BY_US=0
 CONTAINER_USER=""
 CLEANING_UP=0
+BAG_STARTED=0
 
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
 export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}"
 export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
 export FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS:-UDPv4}"
+VSLAM_HEADLESS="${VSLAM_HEADLESS:-0}"
+VSLAM_ONLY="${VSLAM_ONLY:-0}"
+
+if [[ "${VSLAM_HEADLESS}" != "0" && "${VSLAM_HEADLESS}" != "1" ]] || \
+  [[ "${VSLAM_ONLY}" != "0" && "${VSLAM_ONLY}" != "1" ]]; then
+  printf 'VSLAM_HEADLESS and VSLAM_ONLY must be 0 or 1.\n' >&2
+  exit 1
+fi
+if [[ "${VSLAM_ONLY}" == "1" && "${VSLAM_HEADLESS}" != "1" ]]; then
+  printf 'VSLAM_ONLY=1 also requires VSLAM_HEADLESS=1.\n' >&2
+  exit 1
+fi
 
 mkdir -p "${RUNTIME_ROOT}" "${LOG_DIR}"
 
@@ -50,6 +66,57 @@ stop_container_process() {
   fi
 }
 
+container_process_running() {
+  local pid_file="$1"
+  local container_pid
+
+  container_pid="$(docker exec "${CONTAINER_NAME}" sh -c "cat '${pid_file}' 2>/dev/null" 2>/dev/null || true)"
+  [[ "${container_pid}" =~ ^[0-9]+$ ]] && \
+    docker exec "${CONTAINER_NAME}" kill -0 "${container_pid}" >/dev/null 2>&1
+}
+
+finalize_bag() {
+  local deadline
+
+  if (( ! BAG_STARTED )) || ! is_container_running; then
+    return
+  fi
+
+  printf 'Finalizing rosbag...\n'
+  stop_container_process "${CONTAINER_BAG_PID_FILE}" INT
+  deadline=$((SECONDS + 20))
+  while container_process_running "${CONTAINER_BAG_PID_FILE}"; do
+    if (( SECONDS >= deadline )); then
+      printf 'Rosbag did not stop within 20 seconds; sending TERM.\n' >&2
+      stop_container_process "${CONTAINER_BAG_PID_FILE}" TERM
+      deadline=$((SECONDS + 5))
+      while container_process_running "${CONTAINER_BAG_PID_FILE}" && (( SECONDS < deadline )); do
+        sleep 1
+      done
+      break
+    fi
+    sleep 1
+  done
+
+  if [[ -f "${BAG_DIR}/metadata.yaml" ]]; then
+    printf 'Analyzing recorded trajectories...\n'
+    docker exec -u "${CONTAINER_USER}" \
+      -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" \
+      "${CONTAINER_NAME}" bash -lc '
+        source /opt/ros/humble/setup.bash
+        source /workspaces/isaac_ros-dev/install_docker/setup.bash
+        python3 /workspaces/isaac_ros-dev/scripts/analyze_vslam_bag.py "$1"
+      ' _ "${CONTAINER_BAG_DIR}" >"${LOG_DIR}/bag_analysis.log" 2>&1 || {
+        printf 'Bag analysis failed; see %s\n' "${LOG_DIR}/bag_analysis.log" >&2
+        return
+      }
+    printf 'Bag: %s\n' "${BAG_DIR}"
+    printf 'Analysis: %s/analysis.md\n' "${BAG_DIR}"
+  else
+    printf 'Rosbag metadata was not created; see %s/rosbag.log\n' "${LOG_DIR}" >&2
+  fi
+}
+
 cleanup() {
   if (( CLEANING_UP )); then
     return
@@ -59,6 +126,14 @@ cleanup() {
   set +e
 
   printf '\nStopping mapping stack...\n'
+
+  # Let rosbag receive a clean SIGINT and write metadata before its topics or
+  # container disappear.
+  if (( BAG_STARTED )) && is_container_running; then
+    printf 'Capturing a 5-second stationary tail for drift measurement...\n'
+    sleep 5
+  fi
+  finalize_bag
 
   for pid in "${HOST_PIDS[@]}"; do
     # Each host launch runs in its own session, so signal its complete process
@@ -85,7 +160,7 @@ cleanup() {
     stop_container_process "${CONTAINER_RVIZ_PID_FILE}" TERM
     stop_container_process "${CONTAINER_VSLAM_PID_FILE}" TERM
     docker exec "${CONTAINER_NAME}" rm -f \
-      "${CONTAINER_RVIZ_PID_FILE}" "${CONTAINER_VSLAM_PID_FILE}" \
+      "${CONTAINER_RVIZ_PID_FILE}" "${CONTAINER_VSLAM_PID_FILE}" "${CONTAINER_BAG_PID_FILE}" \
       >/dev/null 2>&1 || true
   fi
 
@@ -131,14 +206,14 @@ source_with_nounset_disabled /opt/ros/humble/setup.bash
 printf 'Logs: %s\n' "${LOG_DIR}"
 
 if ! docker image inspect "${MAPPING_IMAGE}" >/dev/null 2>&1; then
-  printf '[0/5] Building the persistent VSLAM mapping image (one time)...\n'
+  printf '[0/6] Building the persistent VSLAM mapping image (one time)...\n'
   docker build \
     --file "${MAPPING_DOCKERFILE}" \
     --tag "${MAPPING_IMAGE}" \
     "${REPO_ROOT}"
 fi
 
-printf '[1/5] Starting STM32 bridge...\n'
+printf '[1/6] Starting STM32 bridge...\n'
 setsid bash -lc "
   export ROS_DOMAIN_ID='${ROS_DOMAIN_ID}'
   export ROS_LOCALHOST_ONLY='${ROS_LOCALHOST_ONLY}'
@@ -151,7 +226,7 @@ setsid bash -lc "
 " >"${LOG_DIR}/stm32_bridge.log" 2>&1 &
 HOST_PIDS+=("$!")
 
-printf '[2/5] Starting RealSense...\n'
+printf '[2/6] Starting RealSense...\n'
 setsid bash -lc "
   export ROS_DOMAIN_ID='${ROS_DOMAIN_ID}'
   export ROS_LOCALHOST_ONLY='${ROS_LOCALHOST_ONLY}'
@@ -167,7 +242,7 @@ setsid bash -lc "
 " >"${LOG_DIR}/realsense.log" 2>&1 &
 HOST_PIDS+=("$!")
 
-printf '[3/5] Preparing Isaac ROS container...\n'
+printf '[3/6] Preparing Isaac ROS container...\n'
 if ! is_container_running; then
   if [[ -z "${DISPLAY:-}" ]] || ! command -v gnome-terminal >/dev/null 2>&1; then
     printf 'A graphical terminal is required to start the Isaac ROS container.\n' >&2
@@ -254,6 +329,8 @@ docker exec -d -u "${CONTAINER_USER}" \
   -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
   -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
   -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
+  -e DAMGC_VSLAM_HEADLESS="${VSLAM_HEADLESS}" \
+  -e DAMGC_VSLAM_ONLY="${VSLAM_ONLY}" \
   "${CONTAINER_NAME}" bash -lc '
     log_path="$1"
     source /opt/ros/humble/setup.bash
@@ -266,20 +343,28 @@ docker exec -d -u "${CONTAINER_USER}" \
     exec ros2 launch rescue_robot_bringup visual_slam_nvblox_realsense.launch.py >>"${log_path}" 2>&1
   ' _ "${container_log_dir}/vslam_nvblox.log"
 
-printf '[4/5] Starting RViz...\n'
-docker exec -d -u "${CONTAINER_USER}" \
-  -e DISPLAY="${DISPLAY:-:0}" \
-  -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" \
-  -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
-  -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
-  -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
-  "${CONTAINER_NAME}" bash -lc '
-    log_path="$1"
-    source /opt/ros/humble/setup.bash
-    source /workspaces/isaac_ros-dev/install_docker/setup.bash
-    echo "$$" > /tmp/damgc_vslam_mapping_rviz.pid
-    exec rviz2 -d /workspaces/isaac_ros-dev/rviz/vslam_nvblox.rviz >>"${log_path}" 2>&1
-  ' _ "${container_log_dir}/rviz.log"
+if [[ "${VSLAM_HEADLESS}" == "1" ]]; then
+  if [[ "${VSLAM_ONLY}" == "1" ]]; then
+    printf '[4/6] VSLAM-only headless mode: nvblox and RViz are disabled...\n'
+  else
+    printf '[4/6] Headless mode: skipping RViz...\n'
+  fi
+else
+  printf '[4/6] Starting RViz...\n'
+  docker exec -d -u "${CONTAINER_USER}" \
+    -e DISPLAY="${DISPLAY:-:0}" \
+    -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" \
+    -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
+    -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
+    -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
+    "${CONTAINER_NAME}" bash -lc '
+      log_path="$1"
+      source /opt/ros/humble/setup.bash
+      source /workspaces/isaac_ros-dev/install_docker/setup.bash
+      echo "$$" > /tmp/damgc_vslam_mapping_rviz.pid
+      exec rviz2 -d /workspaces/isaac_ros-dev/rviz/vslam_nvblox.rviz >>"${log_path}" 2>&1
+    ' _ "${container_log_dir}/rviz.log"
+fi
 
 wait_for_topic() {
   local topic="$1"
@@ -301,7 +386,53 @@ wait_for_topic "/leader/odom/raw" 30
 wait_for_topic "/leader/camera/infra1/image_rect_raw" 45
 wait_for_topic "/visual_slam/tracking/odometry" 120
 
-printf '[5/5] Starting arrow-key control. Space stops; Ctrl-C shuts everything down.\n'
+printf '[5/6] Starting metrics rosbag...\n'
+docker exec "${CONTAINER_NAME}" rm -f "${CONTAINER_BAG_PID_FILE}" >/dev/null 2>&1 || true
+docker exec -d -u "${CONTAINER_USER}" \
+  -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" \
+  -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
+  -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
+  -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
+  "${CONTAINER_NAME}" bash -lc '
+    bag_path="$1"
+    log_path="$2"
+    source /opt/ros/humble/setup.bash
+    source /workspaces/isaac_ros-dev/install_docker/setup.bash
+    echo "$$" > /tmp/damgc_vslam_mapping_bag.pid
+    exec ros2 bag record --output "${bag_path}" \
+      /leader/cmd_vel \
+      /leader/odom/raw \
+      /leader/imu/data_raw \
+      /leader/odometry/local \
+      /leader/odometry/global \
+      /visual_slam/tracking/odometry \
+      /visual_slam/vis/slam_odometry \
+      /visual_slam/slam_odometry_with_covariance \
+      /visual_slam/status \
+      /tf \
+      /tf_static >>"${log_path}" 2>&1
+  ' _ "${CONTAINER_BAG_DIR}" "${container_log_dir}/rosbag.log"
+BAG_STARTED=1
+
+bag_deadline=$((SECONDS + 15))
+until container_process_running "${CONTAINER_BAG_PID_FILE}" && \
+  grep -Fq 'Recording...' "${LOG_DIR}/rosbag.log" 2>/dev/null && \
+  grep -Fq "Subscribed to topic '/visual_slam/tracking/odometry'" \
+    "${LOG_DIR}/rosbag.log" 2>/dev/null; do
+  if (( SECONDS >= bag_deadline )); then
+    printf 'Rosbag failed to start. Check %s/rosbag.log\n' "${LOG_DIR}" >&2
+    exit 1
+  fi
+  sleep 1
+done
+printf '  recording: %s\n' "${BAG_DIR}"
+# /leader/cmd_vel is intentionally discovered after the teleop node starts.
+# The sensor topics are already present, so the baseline delay also gives the
+# recorder time to finish subscribing to their VSLAM/odometry streams.
+printf '  capturing a 5-second stationary baseline...\n'
+sleep 5
+
+printf '[6/6] Starting arrow-key control. Space stops; Ctrl-C shuts everything down.\n'
 source_with_nounset_disabled "${REPO_ROOT}/install/setup.bash"
 ros2 run rescue_robot_bringup arrow_key_teleop.py --ros-args \
   -p linear_speed:=0.08 \

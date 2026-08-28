@@ -167,19 +167,66 @@ ros2 topic hz /nvblox_node/mesh
 
 다음 실행기는 STM32 bridge와 RealSense를 호스트에서 시작하고, Isaac ROS 개발
 컨테이너를 준비한 뒤 dual EKF, VSLAM, nvblox, RViz를 실행한다. 필요한 토픽이 준비되면
-현재 터미널이 방향키 조종기로 바뀐다. Ctrl-C로 조종을 종료하면 실행기가 시작한
-프로세스도 함께 정리한다.
+현재 터미널이 방향키 조종기로 바뀐다. 동시에 정확도 분석용 rosbag을 자동으로
+기록한다. Ctrl-C로 조종을 종료하면 bag을 정상 마감하고 분석 리포트를 만든 뒤,
+실행기가 시작한 프로세스도 함께 정리한다.
 
 ```bash
 cd /home/maze/damgc_robot
 ./scripts/run_vslam_mapping.sh
 ```
 
+GPU 부하를 줄여 정확도 비교를 하려면 RViz와 VSLAM debug rendering만 끄는
+headless 모드로 실행할 수 있다. rosbag, 텍스트 로그, VSLAM/nvblox 계산은 그대로
+동작한다.
+
+```bash
+VSLAM_HEADLESS=1 ./scripts/run_vslam_mapping.sh
+```
+
+VSLAM 자체 처리와 카메라 입력만 분리해서 시험하려면 nvblox까지 끌 수 있다.
+이 경우에도 odometry/status, rosbag, 텍스트 로그는 저장된다.
+
+```bash
+VSLAM_HEADLESS=1 VSLAM_ONLY=1 ./scripts/run_vslam_mapping.sh
+```
+
 처음 컨테이너를 만드는 경우 이미지 준비 때문에 시간이 걸릴 수 있고, 컨테이너용
-터미널 하나가 별도로 열린다. 실행별 로그는 `log/vslam_mapping_날짜_시간/`에 저장된다.
+터미널 하나가 별도로 열린다. 실행별 텍스트 로그는
+`log/vslam_mapping_날짜_시간/`에 저장되고, rosbag과 분석 결과는
+`data/vslam_mapping_날짜_시간/`에 저장된다.
 최초 실행 시에만 `docker/vslam_mapping.Dockerfile`로 VSLAM, nvblox와 dual EKF
 런타임을 포함한 `damgc-vslam-mapping:humble` 이미지를 만든다. 이후 실행은 같은
 이미지를 재사용하므로 컨테이너마다 ROS 패키지를 다시 설치하지 않는다.
+
+자동 bag에는 영상 원본 대신 `/leader/cmd_vel`, wheel/dual-EKF/VSLAM odometry,
+IMU, VSLAM status, TF만 저장해 용량을 줄였다. 정상 종료 후 같은 bag 폴더에 다음
+파일이 생긴다.
+
+조종 시작 전과 Ctrl-C 직후에는 정지 상태 drift를 재기 위해 각각 5초씩 자동
+기록한다. 종료 직전 로봇이 완전히 멈출 수 있도록 Space를 누른 뒤 Ctrl-C를 누르는
+것이 좋다.
+
+- `analysis.md`: 사람이 바로 보는 경로 길이, 최종 변위, yaw, 최대 메시지 공백,
+  마지막 5초 흔들림, 정지 IMU 통계, VSLAM tracking 성공률과 wheel/VSLAM 비교
+- `analysis.json`: 후속 그래프나 반복 시험 비교용 원시 분석 결과
+
+줄자로 잰 실제 거리나 회전각을 포함해 다시 분석하려면 컨테이너 안에서 다음처럼
+실행한다.
+
+```bash
+python3 scripts/analyze_vslam_bag.py data/vslam_mapping_날짜_시간 \
+  --true-distance-m 1.0
+
+python3 scripts/analyze_vslam_bag.py data/vslam_mapping_날짜_시간 \
+  --true-yaw-deg 360
+```
+
+회전각은 좌회전(반시계)을 양수, 우회전(시계)을 음수로 입력한다. 예를 들어 오른쪽으로
+한 바퀴 돌았다면 `--true-yaw-deg -360`이다.
+
+강제로 터미널을 닫거나 전원을 끄면 rosbag의 `metadata.yaml`이 완성되지 않을 수 있다.
+시험이 끝나면 조종 터미널에서 Ctrl-C로 종료한다.
 
 ### 방향키 노드만 실행
 

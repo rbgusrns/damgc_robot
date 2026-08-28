@@ -92,18 +92,29 @@ container가 종료돼도 다음 실행에서 VSLAM, nvblox와 EKF 패키지를 
 3. 일회성 container 종료 후 VSLAM/EKF runtime package가 사라지는 문제
 4. launch 부모만 종료되고 RealSense·STM32 자식 node가 남는 문제
 
-## 현재 저장되는 것과 저장되지 않는 것
+## 자동 저장 및 분석
 
-현재 원클릭 실행기는 각 process의 텍스트 로그만 자동 저장한다.
+원클릭 실행기는 각 process의 텍스트 로그와 함께 정확도 분석용 rosbag을 자동
+저장한다. Ctrl-C 시 rosbag을 먼저 정상 마감하고 다음 결과를 bag 폴더에 생성한다.
+
+- `analysis.md`: wheel/local/global/VSLAM 경로 길이, 변위, yaw, 정지 구간 흔들림,
+  tracking 성공률과 wheel/VSLAM 차이
+- `analysis.json`: 반복 시험 비교와 그래프 작성용 분석 데이터
+
+bag에는 `/leader/cmd_vel`, wheel raw, IMU, local/global EKF, VSLAM odometry/status,
+TF를 기록한다. 카메라 영상은 용량을 줄이기 위해 기본 기록에서 제외했다.
+
+GPU 부하를 분리해서 확인할 수 있도록 다음 실행 모드도 추가했다.
+
+- `VSLAM_HEADLESS=1`: RViz와 VSLAM debug rendering만 비활성화
+- `VSLAM_HEADLESS=1 VSLAM_ONLY=1`: 위 기능에 더해 nvblox도 비활성화하고 VSLAM/EKF
+  입력 처리만 측정
 
 아직 자동 저장하지 않는 항목:
 
-- rosbag2 topic data
 - nvblox 3D map
 - VSLAM map database
-- 주행 경로별 정량 분석 결과
-
-따라서 텍스트 로그만으로는 wheel/VSLAM 궤적 오차를 사후 계산할 수 없다.
+- 카메라 영상을 포함한 완전 재생용 rosbag
 
 ## 관찰 사항
 
@@ -118,9 +129,7 @@ STM32 bridge는 종료 시 rclpy context가 먼저 닫혀 traceback과 exit code
 
 ## 다음 작업
 
-1. 원클릭 실행에 timestamp 기반 자동 rosbag 기록 추가
-2. 기록 topic을 wheel raw, IMU, local/global EKF, VSLAM pose/status, TF로 제한
-3. 줄자 기준 1 m 직진 및 제자리 회전 정량 시험
-4. 큰 사각형 또는 폐루프 주행으로 loop closure 전후 오차 측정
-5. camera frame drop과 `image_jitter_threshold_ms` 조정
-6. nvblox map save/load 지원 확인
+1. 줄자 기준 1 m 직진 및 제자리 회전 정량 시험
+2. 큰 사각형 또는 폐루프 주행으로 loop closure 전후 오차 측정
+3. camera frame drop과 `image_jitter_threshold_ms` 조정
+4. nvblox map save/load 지원 확인
