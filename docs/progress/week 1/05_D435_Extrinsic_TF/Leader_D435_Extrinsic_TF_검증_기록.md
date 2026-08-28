@@ -1,5 +1,9 @@
 # Leader D435 Extrinsic·base_link TF 검증 기록
 
+> 이 문서는 extrinsic을 검증한 당시 기록이다. 후속 base pose/metric 구현과 실제
+> CENTER/LEFT/RIGHT/FARTHER/HIDDEN 재검증 결과는
+> [Leader base_link AprilTag Pose·Metric 구현 및 재현 검증 가이드](../../../../src/leader/rescue_robot_apriltag/docs/LEADER_BASE_LINK_POSE_METRICS_VALIDATION_GUIDE.md)를 따른다.
+
 ## 1. 작업 목적
 
 Leader D435 장착 실측값을 URDF의 `base_link → camera_link` fixed joint에 반영하고,
@@ -157,7 +161,7 @@ leader/tag36h11:0           parent: camera_color_optical_frame
 발생했다. 이는 저장소의 고정 구조가 아니라 검증 프로세스 중복이었으며 두 세션을
 종료했다. 단일 launch 기준으로 같은 transform을 중복 발행하는 구조는 확인되지 않았다.
 
-## 11. 아직 하지 않은 작업
+## 11. 이 기록 시점에 아직 하지 않은 작업
 
 - base-relative `PoseStamped` 추가 구현
 - `base_forward_distance`

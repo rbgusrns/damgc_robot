@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Publish Leader approach state from camera-to-AprilTag transforms.
+"""
+Publish Leader camera- and base-frame AprilTag observations.
 
 The configured source frame must be a camera optical frame, where x points
-right, y points down, and z points forward.  The node publishes observations in
-that frame only; it does not command motion or transform data into ``base_link``.
+right, y points down, and z points forward.  Camera-frame alignment outputs are
+preserved while additional observations are transformed into ``base_link``.
 """
 
 from math import isfinite
@@ -11,6 +12,7 @@ from typing import List, Optional, Sequence
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
+from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.time import Time
@@ -27,6 +29,11 @@ from rescue_robot_apriltag.approach_logic import (
     is_valid_translation,
     normalize_quaternion,
     select_observation,
+)
+from rescue_robot_apriltag.base_pose import (
+    compute_base_metrics,
+    is_fresh_timestamp,
+    transform_pose_preserving_stamp,
 )
 
 
@@ -56,6 +63,18 @@ class AprilTagApproachNode(Node):
         )
         self._angle_pub = self.create_publisher(Float64, "supply/angle", 10)
         self._state_pub = self.create_publisher(String, "alignment/state", 10)
+        self._base_pose_pub = self.create_publisher(
+            PoseStamped, "supply/base_relative_pose", 10
+        )
+        self._base_forward_pub = self.create_publisher(
+            Float64, "supply/base_forward_distance", 10
+        )
+        self._base_lateral_pub = self.create_publisher(
+            Float64, "supply/base_lateral_error", 10
+        )
+        self._base_bearing_pub = self.create_publisher(
+            Float64, "supply/base_bearing", 10
+        )
 
         self._translation_filter = MedianTranslationFilter(self._filter_window)
         self._state_machine = ApproachStateMachine(
@@ -74,6 +93,8 @@ class AprilTagApproachNode(Node):
     def _declare_parameters(self) -> None:
         """Declare startup-only Leader approach parameters."""
         self.declare_parameter("source_frame", "camera_color_optical_frame")
+        self.declare_parameter("base_frame", "base_link")
+        self.declare_parameter("tf_lookup_timeout", 0.0)
         self.declare_parameter("tag_frame_pattern", "leader/tag36h11:{id}")
         self.declare_parameter("target_tag_id", 0)
         self.declare_parameter("allowed_tag_ids", [0, 1, 2])
@@ -90,6 +111,10 @@ class AprilTagApproachNode(Node):
     def _load_and_validate_parameters(self) -> None:
         """Load parameters and reject ambiguous or unsafe configurations."""
         self._source_frame = str(self.get_parameter("source_frame").value)
+        self._base_frame = str(self.get_parameter("base_frame").value)
+        self._tf_lookup_timeout = float(
+            self.get_parameter("tf_lookup_timeout").value
+        )
         self._tag_frame_pattern = str(
             self.get_parameter("tag_frame_pattern").value
         )
@@ -115,6 +140,8 @@ class AprilTagApproachNode(Node):
 
         if not self._source_frame:
             raise ValueError("source_frame must not be empty")
+        if not self._base_frame:
+            raise ValueError("base_frame must not be empty")
         if "{id}" not in self._tag_frame_pattern:
             raise ValueError("tag_frame_pattern must contain the '{id}' placeholder")
         try:
@@ -140,6 +167,7 @@ class AprilTagApproachNode(Node):
             self._tag_timeout,
             self._stable_time,
             self._publish_rate,
+            self._tf_lookup_timeout,
         )
         if not all(isfinite(value) for value in numeric_values):
             raise ValueError("Numeric parameters must be finite")
@@ -156,6 +184,8 @@ class AprilTagApproachNode(Node):
             raise ValueError("publish_rate must be greater than zero")
         if self._filter_window < 1:
             raise ValueError("filter_window must be at least 1")
+        if self._tf_lookup_timeout < 0.0:
+            raise ValueError("tf_lookup_timeout must not be negative")
 
     def _candidate_ids(self) -> Sequence[int]:
         """Return the tag IDs eligible for the current lookup cycle."""
@@ -240,6 +270,66 @@ class AprilTagApproachNode(Node):
         self._state_pub.publish(String(data=state.value))
         self._log_state_change(state)
 
+    def _publish_base_outputs(self, camera_pose: PoseStamped) -> None:
+        """Transform and publish one fresh camera pose in the configured base frame."""
+        stamp = camera_pose.header.stamp
+        if not is_fresh_timestamp(
+            stamp.sec,
+            stamp.nanosec,
+            self.get_clock().now().nanoseconds,
+            self._tag_timeout,
+        ):
+            self.get_logger().warning(
+                "Skipping base outputs for an invalid or stale camera pose stamp",
+                throttle_duration_sec=5.0,
+            )
+            return
+
+        try:
+            transform = self._tf_buffer.lookup_transform(
+                self._base_frame,
+                camera_pose.header.frame_id,
+                Time.from_msg(camera_pose.header.stamp),
+                timeout=Duration(seconds=self._tf_lookup_timeout),
+            )
+        except TransformException as error:
+            self.get_logger().warning(
+                "Skipping base outputs because TF lookup failed: %s" % error,
+                throttle_duration_sec=5.0,
+            )
+            return
+
+        try:
+            base_pose = transform_pose_preserving_stamp(
+                camera_pose, transform, self._base_frame
+            )
+        except Exception as error:  # Keep malformed TF data from stopping perception.
+            self.get_logger().warning(
+                "Skipping base outputs because pose transformation failed: %s" % error,
+                throttle_duration_sec=5.0,
+            )
+            return
+        if base_pose is None:
+            self.get_logger().warning(
+                "Skipping base outputs because pose validation failed",
+                throttle_duration_sec=5.0,
+            )
+            return
+
+        try:
+            metrics = compute_base_metrics(
+                base_pose.pose.position.x, base_pose.pose.position.y
+            )
+        except ValueError:
+            return
+
+        self._base_pose_pub.publish(base_pose)
+        self._base_forward_pub.publish(
+            Float64(data=metrics.forward_distance)
+        )
+        self._base_lateral_pub.publish(Float64(data=metrics.lateral_error))
+        self._base_bearing_pub.publish(Float64(data=metrics.bearing))
+
     def _publish_valid(
         self,
         selected: TagObservation,
@@ -267,6 +357,7 @@ class AprilTagApproachNode(Node):
         self._angle_pub.publish(Float64(data=measurement.angle))
         self._state_pub.publish(String(data=state.value))
         self._log_state_change(state)
+        self._publish_base_outputs(pose)
 
     def _log_state_change(self, state: ApproachState) -> None:
         """Log state transitions once instead of logging at timer frequency."""

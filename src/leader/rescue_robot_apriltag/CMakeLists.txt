@@ -22,6 +22,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_approach_logic test/test_approach_logic.py
     APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}
   )
+  ament_add_pytest_test(test_base_pose test/test_base_pose.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}
+  )
 endif()
 
 ament_package()

@@ -8,7 +8,7 @@
 
 ## 현재 상태 한 줄 요약
 
-**카메라 인식과 접근 상태 판정까지 완료했으며, 실제 로봇 이동·STM32·그리퍼 제어는 아직 연결하지 않았다.**
+**카메라 인식·접근 상태 판정과 Leader base_link 좌표 변환까지 완료했으며, 실제 로봇 이동·STM32·그리퍼 제어는 아직 연결하지 않았다.**
 
 ## 전체 기능 흐름
 
@@ -20,8 +20,8 @@
 AprilTag 검출 및 상대 위치 TF 계산
         ↓
 거리·좌우·각도 오차 계산
-        ↓
-접근 상태 판정
+        ├→ 접근 상태 판정
+        └→ TF2 기반 Leader base_link pose·metric 계산
         ↓
 [다음 단계] 모터 이동 → 정렬 → 그리퍼 동작
 ```
@@ -36,8 +36,8 @@ AprilTag 검출 및 상대 위치 TF 계산
 | USB 카메라 AprilTag | 완료 | ID 0 검출 및 카메라 기준 TF 출력 |
 | D435 RGB AprilTag | 완료 | ID 0 검출 및 카메라 기준 TF 출력 |
 | 접근 상태 판정 노드 | 구현·자동시험 완료 | 9개 상태 발행, 단위 테스트 37개 통과 |
-| 실제 태그 이동 시험 | 일부 미완료 | 좌우·전후·목표 위치 유지 시험 필요 |
-| 로봇 차체 기준 좌표 변환 | 미완료 | 카메라 장착 위치의 정확한 TF 필요 |
+| 실제 태그 이동 시험 | Leader base 출력 검증 완료 | CENTER/LEFT/RIGHT/FARTHER/HIDDEN 실측 |
+| 로봇 차체 기준 좌표 변환 | 구현·실기검증 완료 | TF2 exact-stamp 변환과 base metric 부호 확인 |
 | `cmd_vel`·STM32 모터 제어 | 미완료 | 상태 판정과 실제 주행 연결 필요 |
 | 그리퍼 제어 | 미완료 | 안전 조건과 파지 거리 확정 필요 |
 
@@ -73,7 +73,14 @@ AprilTag 검출 및 상대 위치 TF 계산
   - 다중 태그 선택 및 9개 접근 상태 발행
   - 실행, 시험, 파라미터와 남은 안전 과제
 
-### 5. 이전 기록
+### 5. Leader base_link Pose와 metric
+
+- [base_link AprilTag Pose·Metric 구현 및 재현 검증 가이드](../../../src/leader/rescue_robot_apriltag/docs/LEADER_BASE_LINK_POSE_METRICS_VALIDATION_GUIDE.md)
+  - filtered camera pose의 원본 timestamp를 사용하는 TF2 변환
+  - base forward/lateral/bearing interface와 유효성·유실 처리
+  - D435 ID 0 실측값과 Jetson 다중 터미널 재현 절차
+
+### 6. 이전 기록
 
 - [기존 진행 메모 원문](99_기존_메모/1차_진행상황_원문.txt)
   - 당시 작성한 시간순 메모

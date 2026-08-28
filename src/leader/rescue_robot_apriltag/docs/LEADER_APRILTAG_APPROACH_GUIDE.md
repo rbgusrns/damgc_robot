@@ -144,9 +144,10 @@ timer마다 후보 TF를 조회하고 다음 순서로 처리한다.
 3. 하나의 태그 선택
 4. 선택 ID가 바뀌면 filter와 stable timer 초기화
 5. translation median filter
-6. 거리·각도 계산
-7. 상태 판정
-8. Leader namespace 토픽 발행
+6. 기존 camera 기준 거리·각도 계산과 상태 판정
+7. 기존 camera 기준 토픽 발행
+8. 같은 camera PoseStamped의 원본 timestamp로 `base_link` TF lookup
+9. TF2 변환 성공 시 base pose와 base metric 병렬 발행
 
 ## 8. 다중 ID와 선택 방식
 
@@ -184,7 +185,8 @@ state=TAG_LOST
 ```
 
 유실 중에는 과거 pose, distance, lateral error, straight distance, angle을 새로운
-측정값처럼 재발행하지 않는다.
+측정값처럼 재발행하지 않는다. base pose와 base metric도 같은 `tag_timeout` freshness를
+재사용하며, tag lost/stale 또는 base TF 실패 시 마지막 값이나 0을 다시 발행하지 않는다.
 
 median filter는 최근 `filter_window`개의 x/y/z를 성분별로 계산해 순간 outlier를
 억제한다. 상태 timer가 TF publish 주기보다 빠를 수 있으므로 동일 TF timestamp는 새
@@ -203,6 +205,19 @@ angle             = atan2(x, z)
 
 단위는 translation과 distance가 m, angle이 rad다. `angle_tolerance_deg`만 설정에서
 degree로 받고 내부에서 radian으로 변환한다.
+
+같은 filtered camera PoseStamped를 TF2로 `base_link`에 변환한 뒤에는 다음 값을 별도로
+계산한다. optical-frame 축을 수동으로 교환하지 않는다.
+
+```text
+base_forward_distance = x_base
+base_lateral_error    = y_base
+base_bearing          = atan2(y_base, x_base)
+```
+
+`base_link`의 +X는 로봇 전방, +Y는 왼쪽이므로 왼쪽에서 lateral/bearing이 양수이고
+오른쪽에서 음수다. exact-time TF lookup에는 camera PoseStamped의 frame ID와 stamp를
+사용하며, 결과 pose에도 원본 stamp를 복사한다.
 
 ## 11. 상태 머신
 
@@ -234,6 +249,10 @@ degree로 받고 내부에서 radian으로 변환한다.
 | `/leader/supply/lateral_error` | `std_msgs/msg/Float64` | x 좌우 오차 [m] |
 | `/leader/supply/straight_distance` | `std_msgs/msg/Float64` | 3차원 직선거리 [m] |
 | `/leader/supply/angle` | `std_msgs/msg/Float64` | `atan2(x,z)` [rad] |
+| `/leader/supply/base_relative_pose` | `geometry_msgs/msg/PoseStamped` | `base_link` 기준 선택 tag pose |
+| `/leader/supply/base_forward_distance` | `std_msgs/msg/Float64` | base x 전방 거리 [m] |
+| `/leader/supply/base_lateral_error` | `std_msgs/msg/Float64` | base y 오차 [m], 왼쪽 양수 |
+| `/leader/supply/base_bearing` | `std_msgs/msg/Float64` | `atan2(y_base,x_base)` [rad], 왼쪽 양수 |
 | `/leader/alignment/state` | `std_msgs/msg/String` | 9개 상태 문자열 |
 
 consumer는 pose/metric만 보고 검출 여부를 판단하지 말고 반드시 `detected`와 메시지
@@ -246,6 +265,8 @@ consumer는 pose/metric만 보고 검출 여부를 판단하지 말고 반드시
 | 파라미터 | 현재값 | 설명 |
 |---|---:|---|
 | `source_frame` | `camera_color_optical_frame` | TF parent 및 출력 Pose frame |
+| `base_frame` | `base_link` | 신규 base pose의 TF target/output frame |
+| `tf_lookup_timeout` | `0.0` s | base exact-time lookup 대기시간, 기본 non-blocking |
 | `tag_frame_pattern` | `leader/tag36h11:{id}` | ID별 TF child frame 형식 |
 | `target_tag_id` | `0` | 0 이상은 고정 ID, -1은 다중 모드 |
 | `allowed_tag_ids` | `[0, 1, 2]` | 다중 모드 후보와 priority 순서 |
@@ -357,11 +378,11 @@ colcon test --packages-select rescue_robot_apriltag
 colcon test-result --verbose
 ```
 
-2026-08-27 최종 재실행 결과는 46개 pytest testcase가 모두 통과했다. ament/CTest
-wrapper 1개를 포함한 `colcon test-result` 집계는 `47 tests, 0 errors, 0 failures,
-0 skipped`다. 테스트는 9개 상태, threshold 경계, stable timer reset, 계산식, 잘못된
+기존 suite는 9개 상태, threshold 경계, stable timer reset, camera 계산식, 잘못된
 translation/quaternion, median filter, 중복 timestamp, priority/nearest와 ID 변경을
-포함한다.
+검증한다. base suite는 metric 부호와 `atan2` 경계, freshness, NaN/inf와 quaternion
+거부, known TF 변환, target frame 및 원본 timestamp 보존을 검증한다. 실제 D435에서의
+base 출력 검증은 별도 현장 시험으로 남겨 둔다.
 
 ## 17. 실제 ROS graph 자동 검증 결과
 

@@ -6,6 +6,8 @@
 /leader/apriltag_approach:
   ros__parameters:
     source_frame: camera_color_optical_frame
+    base_frame: base_link
+    tf_lookup_timeout: 0.0
     tag_frame_pattern: "leader/tag36h11:{id}"
     target_tag_id: 0
     allowed_tag_ids: [0, 1, 2]
