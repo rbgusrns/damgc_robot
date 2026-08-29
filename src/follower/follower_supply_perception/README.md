@@ -11,8 +11,9 @@ Jetson Orin Nano의 ROS 2 Humble 환경에서 AprilTag 상대 위치를 사용�
 [`docs/STATUS_AND_ROADMAP.md`](../../../docs/STATUS_AND_ROADMAP.md)를 따릅니다.
 이 패키지의 상태 출력만으로 계획의 정밀 접근·주행·파지가 완료된 것은 아닙니다.
 
-현재 단계에서는 `ament_python` 구조, 순수 Python 상태 로직, TF 기반 상태 판단
-노드, 시험용 YAML, 카메라 없는 단위 테스트와 전체/상태 전용 launch를 준비했습니다.
+현재 단계에서는 기존 camera-frame 상태를 유지하면서 TF2 exact-stamp 변환,
+`base_link` pose·metric·상태, 별도 approach controller, deterministic command selector,
+최종 Follower safety guard까지 software pipeline을 구성했습니다.
 확정된 요구사항은
 [`docs/TASK_SPEC_APRILTAG_APPROACH.md`](docs/TASK_SPEC_APRILTAG_APPROACH.md)에
 기록되어 있습니다.
@@ -35,6 +36,11 @@ launch 구성과 검증 결과는
 전체 구현 변경 기록은
 [`docs/IMPLEMENTATION_RECORD.md`](docs/IMPLEMENTATION_RECORD.md)를 참고합니다.
 
+현재 base-link velocity pipeline의 설계, 전체 파라미터, 선택 빌드·자동시험 결과와
+실카메라 검증 절차는
+[`docs/FOLLOWER_BASE_LINK_VELOCITY_PIPELINE_VALIDATION_GUIDE.md`](docs/FOLLOWER_BASE_LINK_VELOCITY_PIPELINE_VALIDATION_GUIDE.md)를
+기준으로 합니다.
+
 노드 실행 진입점은 `apriltag_approach_node`입니다. 출력 토픽은 상대 이름을 사용하므로
 요구된 `/follower/...` 이름으로 사용하려면 노드를 `follower` namespace에서 실행해야
 합니다.
@@ -47,22 +53,23 @@ launch 구성과 검증 결과는
 
 - Ubuntu 22.04 / ROS 2 Humble
 - Python 3.10
-- 작업공간: `/home/kde/ros2_ws`
-- 패키지: `/home/kde/ros2_ws/src/follower_supply_perception`
+- 작업공간: `~/damgc_robot`
+- 패키지: `~/damgc_robot/src/follower/follower_supply_perception`
 
 향후 빌드와 테스트를 실행할 때는 각 셸에서 ROS 환경을 먼저 설정합니다.
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /home/kde/ros2_ws
+cd ~/damgc_robot
 colcon build --packages-select follower_supply_perception
-source /home/kde/ros2_ws/install/setup.bash
+source install/local_setup.bash
 colcon test --packages-select follower_supply_perception
 colcon test-result --verbose
 ```
 
-이 패키지는 상태 인식만 담당합니다. `cmd_vel`, STM32, 그리퍼 제어는 범위에
-포함하지 않습니다.
+이 패키지 자체는 perception과 상태 판단만 담당합니다. raw command, command ownership,
+final safety는 각각 `follower_approach_control`, `follower_command_selector`,
+`follower_control`이 담당하며 STM32/UART/motor와 그리퍼는 연결하지 않습니다.
 
 ## Launch 실행
 
@@ -71,7 +78,7 @@ colcon test-result --verbose
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/kde/ros2_ws/install/setup.bash
+source ~/damgc_robot/install/local_setup.bash
 ros2 launch follower_supply_perception follower_apriltag.launch.py
 ```
 
@@ -93,9 +100,11 @@ ros2 run rqt_image_view rqt_image_view /follower/camera/image_rect
 ## 사용자 최종 확인
 
 - `docs/MANUAL_STATE_TEST.md`에 따라 실제 태그를 좌우·전후로 이동해 모든 상태를 확인합니다.
-- `rviz2`의 Fixed Frame을 `follower_camera_optical_frame`으로 설정하고 TF와
+- `rviz2`의 Fixed Frame을 `base_link` 또는
+  `follower/follower_camera_optical_frame`으로 설정하고 TF와
   `/follower/supply/relative_pose`를 사용자가 직접 확인합니다.
-- `target_distance=0.15 m`는 시험값이므로 실제 그리퍼/TCP 기준으로 재측정합니다.
+- camera state의 `target_distance=0.15 m`와 base/controller target `0.25 m`는 서로 다른
+  software-validation 값이다. 둘 다 실제 그리퍼/TCP 기준 grasp 거리로 확정하지 않습니다.
 
-현재 source frame은 카메라 optical frame이며 `base_link` 기준 변환, `MarkerArray`,
-`cmd_vel`, STM32와 그리퍼 연동은 구현되지 않았습니다.
+RIGHT/TARGET/HIDDEN 실카메라 시나리오는 아직 사용자가 직접 확인해야 하며 문서에서
+`NOT VERIFIED`로 유지합니다. STM32/UART/motor와 그리퍼 연동은 구현 범위 밖입니다.

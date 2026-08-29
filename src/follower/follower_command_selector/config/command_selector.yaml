@@ -1,0 +1,7 @@
+/follower/command_selector:
+  ros__parameters:
+    source_mode: STOP
+    publish_rate: 50.0
+    approach_timeout: 0.35
+    cooperation_timeout: 0.50
+    axis_epsilon: 1.0e-9

@@ -1,7 +1,8 @@
 """Launch the complete follower USB camera and AprilTag perception pipeline."""
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -27,6 +28,13 @@ def generate_launch_description() -> LaunchDescription:
             [package_share, "config", "follower_usb_camera.yaml"]
         ),
     ]
+    camera_tf = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution(
+                [package_share, "launch", "follower_camera_tf.launch.py"]
+            )
+        )
+    )
 
     arguments = [
         DeclareLaunchArgument(
@@ -60,10 +68,19 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[
             {
                 "video_device": video_device,
+                # This camera exposes MJPEG 640x480 only at 120.101 FPS.  A
+                # slower usb_cam publish timer leaves old mmap frames queued
+                # and makes observation stamps progressively stale.  YUYV at
+                # this resolution has a native 30 FPS mode, so acquisition and
+                # publication remain paced without a source-frame backlog.
                 "framerate": 30.0,
                 "io_method": "mmap",
                 "frame_id": "follower/follower_camera_optical_frame",
-                "pixel_format": "mjpeg2rgb",
+                # Keep the native YUYV payload through acquisition.  The
+                # yuyv2rgb conversion could not sustain the device's native
+                # 30 FPS on the Follower computer and accumulated stale mmap
+                # frames before perception consumed them.
+                "pixel_format": "yuyv",
                 "av_device_format": "YUV422P",
                 "image_width": 640,
                 "image_height": 480,
@@ -108,4 +125,6 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[approach_config],
     )
 
-    return LaunchDescription(arguments + [usb_camera, rectify, apriltag, approach])
+    return LaunchDescription(
+        arguments + [camera_tf, usb_camera, rectify, apriltag, approach]
+    )

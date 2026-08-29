@@ -8,7 +8,7 @@
 
 ## 현재 상태 한 줄 요약
 
-**Leader base_link 상태에서 final `/leader/cmd_vel`까지 ROS 2 software pipeline을 구현·검증했으며, 실제 로봇 이동·STM32·그리퍼 제어는 아직 연결하지 않았다.**
+**Leader와 Follower 모두 AprilTag base-link 상태에서 최종 software velocity topic까지 구현·자동시험했으며, 실제 로봇 이동·STM32·그리퍼 제어는 연결하지 않았다.**
 
 ## 전체 기능 흐름
 
@@ -27,7 +27,12 @@ AprilTag 검출 및 상대 위치 TF 계산
                 ↓
         approach controller → cmd_vel_raw
                 ↓
-        velocity guard → /leader/cmd_vel
+        Leader: velocity guard → /leader/cmd_vel
+        Follower: command selector
+                  ├─ AprilTag approach
+                  └─ cooperation /follower/cmd_vel
+                         ↓
+                  velocity guard → /follower/safe_cmd_vel
                 X
         STM32·motor 미연결
 ```
@@ -42,9 +47,9 @@ AprilTag 검출 및 상대 위치 TF 계산
 | USB 카메라 AprilTag | 완료 | ID 0 검출 및 카메라 기준 TF 출력 |
 | D435 RGB AprilTag | 완료 | ID 0 검출 및 카메라 기준 TF 출력 |
 | 접근 상태 판정 노드 | 구현·자동시험 완료 | 9개 상태 발행, camera-frame 단위 테스트 46개 통과 |
-| 실제 태그 이동 시험 | Leader base 출력 검증 완료 | CENTER/LEFT/RIGHT/FARTHER/HIDDEN 실측 |
-| 로봇 차체 기준 좌표 변환 | 구현·실기검증 완료 | TF2 exact-stamp 변환과 base metric 부호 확인 |
-| ROS 2 velocity command pipeline | software 완료 | base state → raw controller → guard → `/leader/cmd_vel` 검증 |
+| 실제 태그 이동 시험 | 부분 완료 | Leader 완료; Follower CENTER/LEFT/FAR 완료, RIGHT/TARGET/HIDDEN `NOT VERIFIED` |
+| 로봇 차체 기준 좌표 변환 | 구현·자동시험 완료 | Leader/Follower TF2 exact-stamp 변환; Follower LEFT 실측 부호 확인 |
+| ROS 2 velocity command pipeline | software 완료 | Leader `/leader/cmd_vel`; Follower selector·guard → `/follower/safe_cmd_vel` |
 | STM32·실제 motor 제어 | 미완료 | software final topic과 hardware를 아직 연결하지 않음 |
 | 그리퍼 제어 | 미완료 | 안전 조건과 파지 거리 확정 필요 |
 
@@ -94,7 +99,14 @@ AprilTag 검출 및 상대 위치 TF 계산
   - 상태 priority, 제어식, enable gate, clamp, slew, timeout 및 publisher 충돌 점검
   - STM32와 motor를 연결하지 않는 Jetson 수동 검증 절차
 
-### 7. 이전 기록
+### 7. Follower base-link velocity software pipeline
+
+- [Follower base-link velocity pipeline 상세 재현·검증 가이드](../../../src/follower/follower_supply_perception/docs/FOLLOWER_BASE_LINK_VELOCITY_PIPELINE_VALIDATION_GUIDE.md)
+  - 측정 camera extrinsic, camera/base 상태 병렬 유지와 exact-stamp TF2 변환
+  - approach controller, STOP/APPROACH/COOPERATION selector, 기존 final safety guard
+  - 관련 4개 패키지 자동시험 236개와 실카메라 PASS/NOT VERIFIED 구분
+
+### 8. 이전 기록
 
 - [기존 진행 메모 원문](99_기존_메모/1차_진행상황_원문.txt)
   - 당시 작성한 시간순 메모
@@ -114,8 +126,9 @@ AprilTag 검출 및 상대 위치 TF 계산
 | `STABILIZING` | 오차 범위 안에서 안정화 확인 중 |
 | `ALIGNED` | 정렬 조건을 정해진 시간 동안 유지 |
 
-이 상태는 high-level 판단 결과다. 별도 controller와 velocity guard가 software Twist를
-계산하지만, 현재 `/leader/cmd_vel`은 STM32 또는 motor에 연결되어 있지 않다.
+이 상태는 high-level 판단 결과다. 별도 controller·selector·velocity guard가 software
+Twist를 계산하지만, `/leader/cmd_vel`과 `/follower/safe_cmd_vel`은 STM32 또는 motor에
+연결되어 있지 않다.
 
 ## 헷갈리기 쉬운 구분
 
@@ -143,9 +156,11 @@ AprilTag 검출 및 상대 위치 TF 계산
 - 작업공간: 사용자별 절대 경로를 코드에 넣지 않고 `damgc_robot` 저장소 루트를 기준으로 사용
 - 역할 namespace: `/leader`, `/follower`
 - 로봇별 TF frame 이름과 카메라 optical frame–`base_link` 연결
-- 최종 주행 토픽: `/leader/cmd_vel`, `/follower/cmd_vel`
+- 최종 software 주행 토픽: `/leader/cmd_vel`, `/follower/safe_cmd_vel`
+- Follower cooperation 입력: 기존 `/follower/cmd_vel`; AprilTag controller가 직접 publish하지 않음
 - STM32 패킷, wheel odometry와 IMU 메시지·단위·주기
 - 통신 단절 watchdog과 하드웨어·소프트웨어 비상정지 우선순위
 
-`0.15 m` 목표 거리는 시험용 값이다. 실제 파지 거리로 확정하지 말고 카메라 장착 위치와
-그리퍼 끝점(TCP)을 기준으로 다시 측정해야 한다.
+Follower camera target `0.15 m`와 base/controller target `0.25 m`는 software-validation
+값이다. 실제 파지 거리로 확정하지 말고 카메라 장착 위치와 그리퍼 끝점(TCP)을 기준으로
+다시 측정해야 한다.

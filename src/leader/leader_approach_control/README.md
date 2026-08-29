@@ -38,7 +38,7 @@ Header가 없는 세 개의 base metric 토픽을 따로 조합하지 않는다.
 
 ## Provisional parameters
 
-`target_forward=0.50 m`, gains와 raw speed limits는 topic-level software validation용
+`target_forward=0.25 m`, gains와 raw speed limits는 topic-level software validation용
 임시값이다. 실제 grasp distance, gripper target, motor tuning 또는 최종 safety limit가
 아니다. State와 controller가 같은 forward error 기준을 사용하도록
 `rescue_robot_apriltag`의 `base_target_forward`와 이 패키지의 `target_forward`는 항상
@@ -48,7 +48,7 @@ Header가 없는 세 개의 base metric 토픽을 따로 조합하지 않는다.
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /home/maze/damgc_robot
+cd ~/damgc_robot
 colcon build --symlink-install \
   --packages-select rescue_robot_apriltag leader_approach_control
 source install/setup.bash

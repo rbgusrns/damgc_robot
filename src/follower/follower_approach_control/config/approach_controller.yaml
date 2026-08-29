@@ -1,0 +1,23 @@
+/follower/approach_controller:
+  ros__parameters:
+    base_frame: base_link
+    target_tag_id: 0
+    enabled_on_startup: false
+    publish_rate: 20.0
+    # ROS 2 Humble usb_cam converts the V4L monotonic stamp with a process-start
+    # fractional-second offset.  Live runs measured a fixed 0.31-0.79 s age;
+    # 1.20 s covers the theoretical <1 s offset plus perception latency.
+    # Selector/guard receipt watchdogs remain independently at 0.35/0.30 s.
+    pose_timeout: 1.20
+    sample_sync_tolerance: 0.10
+
+    # Configured approach stop target, matching the Leader at 0.25 m.
+    # It must equal follower_supply_perception base_target_forward.
+    target_forward: 0.25
+    # Gains and raw limits remain conservative topic-validation values.
+    linear_gain: 0.20
+    angular_gain: 0.80
+    lateral_gain: 0.50
+    max_raw_linear_speed: 0.05
+    max_raw_angular_speed: 0.20
+    allow_reverse: false

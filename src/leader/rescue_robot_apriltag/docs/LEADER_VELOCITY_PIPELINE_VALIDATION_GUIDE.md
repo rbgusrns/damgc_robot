@@ -121,7 +121,7 @@ service를 사용한다. `ros2 param set`으로 startup parameter를 바꾸는 �
 ## 5. Base alignment state 설계
 
 좌표축은 `base_link`의 `+X=전방`, `+Y=왼쪽`, `+Z=위`다. 기본값에서 bearing tolerance는
-`5 deg`, target 구간은 `0.50 ± 0.03 m`, lateral tolerance는 `±0.02 m`다.
+`5 deg`, target 구간은 `0.25 ± 0.03 m`, lateral tolerance는 `±0.02 m`다.
 
 상태 priority는 아래 표의 위에서 아래 순서다. tolerance 경계값 자체는 tolerance 안으로
 처리한다.
@@ -144,7 +144,7 @@ Tolerance 밖으로 나가거나 tag ID가 변경되거나 tag가 lost되면 안
 
 > **WARNING — 실제 파지 거리 아님**
 >
-> `base_target_forward=0.50 m`, `target_forward=0.50 m`와 모든 base tolerance는
+> `base_target_forward=0.25 m`, `target_forward=0.25 m`와 모든 base tolerance는
 > software/state/topic 검증용 provisional 값이다. 최종 gripper grasp 거리, TCP 목표,
 > 접촉 거리 또는 motor stopping distance가 아니다.
 
@@ -233,7 +233,7 @@ Source: `src/leader/rescue_robot_apriltag/config/approach.yaml`
 | `stable_time` | `0.8` | s | camera state 안정 유지 시간 | tentative |
 | `publish_rate` | `20.0` | Hz | perception/state update rate | software 설정 |
 | `filter_window` | `5` | samples | translation median window | software 설정 |
-| `base_target_forward` | `0.50` | m | base state 목표 전방 거리 | provisional |
+| `base_target_forward` | `0.25` | m | base state 목표 전방 거리 | provisional |
 | `base_forward_tolerance` | `0.03` | m | base forward tolerance | provisional |
 | `base_lateral_tolerance` | `0.02` | m | base lateral tolerance | provisional |
 | `base_bearing_tolerance_deg` | `5.0` | deg | base bearing tolerance | provisional |
@@ -251,7 +251,7 @@ Source: `src/leader/leader_approach_control/config/approach_controller.yaml`
 | `controller_publish_rate` | `20.0` | Hz | raw zero/non-zero 발행 주기 | software 설정 |
 | `controller_pose_timeout` | `0.35` | s | pose source/receipt freshness | tentative safety |
 | `sample_sync_tolerance` | `0.10` | s | pose 뒤 state 수신 허용 시간 | tentative safety |
-| `target_forward` | `0.50` | m | forward error 목표 | provisional, grasp 아님 |
+| `target_forward` | `0.25` | m | forward error 목표 | provisional, grasp 아님 |
 | `linear_gain` | `0.20` | `(m/s)/m` | forward proportional gain | tentative tuning |
 | `angular_gain` | `0.80` | `(rad/s)/rad` | bearing proportional gain | tentative tuning |
 | `lateral_gain` | `0.50` | `(rad/s)/m` | lateral angular correction gain | tentative tuning |
@@ -440,8 +440,8 @@ ros2 topic echo /leader/alignment/state std_msgs/msg/String
 |---|---|
 | bearing tolerance보다 왼쪽 | `TURN_LEFT` |
 | bearing tolerance보다 오른쪽 | `TURN_RIGHT` |
-| 방향이 맞고 `forward>0.53 m` | `APPROACH` |
-| 방향이 맞고 `forward<0.47 m` | `TOO_CLOSE` |
+| 방향이 맞고 `forward>0.28 m` | `APPROACH` |
+| 방향이 맞고 `forward<0.22 m` | `TOO_CLOSE` |
 | 목표 거리에서 lateral이 왼쪽/오른쪽 | `FINE_ALIGN_LEFT` / `FINE_ALIGN_RIGHT` |
 | 모든 tolerance에 처음 진입 | `STABILIZING` |
 | 모든 tolerance를 0.8 s 연속 유지 | `ALIGNED` |

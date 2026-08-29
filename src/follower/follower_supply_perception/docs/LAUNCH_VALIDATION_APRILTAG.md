@@ -4,7 +4,7 @@
 
 `follower_apriltag.launch.py`는 다음 네 노드를 재현 가능한 하나의 구성으로 실행한다.
 
-- `/follower/camera/usb_cam`: `/dev/video0`, 640x480, 30 fps, `mjpeg2rgb`
+- `/follower/camera/usb_cam`: `/dev/video0`, 640x480, 30 fps, mmap, native `yuyv`
 - `/follower/camera/rectify_node`: image_raw와 camera_info를 image_rect로 보정
 - `/follower/apriltag/apriltag`: 36h11, tag size `0.050 m`
 - `/follower/apriltag_approach`: TF 기반 상태 판단
@@ -61,7 +61,8 @@ RViz, `cmd_vel`, STM32와 그리퍼 제어는 포함하지 않는다.
 실행 중 `/follower/camera/image_raw`, `camera_info`, `image_rect`,
 `/follower/apriltag/detections`, 8개 상태 판단 출력과 `/tf`를 확인했다.
 `image_rect`는 관찰 구간에서 약 `11.8 Hz`, AprilTag `size`는 `0.05`였다. 카메라는
-`/dev/video0`, 640x480, 30 fps, mmap, `mjpeg2rgb`로 시작했다.
+`/dev/video0`, 640x480, 30 fps, mmap, native `yuyv`로 시작했다. 이 장치는 같은
+해상도의 MJPEG를 120.101 fps로만 제공하므로 30 fps pipeline에서는 사용하지 않는다.
 
 카메라가 지원하지 않는 일부 선택 제어에 `unknown control` 경고가 있었지만 영상과
 필수 토픽은 정상 생성됐다. 종료 시 timeout과 명시적 interrupt가 거의 동시에 들어가
