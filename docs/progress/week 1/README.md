@@ -8,7 +8,7 @@
 
 ## 현재 상태 한 줄 요약
 
-**카메라 인식·접근 상태 판정과 Leader base_link 좌표 변환까지 완료했으며, 실제 로봇 이동·STM32·그리퍼 제어는 아직 연결하지 않았다.**
+**Leader base_link 상태에서 final `/leader/cmd_vel`까지 ROS 2 software pipeline을 구현·검증했으며, 실제 로봇 이동·STM32·그리퍼 제어는 아직 연결하지 않았다.**
 
 ## 전체 기능 흐름
 
@@ -22,8 +22,14 @@ AprilTag 검출 및 상대 위치 TF 계산
 거리·좌우·각도 오차 계산
         ├→ 접근 상태 판정
         └→ TF2 기반 Leader base_link pose·metric 계산
-        ↓
-[다음 단계] 모터 이동 → 정렬 → 그리퍼 동작
+                ↓
+        base alignment state
+                ↓
+        approach controller → cmd_vel_raw
+                ↓
+        velocity guard → /leader/cmd_vel
+                X
+        STM32·motor 미연결
 ```
 
 ## 어디까지 완료됐나
@@ -35,10 +41,11 @@ AprilTag 검출 및 상대 위치 TF 계산
 | D435 거리 CSV 저장 | 완료 | 중앙 20×20 픽셀의 중앙값을 1초마다 저장 |
 | USB 카메라 AprilTag | 완료 | ID 0 검출 및 카메라 기준 TF 출력 |
 | D435 RGB AprilTag | 완료 | ID 0 검출 및 카메라 기준 TF 출력 |
-| 접근 상태 판정 노드 | 구현·자동시험 완료 | 9개 상태 발행, 단위 테스트 37개 통과 |
+| 접근 상태 판정 노드 | 구현·자동시험 완료 | 9개 상태 발행, camera-frame 단위 테스트 46개 통과 |
 | 실제 태그 이동 시험 | Leader base 출력 검증 완료 | CENTER/LEFT/RIGHT/FARTHER/HIDDEN 실측 |
 | 로봇 차체 기준 좌표 변환 | 구현·실기검증 완료 | TF2 exact-stamp 변환과 base metric 부호 확인 |
-| `cmd_vel`·STM32 모터 제어 | 미완료 | 상태 판정과 실제 주행 연결 필요 |
+| ROS 2 velocity command pipeline | software 완료 | base state → raw controller → guard → `/leader/cmd_vel` 검증 |
+| STM32·실제 motor 제어 | 미완료 | software final topic과 hardware를 아직 연결하지 않음 |
 | 그리퍼 제어 | 미완료 | 안전 조건과 파지 거리 확정 필요 |
 
 ## 기능별 문서
@@ -80,7 +87,14 @@ AprilTag 검출 및 상대 위치 TF 계산
   - base forward/lateral/bearing interface와 유효성·유실 처리
   - D435 ID 0 실측값과 Jetson 다중 터미널 재현 절차
 
-### 6. 이전 기록
+### 6. Leader velocity command software pipeline
+
+- [base state → controller → velocity guard 상세 재현·검증 가이드](../../../src/leader/rescue_robot_apriltag/docs/LEADER_VELOCITY_PIPELINE_VALIDATION_GUIDE.md)
+  - `/leader/base_alignment/state`, `/leader/approach/cmd_vel_raw`, `/leader/cmd_vel`
+  - 상태 priority, 제어식, enable gate, clamp, slew, timeout 및 publisher 충돌 점검
+  - STM32와 motor를 연결하지 않는 Jetson 수동 검증 절차
+
+### 7. 이전 기록
 
 - [기존 진행 메모 원문](99_기존_메모/1차_진행상황_원문.txt)
   - 당시 작성한 시간순 메모
@@ -100,8 +114,8 @@ AprilTag 검출 및 상대 위치 TF 계산
 | `STABILIZING` | 오차 범위 안에서 안정화 확인 중 |
 | `ALIGNED` | 정렬 조건을 정해진 시간 동안 유지 |
 
-이 상태들은 **판단 결과일 뿐 모터 명령이 아니다.** 현재 구현에는 `cmd_vel`, STM32 명령,
-그리퍼 동작이 포함되어 있지 않다.
+이 상태는 high-level 판단 결과다. 별도 controller와 velocity guard가 software Twist를
+계산하지만, 현재 `/leader/cmd_vel`은 STM32 또는 motor에 연결되어 있지 않다.
 
 ## 헷갈리기 쉬운 구분
 

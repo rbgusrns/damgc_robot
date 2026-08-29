@@ -30,6 +30,11 @@ from rescue_robot_apriltag.approach_logic import (
     normalize_quaternion,
     select_observation,
 )
+from rescue_robot_apriltag.base_alignment_logic import (
+    BaseAlignmentMeasurement,
+    BaseAlignmentStateMachine,
+    BaseAlignmentThresholds,
+)
 from rescue_robot_apriltag.base_pose import (
     compute_base_metrics,
     is_fresh_timestamp,
@@ -75,6 +80,9 @@ class AprilTagApproachNode(Node):
         self._base_bearing_pub = self.create_publisher(
             Float64, "supply/base_bearing", 10
         )
+        self._base_state_pub = self.create_publisher(
+            String, "base_alignment/state", 10
+        )
 
         self._translation_filter = MedianTranslationFilter(self._filter_window)
         self._state_machine = ApproachStateMachine(
@@ -86,8 +94,19 @@ class AprilTagApproachNode(Node):
                 stable_time=self._stable_time,
             )
         )
+        self._base_state_machine = BaseAlignmentStateMachine(
+            BaseAlignmentThresholds(
+                target_forward=self._base_target_forward,
+                forward_tolerance=self._base_forward_tolerance,
+                lateral_tolerance=self._base_lateral_tolerance,
+                bearing_tolerance_deg=self._base_bearing_tolerance_deg,
+                stable_time=self._base_stable_time,
+                sample_timeout=self._tag_timeout,
+            )
+        )
         self._active_tag_id: Optional[int] = None
         self._last_logged_state: Optional[ApproachState] = None
+        self._last_logged_base_state: Optional[ApproachState] = None
         self._timer = self.create_timer(1.0 / self._publish_rate, self._on_timer)
 
     def _declare_parameters(self) -> None:
@@ -107,6 +126,13 @@ class AprilTagApproachNode(Node):
         self.declare_parameter("stable_time", 0.8)
         self.declare_parameter("publish_rate", 20.0)
         self.declare_parameter("filter_window", 5)
+        # Base-frame values are provisional software-validation thresholds.
+        # They are not a calibrated grasp or gripper stopping target.
+        self.declare_parameter("base_target_forward", 0.50)
+        self.declare_parameter("base_forward_tolerance", 0.03)
+        self.declare_parameter("base_lateral_tolerance", 0.02)
+        self.declare_parameter("base_bearing_tolerance_deg", 5.0)
+        self.declare_parameter("base_stable_time", 0.8)
 
     def _load_and_validate_parameters(self) -> None:
         """Load parameters and reject ambiguous or unsafe configurations."""
@@ -137,6 +163,21 @@ class AprilTagApproachNode(Node):
         self._stable_time = float(self.get_parameter("stable_time").value)
         self._publish_rate = float(self.get_parameter("publish_rate").value)
         self._filter_window = int(self.get_parameter("filter_window").value)
+        self._base_target_forward = float(
+            self.get_parameter("base_target_forward").value
+        )
+        self._base_forward_tolerance = float(
+            self.get_parameter("base_forward_tolerance").value
+        )
+        self._base_lateral_tolerance = float(
+            self.get_parameter("base_lateral_tolerance").value
+        )
+        self._base_bearing_tolerance_deg = float(
+            self.get_parameter("base_bearing_tolerance_deg").value
+        )
+        self._base_stable_time = float(
+            self.get_parameter("base_stable_time").value
+        )
 
         if not self._source_frame:
             raise ValueError("source_frame must not be empty")
@@ -177,6 +218,14 @@ class AprilTagApproachNode(Node):
             lateral_tolerance=self._lateral_tolerance,
             angle_tolerance_deg=self._angle_tolerance_deg,
             stable_time=self._stable_time,
+        ).validate()
+        BaseAlignmentThresholds(
+            target_forward=self._base_target_forward,
+            forward_tolerance=self._base_forward_tolerance,
+            lateral_tolerance=self._base_lateral_tolerance,
+            bearing_tolerance_deg=self._base_bearing_tolerance_deg,
+            stable_time=self._base_stable_time,
+            sample_timeout=self._tag_timeout,
         ).validate()
         if self._tag_timeout < 0.0:
             raise ValueError("tag_timeout must not be negative")
@@ -269,20 +318,30 @@ class AprilTagApproachNode(Node):
         self._tag_id_pub.publish(Int32(data=-1))
         self._state_pub.publish(String(data=state.value))
         self._log_state_change(state)
+        self._publish_base_lost(now_seconds)
+
+    def _publish_base_lost(self, now_seconds: float) -> None:
+        """Publish base-frame loss and clear its temporal alignment history."""
+        state = self._base_state_machine.update(None, now_seconds, None)
+        self._base_state_pub.publish(String(data=state.value))
+        self._log_base_state_change(state)
 
     def _publish_base_outputs(self, camera_pose: PoseStamped) -> None:
         """Transform and publish one fresh camera pose in the configured base frame."""
         stamp = camera_pose.header.stamp
+        now_nanoseconds = self.get_clock().now().nanoseconds
+        now_seconds = now_nanoseconds / 1.0e9
         if not is_fresh_timestamp(
             stamp.sec,
             stamp.nanosec,
-            self.get_clock().now().nanoseconds,
+            now_nanoseconds,
             self._tag_timeout,
         ):
             self.get_logger().warning(
                 "Skipping base outputs for an invalid or stale camera pose stamp",
                 throttle_duration_sec=5.0,
             )
+            self._publish_base_lost(now_seconds)
             return
 
         try:
@@ -297,6 +356,7 @@ class AprilTagApproachNode(Node):
                 "Skipping base outputs because TF lookup failed: %s" % error,
                 throttle_duration_sec=5.0,
             )
+            self._publish_base_lost(now_seconds)
             return
 
         try:
@@ -308,12 +368,14 @@ class AprilTagApproachNode(Node):
                 "Skipping base outputs because pose transformation failed: %s" % error,
                 throttle_duration_sec=5.0,
             )
+            self._publish_base_lost(now_seconds)
             return
         if base_pose is None:
             self.get_logger().warning(
                 "Skipping base outputs because pose validation failed",
                 throttle_duration_sec=5.0,
             )
+            self._publish_base_lost(now_seconds)
             return
 
         try:
@@ -321,7 +383,19 @@ class AprilTagApproachNode(Node):
                 base_pose.pose.position.x, base_pose.pose.position.y
             )
         except ValueError:
+            self._publish_base_lost(now_seconds)
             return
+
+        state = self._base_state_machine.update(
+            BaseAlignmentMeasurement(
+                forward_distance=metrics.forward_distance,
+                lateral_error=metrics.lateral_error,
+                bearing=metrics.bearing,
+                stamp_seconds=(stamp.sec + stamp.nanosec / 1.0e9),
+            ),
+            now_seconds,
+            self._active_tag_id,
+        )
 
         self._base_pose_pub.publish(base_pose)
         self._base_forward_pub.publish(
@@ -329,6 +403,8 @@ class AprilTagApproachNode(Node):
         )
         self._base_lateral_pub.publish(Float64(data=metrics.lateral_error))
         self._base_bearing_pub.publish(Float64(data=metrics.bearing))
+        self._base_state_pub.publish(String(data=state.value))
+        self._log_base_state_change(state)
 
     def _publish_valid(
         self,
@@ -364,6 +440,14 @@ class AprilTagApproachNode(Node):
         if state != self._last_logged_state:
             self.get_logger().info("Alignment state changed to %s" % state.value)
             self._last_logged_state = state
+
+    def _log_base_state_change(self, state: ApproachState) -> None:
+        """Log base-frame state transitions once instead of every timer cycle."""
+        if state != self._last_logged_base_state:
+            self.get_logger().info(
+                "Base alignment state changed to %s" % state.value
+            )
+            self._last_logged_base_state = state
 
 
 def main(args: Optional[List[str]] = None) -> None:

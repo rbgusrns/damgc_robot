@@ -14,6 +14,10 @@ from rescue_robot_apriltag.approach_logic import (
     TagObservation,
     compute_measurement,
 )
+from rescue_robot_apriltag.base_alignment_logic import (
+    BaseAlignmentStateMachine,
+    BaseAlignmentThresholds,
+)
 from rescue_robot_apriltag.apriltag_approach_node import AprilTagApproachNode
 from rescue_robot_apriltag.base_pose import (
     compute_base_metrics,
@@ -282,20 +286,37 @@ class RecordingBuffer:
 
 def make_base_publish_harness(tf_buffer: object) -> SimpleNamespace:
     """Create the attributes used by the node's base-output branch."""
-    return SimpleNamespace(
+    harness = SimpleNamespace(
         _base_frame="base_link",
         _tf_lookup_timeout=0.0,
         _tag_timeout=1.0,
+        _active_tag_id=0,
         _tf_buffer=tf_buffer,
         _base_pose_pub=RecordingPublisher(),
         _base_forward_pub=RecordingPublisher(),
         _base_lateral_pub=RecordingPublisher(),
         _base_bearing_pub=RecordingPublisher(),
+        _base_state_pub=RecordingPublisher(),
+        _base_state_machine=BaseAlignmentStateMachine(
+            BaseAlignmentThresholds(
+                target_forward=0.50,
+                forward_tolerance=0.03,
+                lateral_tolerance=0.02,
+                bearing_tolerance_deg=5.0,
+                stable_time=0.8,
+                sample_timeout=1.0,
+            )
+        ),
+        _log_base_state_change=lambda _state: None,
         get_clock=lambda: SimpleNamespace(
             now=lambda: SimpleNamespace(nanoseconds=12_500_000_000)
         ),
         get_logger=lambda: SimpleNamespace(warning=lambda _message, **_kwargs: None),
     )
+    harness._publish_base_lost = lambda now_seconds: (
+        AprilTagApproachNode._publish_base_lost(harness, now_seconds)
+    )
+    return harness
 
 
 def test_node_base_branch_looks_up_input_pose_timestamp() -> None:
@@ -313,6 +334,7 @@ def test_node_base_branch_looks_up_input_pose_timestamp() -> None:
     assert harness._base_forward_pub.messages[0].data == pytest.approx(1.0)
     assert harness._base_lateral_pub.messages[0].data == pytest.approx(0.2)
     assert harness._base_bearing_pub.messages[0].data > 0.0
+    assert harness._base_state_pub.messages[0].data == ApproachState.TURN_LEFT.value
 
 
 def test_node_base_branch_publishes_nothing_on_tf_failure() -> None:
@@ -333,3 +355,42 @@ def test_node_base_branch_publishes_nothing_on_tf_failure() -> None:
     assert not harness._base_forward_pub.messages
     assert not harness._base_lateral_pub.messages
     assert not harness._base_bearing_pub.messages
+    assert harness._base_state_pub.messages[-1].data == ApproachState.TAG_LOST.value
+
+
+def test_camera_lost_cycle_also_publishes_base_tag_lost() -> None:
+    """A camera loss must not leave the previous base state looking current."""
+    camera_state_machine = SimpleNamespace(
+        update=lambda _measurement, _now, _tag_id: ApproachState.TAG_LOST
+    )
+    harness = SimpleNamespace(
+        _translation_filter=SimpleNamespace(reset=lambda: None),
+        _active_tag_id=0,
+        _state_machine=camera_state_machine,
+        _base_state_machine=BaseAlignmentStateMachine(
+            BaseAlignmentThresholds(
+                target_forward=0.50,
+                forward_tolerance=0.03,
+                lateral_tolerance=0.02,
+                bearing_tolerance_deg=5.0,
+                stable_time=0.8,
+                sample_timeout=1.0,
+            )
+        ),
+        _detected_pub=RecordingPublisher(),
+        _tag_id_pub=RecordingPublisher(),
+        _state_pub=RecordingPublisher(),
+        _base_state_pub=RecordingPublisher(),
+        _log_state_change=lambda _state: None,
+        _log_base_state_change=lambda _state: None,
+    )
+    harness._publish_base_lost = lambda now_seconds: (
+        AprilTagApproachNode._publish_base_lost(harness, now_seconds)
+    )
+
+    AprilTagApproachNode._publish_lost(harness, 10.0)
+
+    assert harness._detected_pub.messages[-1].data is False
+    assert harness._tag_id_pub.messages[-1].data == -1
+    assert harness._state_pub.messages[-1].data == ApproachState.TAG_LOST.value
+    assert harness._base_state_pub.messages[-1].data == ApproachState.TAG_LOST.value

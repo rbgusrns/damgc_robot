@@ -22,3 +22,11 @@
     stable_time: 0.8
     publish_rate: 20.0
     filter_window: 5
+
+    # Provisional base_link alignment values for topic-level software testing.
+    # These are not a calibrated grasp distance or a physical gripper target.
+    base_target_forward: 0.50
+    base_forward_tolerance: 0.03
+    base_lateral_tolerance: 0.02
+    base_bearing_tolerance_deg: 5.0
+    base_stable_time: 0.8
