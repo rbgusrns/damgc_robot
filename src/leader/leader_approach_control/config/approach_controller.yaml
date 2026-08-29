@@ -11,7 +11,7 @@
     # Keep target_forward equal to rescue_robot_apriltag's base_target_forward.
     # It is not a calibrated grasp or physical gripper target.
     # Gains and raw limits are not final motor tuning or a final safety clamp.
-    target_forward: 0.50
+    target_forward: 0.25
     linear_gain: 0.20
     angular_gain: 0.80
     lateral_gain: 0.50
