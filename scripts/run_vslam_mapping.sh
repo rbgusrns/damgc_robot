@@ -28,6 +28,10 @@ export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
 export FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS:-UDPv4}"
 VSLAM_HEADLESS="${VSLAM_HEADLESS:-0}"
 VSLAM_ONLY="${VSLAM_ONLY:-0}"
+STM32_I2C_DEVICE="${STM32_I2C_DEVICE:-/dev/i2c-7}"
+STM32_I2C_ADDRESS="${STM32_I2C_ADDRESS:-66}"
+STM32_I2C_POLL_HZ="${STM32_I2C_POLL_HZ:-500.0}"
+STM32_I2C_WRITE_ENABLED="${STM32_I2C_WRITE_ENABLED:-1}"
 
 if [[ "${VSLAM_HEADLESS}" != "0" && "${VSLAM_HEADLESS}" != "1" ]] || \
   [[ "${VSLAM_ONLY}" != "0" && "${VSLAM_ONLY}" != "1" ]]; then
@@ -37,6 +41,15 @@ fi
 if [[ "${VSLAM_ONLY}" == "1" && "${VSLAM_HEADLESS}" != "1" ]]; then
   printf 'VSLAM_ONLY=1 also requires VSLAM_HEADLESS=1.\n' >&2
   exit 1
+fi
+if [[ "${STM32_I2C_WRITE_ENABLED}" != "0" && \
+      "${STM32_I2C_WRITE_ENABLED}" != "1" ]]; then
+  printf 'STM32_I2C_WRITE_ENABLED must be 0 or 1.\n' >&2
+  exit 1
+fi
+STM32_I2C_WRITE_ARG="false"
+if [[ "${STM32_I2C_WRITE_ENABLED}" == "1" ]]; then
+  STM32_I2C_WRITE_ARG="true"
 fi
 
 mkdir -p "${RUNTIME_ROOT}" "${LOG_DIR}"
@@ -222,7 +235,12 @@ setsid bash -lc "
   source /opt/ros/humble/setup.bash
   source /home/maze/stm32_bridge_install/setup.bash
   exec ros2 launch stm32_bridge stm32_bridge.launch.py \\
-    port:=/dev/ttyTHS1 baudrate:=460800 namespace:=leader
+    transport:=i2c \\
+    i2c_device:='${STM32_I2C_DEVICE}' \\
+    i2c_address:='${STM32_I2C_ADDRESS}' \\
+    i2c_poll_hz:='${STM32_I2C_POLL_HZ}' \\
+    i2c_write_enabled:='${STM32_I2C_WRITE_ARG}' \\
+    namespace:=leader
 " >"${LOG_DIR}/stm32_bridge.log" 2>&1 &
 HOST_PIDS+=("$!")
 

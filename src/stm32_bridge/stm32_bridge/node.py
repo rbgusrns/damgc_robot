@@ -10,15 +10,22 @@ from sensor_msgs.msg import Imu
 from std_msgs.msg import String, UInt32
 
 from . import protocol
+from .transport import I2cTransport, SerialTransport
 
 
 class Stm32Bridge(Node):
     def __init__(self):
         super().__init__("stm32_bridge")
-        # Jetson Orin 40-pin header pins 8/10 are commonly ttyTHS1 on
-        # JetPack 6. Override this parameter if the carrier maps them to THS0.
+        # Leader default: Jetson Orin header pins 3/5, exposed as i2c-7.
+        self.declare_parameter("transport", "i2c")
+        self.declare_parameter("i2c_device", "/dev/i2c-7")
+        self.declare_parameter("i2c_address", 0x42)
+        self.declare_parameter("i2c_read_size", 64)
+        self.declare_parameter("i2c_poll_hz", 500.0)
+        self.declare_parameter("i2c_write_enabled", True)
+        # UART remains available as an explicit fallback.
         self.declare_parameter("port", "/dev/ttyTHS1")
-        self.declare_parameter("baudrate", 460800)
+        self.declare_parameter("baudrate", 230400)
         self.declare_parameter("frame_id", "odom")
         self.declare_parameter("child_frame_id", "base_link")
         self.declare_parameter("imu_frame_id", "imu_link")
@@ -30,14 +37,17 @@ class Stm32Bridge(Node):
         self.declare_parameter("ticks_per_revolution", 5131)
         self.declare_parameter("cmd_timeout_ms", 200)
         self.declare_parameter("reconnect_period_s", 1.0)
-        self._serial = None
-        self._serial_lock = threading.Lock()
+        self._transport = None
+        self._transport_lock = threading.Lock()
         self._parser = protocol.FrameParser()
         self._last_rx_time = None
         self._rx_frames = 0
+        self._rx_polls = 0
+        self._rx_empty_polls = 0
         self._rx_sequence_drops = 0
         self._last_rx_seq = None
-        self._serial_error_logged = False
+        self._transport_error_logged = False
+        self._last_i2c_frame = None
         self._tx_seq = 0
         self._last_cmd = Twist()
         self._last_cmd_time = 0.0
@@ -45,42 +55,79 @@ class Stm32Bridge(Node):
         self._right_ticks = None
         self._x = self._y = self._yaw = 0.0
         self._last_wheel_time = None
-        self._open_serial()
+        self._open_transport()
         self._imu_pub = self.create_publisher(Imu, "imu/data_raw", 20)
         self._odom_pub = self.create_publisher(Odometry, "odom/raw", 20)
         self._state_pub = self.create_publisher(String, "system_state", 10)
         self._rx_count_pub = self.create_publisher(UInt32, "stm32_rx/frame_count", 10)
+        self._rx_poll_pub = self.create_publisher(UInt32, "stm32_rx/poll_count", 10)
+        self._rx_empty_pub = self.create_publisher(UInt32, "stm32_rx/empty_poll_count", 10)
         self._rx_crc_pub = self.create_publisher(UInt32, "stm32_rx/crc_errors", 10)
         self._rx_drop_pub = self.create_publisher(UInt32, "stm32_rx/sequence_drops", 10)
         self.create_subscription(Twist, "cmd_vel", self._cmd_callback, 20)
-        self.create_timer(0.005, self._read_serial)
+        poll_hz = float(self.get_parameter("i2c_poll_hz").value)
+        if poll_hz <= 0.0:
+            raise ValueError("i2c_poll_hz must be greater than zero")
+        self.create_timer(1.0 / poll_hz, self._read_transport)
         self.create_timer(0.02, self._send_velocity)
         self.create_timer(float(self.get_parameter("reconnect_period_s").value), self._reconnect)
         self.create_timer(1.0, self._publish_rx_stats)
 
-    def _open_serial(self):
+    def _open_transport(self):
         try:
-            import serial
-            self._serial = serial.Serial(self.get_parameter("port").value,
-                                         int(self.get_parameter("baudrate").value), timeout=0)
-            self._serial_error_logged = False
-            self.get_logger().info(f"Opened STM32 UART {self._serial.port}")
+            transport_name = str(self.get_parameter("transport").value).lower()
+            if transport_name == "i2c":
+                self._transport = I2cTransport(
+                    str(self.get_parameter("i2c_device").value),
+                    int(self.get_parameter("i2c_address").value),
+                    int(self.get_parameter("i2c_read_size").value),
+                )
+            elif transport_name == "uart":
+                self._transport = SerialTransport(
+                    str(self.get_parameter("port").value),
+                    int(self.get_parameter("baudrate").value),
+                )
+            else:
+                raise ValueError(f"unsupported transport: {transport_name}")
+            self._transport_error_logged = False
+            self.get_logger().info(f"Opened STM32 {self._transport.description}")
+            if (transport_name == "i2c"
+                    and not bool(self.get_parameter("i2c_write_enabled").value)):
+                self.get_logger().warning(
+                    "STM32 I2C command writes are disabled; bridge is receive-only")
         except Exception as exc:
-            self._serial = None
-            if not self._serial_error_logged:
-                self.get_logger().error(f"Cannot open STM32 UART: {exc}")
-                self._serial_error_logged = True
+            self._transport = None
+            if not self._transport_error_logged:
+                self.get_logger().error(f"Cannot open STM32 transport: {exc}")
+                self._transport_error_logged = True
+
+    def _close_transport(self):
+        if self._transport is not None:
+            try:
+                self._transport.close()
+            except Exception:
+                pass
+            self._transport = None
+
+    def _transport_failed(self, operation, exc):
+        if not self._transport_error_logged:
+            self.get_logger().error(f"STM32 {operation} failed: {exc}")
+            self._transport_error_logged = True
+        self._close_transport()
 
     def _reconnect(self):
-        if self._serial is None or not self._serial.is_open:
-            self._open_serial()
+        if self._transport is None or not self._transport.is_open:
+            self._open_transport()
 
     def _cmd_callback(self, msg):
         self._last_cmd = msg
         self._last_cmd_time = time.monotonic()
 
     def _send_velocity(self):
-        if self._serial is None or not self._serial.is_open:
+        if self._transport is None or not self._transport.is_open:
+            return
+        if (str(self.get_parameter("transport").value).lower() == "i2c"
+                and not bool(self.get_parameter("i2c_write_enabled").value)):
             return
         age_ms = (time.monotonic() - self._last_cmd_time) * 1000.0
         active = age_ms <= float(self.get_parameter("cmd_timeout_ms").value)
@@ -94,23 +141,30 @@ class Stm32Bridge(Node):
                                                        max(-32768, min(32767, right)), 200, flags)
         frame = protocol.encode_frame(protocol.CMD_VELOCITY, self._tx_seq, payload)
         self._tx_seq = (self._tx_seq + 1) & 0xFFFF
-        with self._serial_lock:
-            self._serial.write(frame)
+        try:
+            with self._transport_lock:
+                self._transport.write(frame)
+        except Exception as exc:
+            self._transport_failed("write", exc)
 
-    def _read_serial(self):
-        if self._serial is None or not self._serial.is_open:
+    def _read_transport(self):
+        if self._transport is None or not self._transport.is_open:
             return
         try:
-            with self._serial_lock:
-                data = self._serial.read(self._serial.in_waiting or 1)
+            with self._transport_lock:
+                data = self._transport.read()
+            self._rx_polls += 1
+            if not data:
+                self._rx_empty_polls += 1
         except Exception as exc:
-            self.get_logger().error(f"STM32 UART read failed: {exc}")
-            try:
-                self._serial.close()
-            except Exception:
-                pass
+            self._transport_failed("read", exc)
             return
         for msg_type, seq, flags, payload in self._parser.feed(data):
+            frame_identity = (msg_type, seq, flags, payload)
+            if (str(self.get_parameter("transport").value).lower() == "i2c"
+                    and frame_identity == self._last_i2c_frame):
+                continue
+            self._last_i2c_frame = frame_identity
             self._rx_frames += 1
             self._last_rx_time = time.monotonic()
             if self._last_rx_seq is not None:
@@ -133,6 +187,8 @@ class Stm32Bridge(Node):
     def _publish_rx_stats(self):
         for publisher, value in (
             (self._rx_count_pub, self._rx_frames),
+            (self._rx_poll_pub, self._rx_polls),
+            (self._rx_empty_pub, self._rx_empty_polls),
             (self._rx_crc_pub, self._parser.crc_errors),
             (self._rx_drop_pub, self._rx_sequence_drops),
         ):
@@ -211,7 +267,10 @@ def main(args=None):
     node = Stm32Bridge()
     try:
         rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     finally:
+        node._close_transport()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

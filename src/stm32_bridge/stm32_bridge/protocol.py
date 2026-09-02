@@ -1,4 +1,4 @@
-"""Binary protocol for the Orin–STM32 UART link."""
+"""Transport-independent binary protocol for the Orin–STM32 link."""
 
 import struct
 
