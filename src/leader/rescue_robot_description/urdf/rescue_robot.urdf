@@ -419,5 +419,20 @@
     <child link="imu_link"/>
     <origin xyz="0 0 0.040" rpy="0 0 0"/>
   </joint>
+  <link name="cad_model_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh
+          filename="package://rescue_robot_description/meshes/robot_cad.stl"
+          scale="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+  </link>
 
+  <joint name="base_link_to_cad_model" type="fixed">
+    <parent link="base_link"/>
+    <child link="cad_model_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
 </robot>

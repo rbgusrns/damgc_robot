@@ -16,6 +16,12 @@ def generate_launch_description():
         "rescue_robot.urdf"
     )
 
+    rviz_path = os.path.join(
+        package_path,
+        "rviz",
+        "urdf_model.rviz"
+    )
+
     with open(urdf_path, "r", encoding="utf-8") as file:
         robot_description = file.read()
 
@@ -32,8 +38,8 @@ def generate_launch_description():
         Node(
             package="rviz2",
             executable="rviz2",
-            output="screen"
+            output="screen",
+            arguments=["-d", rviz_path]
         )
     ])
-
 
