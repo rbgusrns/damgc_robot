@@ -57,9 +57,9 @@ class VelocityGuardNode(Node):
             "%.3frad/s)"
             % (
                 self._enabled,
-                self._parameters.command_timeout,
-                self._parameters.max_linear_speed,
-                self._parameters.max_angular_speed,
+                self._guard_parameters.command_timeout,
+                self._guard_parameters.max_linear_speed,
+                self._guard_parameters.max_angular_speed,
             )
         )
 
@@ -94,7 +94,7 @@ class VelocityGuardNode(Node):
         self._shutdown_stop_count = int(
             self.get_parameter("shutdown_stop_count").value
         )
-        self._parameters = GuardParameters(
+        self._guard_parameters = GuardParameters(
             max_linear_speed=float(
                 self.get_parameter("max_linear_speed").value
             ),
@@ -120,7 +120,7 @@ class VelocityGuardNode(Node):
             raise ValueError("publish_rate must be finite and greater than zero")
         if self._shutdown_stop_count < 1:
             raise ValueError("shutdown_stop_count must be at least one")
-        self._parameters.validate()
+        self._guard_parameters.validate()
 
     def _on_command(self, message: Twist) -> None:
         """Validate each raw command and discard invalid data immediately."""
@@ -131,7 +131,7 @@ class VelocityGuardNode(Node):
             message.angular.x,
             message.angular.y,
             message.angular.z,
-            self._parameters,
+            self._guard_parameters,
         )
         now_seconds = time.monotonic()
         if command is None:
@@ -171,7 +171,7 @@ class VelocityGuardNode(Node):
             or not command_is_fresh(
                 now_seconds,
                 self._last_received_seconds,
-                self._parameters.command_timeout,
+                self._guard_parameters.command_timeout,
             )
         ):
             self._force_zero(now_seconds)
@@ -186,7 +186,7 @@ class VelocityGuardNode(Node):
                 self._last_output,
                 self._last_command,
                 elapsed,
-                self._parameters,
+                self._guard_parameters,
             )
             self._last_output_seconds = now_seconds
         self._safe_pub.publish(self._to_twist(self._last_output))

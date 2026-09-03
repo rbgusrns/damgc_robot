@@ -20,7 +20,7 @@
 - 팔로워: USB 카메라, AprilTag 검출, 기존 camera-frame 상태, exact-stamp TF2 기반
   `base_link` pose·metric·상태, raw approach controller, STOP/APPROACH/COOPERATION
   command selector, 최종 safety guard와 `/follower/safe_cmd_vel`
-- 추가 구현: STM32 UART binary protocol, IMU·wheel state 수신, `/cmd_vel` UART
+- 추가 구현: STM32 I2C/UART binary protocol, IMU·wheel state 수신, `/cmd_vel`
   전달, wheel odometry 원시 계산, 엔코더·IMU/VSLAM dual EKF 융합 설정, 모터
   속도 PID와 watchdog
 - 확인됨: STM32 wheel/IMU 수신, dual EKF·Visual SLAM·nvblox 동시 실행,
@@ -29,10 +29,10 @@
 - 아직 없음: 사람 탐지, Nav2, 그리퍼 연동, Mission Coordinator, 실물
   리더–팔로워 협동 운반
 
-Leader와 Follower AprilTag pipeline은 `base_link` 상태에서 software-only 최종 속도 토픽까지
-구현되어 있습니다. `/leader/cmd_vel`과 `/follower/safe_cmd_vel`은 아직
-STM32/UART/motor에 연결하지 않았으며, 실제 이동 전에는 hardware E-stop과 bridge
-watchdog을 별도로 검증해야 합니다.
+Leader AprilTag pipeline은 guarded `/leader/cmd_vel`에서 I2C STM32 bridge와 motor까지
+통합되어 있습니다. Follower의 `/follower/safe_cmd_vel`은 아직 motor에 연결하지
+않았습니다. 실제 이동 전에는 hardware E-stop과 bridge watchdog을 별도로 확인해야
+합니다.
 
 ## 빌드
 
@@ -118,6 +118,20 @@ AprilTag 확인 시 실제 태그 ID 0과 5 cm 크기의 `tag36h11` 태그를 �
 두어야 검출 결과와 태그 TF가 출력됩니다.
 
 ## 리더 AprilTag base-link velocity pipeline
+
+실제 Leader 주행은 다음 통합 launch를 사용합니다. Approach controller는 자동으로
+enabled되지만 velocity guard는 disabled로 시작하므로, 안전 확인 후 사용자가 guard를
+명시적으로 enable하기 전까지 motor command는 zero로 유지됩니다.
+
+```bash
+ros2 launch rescue_robot_bringup leader_apriltag_drive.launch.py
+```
+
+빌드, 상태 확인, 주행 시작·정지와 I2C troubleshooting은
+[Leader AprilTag Drive Run Guide](src/leader/rescue_robot_bringup/docs/LEADER_APRILTAG_DRIVE_RUN_GUIDE.md)를
+따릅니다.
+
+아래 명령은 STM32를 연결하지 않고 각 software component를 따로 시험할 때 사용합니다.
 
 기본 `camera_apriltag.launch.py`는 detection까지만 실행하며, 기존 camera-frame 상태와
 신규 base-link pose·metric·상태까지 함께 실행하려면 `enable_approach:=true`를 지정합니다.

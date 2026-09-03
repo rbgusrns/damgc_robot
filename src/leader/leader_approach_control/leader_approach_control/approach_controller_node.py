@@ -86,9 +86,9 @@ class ApproachControllerNode(Node):
             "(%.3fm/s, %.3frad/s)"
             % (
                 self._enabled,
-                self._parameters.target_forward,
-                self._parameters.max_raw_linear_speed,
-                self._parameters.max_raw_angular_speed,
+                self._control_parameters.target_forward,
+                self._control_parameters.max_raw_linear_speed,
+                self._control_parameters.max_raw_angular_speed,
             )
         )
 
@@ -126,7 +126,7 @@ class ApproachControllerNode(Node):
         self._sync_tolerance = float(
             self.get_parameter("sample_sync_tolerance").value
         )
-        self._parameters = ControllerParameters(
+        self._control_parameters = ControllerParameters(
             target_forward=float(self.get_parameter("target_forward").value),
             linear_gain=float(self.get_parameter("linear_gain").value),
             angular_gain=float(self.get_parameter("angular_gain").value),
@@ -157,7 +157,7 @@ class ApproachControllerNode(Node):
             raise ValueError("controller_pose_timeout must be greater than zero")
         if self._sync_tolerance < 0.0:
             raise ValueError("sample_sync_tolerance must not be negative")
-        self._parameters.validate()
+        self._control_parameters.validate()
 
     def _on_detected(self, message: Bool) -> None:
         """Invalidate cached control data across detection transitions."""
@@ -267,7 +267,7 @@ class ApproachControllerNode(Node):
         command = compute_approach_command(
             self._coherent_state or TAG_LOST,
             self._measurement,
-            self._parameters,
+            self._control_parameters,
             enabled=self._enabled,
             detected=self._detected,
             tag_valid=self._selected_tag_id == self._target_tag_id,
