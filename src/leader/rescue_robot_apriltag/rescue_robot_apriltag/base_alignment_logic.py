@@ -169,7 +169,7 @@ def is_blind_final_approach_eligible(
     final_target_distance: float,
     activation_max_tag_x: float,
     max_distance: float,
-    last_tag_max_age: float,
+    handoff_max_age: float,
     yaw_tolerance: float,
     cross_track_tolerance: float,
     odometry_valid: bool,
@@ -188,7 +188,7 @@ def is_blind_final_approach_eligible(
         last_valid_yaw_error,
         last_valid_cross_track,
         activation_max_tag_x,
-        last_tag_max_age,
+        handoff_max_age,
         yaw_tolerance,
         cross_track_tolerance,
     )
@@ -196,13 +196,13 @@ def is_blind_final_approach_eligible(
         return False
     if (
         activation_max_tag_x <= 0.0
-        or last_tag_max_age < 0.0
+        or handoff_max_age < 0.0
         or yaw_tolerance < 0.0
         or cross_track_tolerance < 0.0
     ):
         return False
     age = now_seconds - last_valid_timestamp
-    if age < 0.0 or age > last_tag_max_age:
+    if age < 0.0 or age > handoff_max_age:
         return False
     if last_valid_tag_x > activation_max_tag_x:
         return False

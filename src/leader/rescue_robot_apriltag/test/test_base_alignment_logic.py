@@ -328,7 +328,7 @@ def test_blind_eligibility_requires_visual_final_approach_and_fresh_alignment() 
         final_target_distance=0.20,
         activation_max_tag_x=0.30,
         max_distance=0.12,
-        last_tag_max_age=0.25,
+        handoff_max_age=0.40,
         yaw_tolerance=radians(4.0),
         cross_track_tolerance=0.015,
         odometry_valid=True,
@@ -345,6 +345,37 @@ def test_blind_eligibility_requires_visual_final_approach_and_fresh_alignment() 
         invalid = dict(kwargs)
         invalid[key] = value
         assert not is_blind_final_approach_eligible(**invalid)
+
+
+@pytest.mark.parametrize(
+    ("age", "expected"),
+    [
+        (0.20, True),
+        (0.25, True),
+        (0.30, True),
+        (0.39, True),
+        (0.41, False),
+    ],
+)
+def test_handoff_age_is_separate_from_sample_loss_age(
+    age: float, expected: bool
+) -> None:
+    assert is_blind_final_approach_eligible(
+        enabled=True,
+        phase=final_approach_decision(),
+        last_valid_tag_x=0.26,
+        last_valid_timestamp=10.0,
+        now_seconds=10.0 + age,
+        last_valid_yaw_error=0.0,
+        last_valid_cross_track=0.0,
+        final_target_distance=0.20,
+        activation_max_tag_x=0.30,
+        max_distance=0.12,
+        handoff_max_age=0.40,
+        yaw_tolerance=radians(4.0),
+        cross_track_tolerance=0.015,
+        odometry_valid=True,
+    ) is expected
 
 
 @pytest.mark.parametrize(
@@ -367,7 +398,7 @@ def test_blind_eligibility_rejects_non_final_phases(phase) -> None:
         final_target_distance=0.20,
         activation_max_tag_x=0.30,
         max_distance=0.12,
-        last_tag_max_age=0.25,
+        handoff_max_age=0.40,
         yaw_tolerance=radians(4.0),
         cross_track_tolerance=0.015,
         odometry_valid=True,
@@ -408,7 +439,7 @@ def test_blind_eligibility_rejects_nonfinite_cached_tag_data() -> None:
         final_target_distance=0.20,
         activation_max_tag_x=0.30,
         max_distance=0.12,
-        last_tag_max_age=0.25,
+        handoff_max_age=0.40,
         yaw_tolerance=radians(4.0),
         cross_track_tolerance=0.015,
         odometry_valid=True,

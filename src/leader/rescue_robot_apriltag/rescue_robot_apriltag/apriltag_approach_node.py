@@ -223,6 +223,7 @@ class AprilTagApproachNode(Node):
         self.declare_parameter("blind_activation_max_tag_x", 0.30)
         self.declare_parameter("blind_max_distance", 0.12)
         self.declare_parameter("blind_last_tag_max_age", 0.25)
+        self.declare_parameter("blind_handoff_max_age", 0.40)
         self.declare_parameter("blind_max_duration", 5.0)
         self.declare_parameter("odom_topic", "/leader/odom/raw")
 
@@ -309,6 +310,9 @@ class AprilTagApproachNode(Node):
         self._blind_last_tag_max_age = float(
             self.get_parameter("blind_last_tag_max_age").value
         )
+        self._blind_handoff_max_age = float(
+            self.get_parameter("blind_handoff_max_age").value
+        )
         self._blind_max_duration = float(
             self.get_parameter("blind_max_duration").value
         )
@@ -347,6 +351,7 @@ class AprilTagApproachNode(Node):
             self._blind_activation_max_tag_x,
             self._blind_max_distance,
             self._blind_last_tag_max_age,
+            self._blind_handoff_max_age,
             self._blind_max_duration,
         )
         if not all(isfinite(value) for value in numeric_values):
@@ -401,6 +406,10 @@ class AprilTagApproachNode(Node):
             raise ValueError("blind_max_distance must not be negative")
         if self._blind_last_tag_max_age < 0.0:
             raise ValueError("blind_last_tag_max_age must not be negative")
+        if self._blind_handoff_max_age <= self._blind_last_tag_max_age:
+            raise ValueError(
+                "blind_handoff_max_age must exceed blind_last_tag_max_age"
+            )
         if self._blind_max_duration <= 0.0:
             raise ValueError("blind_max_duration must be positive")
         if not self._odom_topic:
@@ -601,7 +610,7 @@ class AprilTagApproachNode(Node):
             final_target_distance=self._final_target_distance,
             activation_max_tag_x=self._blind_activation_max_tag_x,
             max_distance=self._blind_max_distance,
-            last_tag_max_age=self._blind_last_tag_max_age,
+            handoff_max_age=self._blind_handoff_max_age,
             yaw_tolerance=self._final_yaw_tolerance_deg * 3.141592653589793 / 180.0,
             cross_track_tolerance=self._final_position_tolerance,
             odometry_valid=True,

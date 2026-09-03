@@ -348,6 +348,8 @@ colcon test-result --verbose
 ros2 param get /leader/apriltag_approach blind_final_approach_enabled
 ros2 param get /leader/apriltag_approach blind_activation_max_tag_x
 ros2 param get /leader/apriltag_approach blind_max_distance
+ros2 param get /leader/apriltag_approach blind_last_tag_max_age
+ros2 param get /leader/apriltag_approach blind_handoff_max_age
 ros2 topic echo /leader/alignment/blind_final_approach_active
 ros2 topic echo /leader/alignment/last_valid_tag_x
 ros2 topic echo /leader/alignment/blind_planned_distance
@@ -359,7 +361,8 @@ ros2 topic echo /leader/approach/cmd_vel_raw
 ros2 topic echo /leader/cmd_vel
 ```
 
-Tag가 보이는 동안에는 기존 `COARSE_TRACK`, `NEAR_ALIGN`, `RECENTER`,
+`blind_last_tag_max_age`는 `0.25 s`, `blind_handoff_max_age`는 `0.40 s`이며 후자가 더
+큰지 확인한다. Tag가 보이는 동안에는 기존 `COARSE_TRACK`, `NEAR_ALIGN`, `RECENTER`,
 `FINAL_YAW_ALIGN`, `FINAL_APPROACH` 흐름과 command가 이전과 같아야 한다.
 
 ### 19.3 Close-range positive test
@@ -367,9 +370,9 @@ Tag가 보이는 동안에는 기존 `COARSE_TRACK`, `NEAR_ALIGN`, `RECENTER`,
 Final approach에서 다음을 확인한다.
 
 ```text
-last_valid_tag_x ≈ 0.27 m
+last_valid_tag_x ≈ 0.26 m
 final_target_distance = 0.20 m
-planned_blind_distance ≈ 0.07 m
+planned_blind_distance ≈ 0.06 m
 ```
 
 Tag를 가까이 이동시켜 image에서 사라지게 하면, 직전 phase가 aligned
@@ -381,6 +384,11 @@ blind_active = true
 linear.x > 0, low speed
 angular.z = 0
 ```
+
+새 source stamp가 약 `0.25 s` 동안 갱신되지 않아 loss candidate가 되어도, callback이
+약 `0.30 s`에 실행된 경우 `blind_handoff_max_age=0.40 s` 안에 있으므로 blind handoff가
+가능해야 한다. 반대로 source stamp가 계속 증가하면 visual FINAL_APPROACH를 유지하고
+blind를 시작하지 않아야 한다.
 
 `odom_forward_progress`가 증가하여 계획 거리 이상이 되면 command는 즉시
 `linear.x=0`, `angular.z=0`이 되고 public state가 `ALIGNED`가 된다.
@@ -395,7 +403,7 @@ blind mode가 시작되지 않아야 한다.
 ### 19.4 Wheels-up and ground test
 
 먼저 바퀴를 들어 올린 상태에서 Tag를 근접 loss시켜 blind mode 진입, forward-only command,
-progress, completion zero를 확인한다. 이후 ground low-speed test에서 약 7 cm만 추가 이동하는지
+progress, completion zero를 확인한다. 이후 ground low-speed test에서 약 6 cm만 추가 이동하는지
 확인한다. Blind 중 회전이나 reverse가 나오면 즉시 emergency stop한다.
 
 ### 19.5 Negative regression tests

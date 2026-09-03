@@ -655,6 +655,7 @@ def test_close_range_freshness_can_plan_before_global_tag_timeout() -> None:
         _last_valid_yaw_error=0.0,
         _last_valid_cross_track=0.0,
         _blind_last_tag_max_age=0.25,
+        _blind_handoff_max_age=0.40,
         _final_target_distance=0.20,
         _blind_max_distance=0.12,
         _blind_final_approach_enabled=True,

@@ -354,7 +354,8 @@ TAG_LOST ─ valid ▼                              │ tag lost/invalid
               ALIGNED
 
 Any phase + final target behind tolerance → TOO_CLOSE → zero
-Any phase + lost/invalid/stale          → TAG_LOST → zero
+Ineligible/far phase + lost/invalid/stale → TAG_LOST → zero
+Eligible final close-range loss          → blind handoff evaluation
 ```
 
 ## 24. Parameters table
@@ -517,6 +518,25 @@ distance·valid odometry를 모두 만족하는 경우에만 internal mode
 `BLIND_FINAL_APPROACH`를 사용한다. `FINE_ALIGN_LEFT/RIGHT`, TURN, COARSE, NEAR,
 RECENTER 중 loss는 항상 stop한다.
 
+### 31.2.1 Sample-loss timeout과 visual handoff age
+
+두 freshness 값은 서로 다른 목적을 가진다. `blind_last_tag_max_age`는 새 source Tag
+sample이 없다고 판단하는 loss detection timeout이고, `blind_handoff_max_age`는 loss를
+감지한 뒤 마지막 valid visual snapshot을 odometry handoff에 사용할 수 있는 최대 age다.
+기존처럼 하나의 `0.25 s` 값을 두 판단에 함께 사용하면 `0.25 s` 이후 loss를 판단하는
+순간 같은 snapshot이 이미 handoff 불가가 되는 논리 충돌이 발생한다. 현재 기본값은
+다음과 같다.
+
+```text
+sample-loss timeout = blind_last_tag_max_age = 0.25 s
+visual handoff age  = blind_handoff_max_age  = 0.40 s
+```
+
+따라서 실제 callback이 마지막 sample 뒤 `0.30 s`에 실행되어도 loss candidate가 되고,
+visual age `0.30 s <= 0.40 s`이므로 나머지 strict eligibility를 평가할 수 있다.
+`blind_handoff_max_age`는 `blind_last_tag_max_age`보다 커야 하며, 너무 오래된 visual
+snapshot을 blind 주행에 사용하지 않도록 `0.40 s` 상한을 유지한다.
+
 ### 31.3 거리와 odometry
 
 `last_valid_tag_x`는 camera optical `z`가 아니라 `base_link`의 +X 전방 거리다.
@@ -572,7 +592,8 @@ Blind-final `ALIGNED`는 마지막 valid fine-aligned visual pose와 짧은 odom
 | `blind_final_approach_enabled` | `true` | bool | fallback enable |
 | `blind_activation_max_tag_x` | `0.30` | m | blind 허용 최대 base +X |
 | `blind_max_distance` | `0.12` | m | 계획 가능한 최대 remaining distance |
-| `blind_last_tag_max_age` | `0.25` | s | 마지막 valid pose freshness |
+| `blind_last_tag_max_age` | `0.25` | s | 새 sample loss detection timeout |
+| `blind_handoff_max_age` | `0.40` | s | visual-to-odometry handoff 최대 age |
 | `blind_max_duration` | `5.0` | s | blind watchdog |
 | `odom_topic` | `/leader/odom/raw` | topic | 기존 Leader wheel odometry |
 | `blind_final_speed` | `0.015` | m/s | blind forward speed; final speed 이하 |
