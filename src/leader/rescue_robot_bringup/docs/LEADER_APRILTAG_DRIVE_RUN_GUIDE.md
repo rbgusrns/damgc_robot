@@ -1,7 +1,7 @@
 # Leader AprilTag Drive Run Guide
 
-Tag orientation을 사용하는 최종 정렬의 target pose, parameter, RViz 및 단계별 실차
-검증은 [Leader Tag-Normal 최종 정렬 검증 가이드](../../rescue_robot_apriltag/docs/LEADER_TAG_NORMAL_ALIGNMENT_VALIDATION_GUIDE.md)를
+Far center tracking과 near Tag-normal 정렬을 결합한 target pose, parameter 및 실차
+검증은 [Leader Hybrid 정렬 검증 가이드](../../rescue_robot_apriltag/docs/LEADER_HYBRID_TAG_ALIGNMENT_VALIDATION_GUIDE.md)를
 함께 따른다.
 
 ## 1. 목적
@@ -130,13 +130,14 @@ AprilTag 상태를 계속 확인하려면 다음을 실행한다. 종료하려�
 
 ```bash
 ros2 topic echo /leader/base_alignment/state
+ros2 topic echo /leader/alignment/control_mode
 ```
 
 | 상태 | 의미 |
 |---|---|
-| `TURN_LEFT` | pre-align target 방향으로 좌회전이 필요하다. |
-| `TURN_RIGHT` | pre-align target 방향으로 우회전이 필요하다. |
-| `APPROACH` | pre-align target을 향해 접근한다. |
+| `TURN_LEFT` | COARSE center tracking 또는 FOV RECENTER 좌회전이다. |
+| `TURN_RIGHT` | COARSE center tracking 또는 FOV RECENTER 우회전이다. |
+| `APPROACH` | FAR center tracking 또는 bounded NEAR normal alignment 접근이다. |
 | `FINE_ALIGN_LEFT` / `FINE_ALIGN_RIGHT` | tag normal 기반 final yaw 제자리 정렬이 필요하다. |
 | `FINAL_APPROACH` | final target까지 낮은 속도로 접근한다. |
 | `TOO_CLOSE` | final target을 지나 후진 없이 복구할 수 없어 정지한다. |

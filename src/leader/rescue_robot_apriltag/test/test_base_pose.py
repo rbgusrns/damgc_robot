@@ -1,6 +1,6 @@
 """Tests for validated Leader base-frame pose conversion and metrics."""
 
-from math import atan2, cos, inf, nan, pi, radians, sqrt
+from math import atan2, cos, inf, nan, pi, radians, sin, sqrt
 from types import SimpleNamespace
 from typing import Tuple
 
@@ -27,8 +27,27 @@ from rescue_robot_apriltag.base_pose import (
     is_fresh_timestamp,
     normalize_angle,
     rotate_tag_z_to_base_xy,
+    select_robot_facing_normal,
     transform_pose_preserving_stamp,
 )
+
+
+def make_alignment_thresholds() -> BaseAlignmentThresholds:
+    return BaseAlignmentThresholds(
+        orientation_engage_distance=0.40,
+        orientation_disengage_distance=0.43,
+        turn_enter_error_deg=8.0,
+        turn_exit_error_deg=3.0,
+        tag_recenter_enter_deg=18.0,
+        tag_recenter_exit_deg=11.0,
+        near_normal_correction_limit_deg=6.0,
+        pre_align_position_tolerance=0.02,
+        final_position_tolerance=0.015,
+        final_yaw_tolerance_deg=4.0,
+        final_realign_yaw_error_deg=8.0,
+        stable_time=0.8,
+        sample_timeout=1.0,
+    )
 
 
 def make_pose(
@@ -127,9 +146,27 @@ def test_targets_are_on_apriltag_printed_front_side_at_configured_distances() ->
     assert geometry.target_yaw == pytest.approx(0.0)
 
 
-def test_target_geometry_rejects_tag_normal_pointing_away_from_robot() -> None:
+def test_robot_facing_normal_is_kept_and_opposite_normal_is_flipped() -> None:
+    assert select_robot_facing_normal(0.50, 0.0, -1.0, 0.0) == pytest.approx(
+        (-1.0, 0.0)
+    )
+    assert select_robot_facing_normal(0.50, 0.0, 1.0, 0.0) == pytest.approx(
+        (-1.0, 0.0)
+    )
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        (0.0, 0.0, 1.0, 0.0),
+        (1.0, 0.0, 0.0, 0.0),
+        (1.0, 0.0, nan, 0.0),
+        (1.0, 0.0, 0.0, 1.0),
+    ],
+)
+def test_robot_facing_normal_rejects_invalid_or_ambiguous_vectors(values) -> None:
     with pytest.raises(ValueError):
-        compute_target_geometry(0.50, 0.0, 1.0, 0.0, 0.30, 0.20)
+        select_robot_facing_normal(*values)
 
 
 def test_measured_leader_tf_outward_normal_produces_front_side_targets() -> None:
@@ -158,17 +195,10 @@ def test_robot_looking_at_tag_from_the_side_must_not_be_aligned() -> None:
     )
     assert geometry.final_position_error > 0.015
     assert abs(geometry.final_yaw_error) > radians(4.0)
-    machine = BaseAlignmentStateMachine(
-        BaseAlignmentThresholds(
-            pre_align_position_tolerance=0.02,
-            pre_align_heading_tolerance_deg=5.0,
-            final_position_tolerance=0.015,
-            final_yaw_tolerance_deg=4.0,
-            stable_time=0.8,
-            sample_timeout=1.0,
-        )
-    )
+    machine = BaseAlignmentStateMachine(make_alignment_thresholds())
     measurement = BaseAlignmentMeasurement(
+        0.50,
+        0.0,
         geometry.prealign_x,
         geometry.prealign_y,
         geometry.final_x,
@@ -176,8 +206,50 @@ def test_robot_looking_at_tag_from_the_side_must_not_be_aligned() -> None:
         geometry.final_yaw_error,
         10.0,
     )
-    state = machine.update(measurement, 10.0, 0)
-    assert state not in {ApproachState.STABILIZING, ApproachState.ALIGNED}
+    decision = machine.update(measurement, 10.0, 0)
+    assert decision.state not in {ApproachState.STABILIZING, ApproachState.ALIGNED}
+
+
+def test_tilted_tag_geometry_can_reach_correct_alignment() -> None:
+    tilt = radians(30.0)
+    normal = (-cos(tilt), -sin(tilt))
+    initial = compute_target_geometry(
+        0.50, 0.20, normal[0], normal[1], 0.30, 0.20
+    )
+    assert initial.target_yaw == pytest.approx(tilt)
+
+    # At the generated final pose, rotate world vectors into the new base frame.
+    relative_tag_world = (
+        0.50 - initial.final_x,
+        0.20 - initial.final_y,
+    )
+    c = cos(-initial.target_yaw)
+    s = sin(-initial.target_yaw)
+    tag_x = c * relative_tag_world[0] - s * relative_tag_world[1]
+    tag_y = s * relative_tag_world[0] + c * relative_tag_world[1]
+    normal_x = c * normal[0] - s * normal[1]
+    normal_y = s * normal[0] + c * normal[1]
+    reached = compute_target_geometry(
+        tag_x, tag_y, normal_x, normal_y, 0.30, 0.20
+    )
+    assert reached.final_position_error == pytest.approx(0.0, abs=1.0e-12)
+    assert reached.final_yaw_error == pytest.approx(0.0, abs=1.0e-12)
+
+    decision = BaseAlignmentStateMachine(make_alignment_thresholds()).update(
+        BaseAlignmentMeasurement(
+            tag_x,
+            tag_y,
+            reached.prealign_x,
+            reached.prealign_y,
+            reached.final_x,
+            reached.final_y,
+            reached.final_yaw_error,
+            10.0,
+        ),
+        10.0,
+        0,
+    )
+    assert decision.state == ApproachState.STABILIZING
 
 
 def test_angle_wraparound_uses_short_rotation() -> None:
@@ -403,19 +475,11 @@ def make_base_publish_harness(tf_buffer: object) -> SimpleNamespace:
         _prealign_target_pub=RecordingPublisher(),
         _final_target_pub=RecordingPublisher(),
         _control_target_pub=RecordingPublisher(),
+        _control_mode_pub=RecordingPublisher(),
         _final_position_error_pub=RecordingPublisher(),
         _final_yaw_error_pub=RecordingPublisher(),
         _base_state_pub=RecordingPublisher(),
-        _base_state_machine=BaseAlignmentStateMachine(
-            BaseAlignmentThresholds(
-                pre_align_position_tolerance=0.02,
-                pre_align_heading_tolerance_deg=5.0,
-                final_position_tolerance=0.015,
-                final_yaw_tolerance_deg=4.0,
-                stable_time=0.8,
-                sample_timeout=1.0,
-            )
-        ),
+        _base_state_machine=BaseAlignmentStateMachine(make_alignment_thresholds()),
         _log_base_state_change=lambda _state: None,
         get_clock=lambda: SimpleNamespace(
             now=lambda: SimpleNamespace(nanoseconds=12_500_000_000)
@@ -428,6 +492,11 @@ def make_base_publish_harness(tf_buffer: object) -> SimpleNamespace:
     harness._make_target_pose = lambda base_pose, geometry, prealign: (
         AprilTagApproachNode._make_target_pose(
             harness, base_pose, geometry, prealign=prealign
+        )
+    )
+    harness._make_control_pose = lambda base_pose, geometry, decision: (
+        AprilTagApproachNode._make_control_pose(
+            harness, base_pose, geometry, decision
         )
     )
     return harness
@@ -489,20 +558,12 @@ def test_camera_lost_cycle_also_publishes_base_tag_lost() -> None:
         _normal_filter=SimpleNamespace(reset=lambda: None),
         _active_tag_id=0,
         _state_machine=camera_state_machine,
-        _base_state_machine=BaseAlignmentStateMachine(
-            BaseAlignmentThresholds(
-                pre_align_position_tolerance=0.02,
-                pre_align_heading_tolerance_deg=5.0,
-                final_position_tolerance=0.015,
-                final_yaw_tolerance_deg=4.0,
-                stable_time=0.8,
-                sample_timeout=1.0,
-            )
-        ),
+        _base_state_machine=BaseAlignmentStateMachine(make_alignment_thresholds()),
         _detected_pub=RecordingPublisher(),
         _tag_id_pub=RecordingPublisher(),
         _state_pub=RecordingPublisher(),
         _base_state_pub=RecordingPublisher(),
+        _control_mode_pub=RecordingPublisher(),
         _log_state_change=lambda _state: None,
         _log_base_state_change=lambda _state: None,
     )

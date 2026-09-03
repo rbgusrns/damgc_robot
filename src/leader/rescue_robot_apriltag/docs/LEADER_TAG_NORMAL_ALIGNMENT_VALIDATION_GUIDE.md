@@ -1,5 +1,11 @@
 # Leader Tag-Normal 최종 정렬 검증 가이드
 
+> **Historical / superseded:** 이 문서는 먼 거리부터 pre-align point를 직접 추종했던
+> 첫 orientation 기반 구현을 기록한다. 실차에서 과도한 회전, FOV 이탈, `TAG_LOST`,
+> 지그재그가 확인되어 현재는 hybrid 방식으로 대체됐다. 현재 설계와 검증 절차는
+> [Hybrid algorithm](LEADER_HYBRID_TAG_ALIGNMENT_ALGORITHM.md) 및
+> [Hybrid validation guide](LEADER_HYBRID_TAG_ALIGNMENT_VALIDATION_GUIDE.md)를 사용한다.
+
 ## 1. 목적과 알고리즘
 
 기존 알고리즘은 태그 중심의 `base_forward_distance`, `base_lateral_error`,

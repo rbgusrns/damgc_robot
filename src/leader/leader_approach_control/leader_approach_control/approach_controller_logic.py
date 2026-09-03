@@ -31,6 +31,25 @@ KNOWN_STATES = frozenset(
     }
 )
 
+COARSE_TRACK = "COARSE_TRACK"
+NEAR_ALIGN = "NEAR_ALIGN"
+RECENTER = "RECENTER"
+FINAL_YAW_ALIGN = "FINAL_YAW_ALIGN"
+
+KNOWN_MODES = frozenset(
+    {
+        TAG_LOST,
+        COARSE_TRACK,
+        NEAR_ALIGN,
+        RECENTER,
+        FINAL_YAW_ALIGN,
+        FINAL_APPROACH,
+        STABILIZING,
+        ALIGNED,
+        TOO_CLOSE,
+    }
+)
+
 
 @dataclass(frozen=True)
 class ControllerParameters:
@@ -41,6 +60,7 @@ class ControllerParameters:
     lateral_gain: float
     max_raw_linear_speed: float
     max_raw_angular_speed: float
+    near_max_angular_speed: float
     max_final_linear_speed: float
     max_final_angular_speed: float
 
@@ -52,6 +72,7 @@ class ControllerParameters:
             self.lateral_gain,
             self.max_raw_linear_speed,
             self.max_raw_angular_speed,
+            self.near_max_angular_speed,
             self.max_final_linear_speed,
             self.max_final_angular_speed,
         )
@@ -67,6 +88,10 @@ class ControllerParameters:
             raise ValueError("max_raw_linear_speed must be greater than zero")
         if self.max_raw_angular_speed <= 0.0:
             raise ValueError("max_raw_angular_speed must be greater than zero")
+        if not 0.0 < self.near_max_angular_speed <= self.max_raw_angular_speed:
+            raise ValueError(
+                "near_max_angular_speed must be positive and no greater than raw max"
+            )
         if not 0.0 < self.max_final_linear_speed <= self.max_raw_linear_speed:
             raise ValueError(
                 "max_final_linear_speed must be positive and no greater than raw max"
@@ -151,6 +176,7 @@ def samples_are_coherent(
 
 def compute_approach_command(
     state: str,
+    mode: str,
     measurement: Optional[BaseControlMeasurement],
     parameters: ControllerParameters,
     *,
@@ -169,6 +195,7 @@ def compute_approach_command(
         or not fresh
         or not coherent
         or state not in KNOWN_STATES
+        or mode not in KNOWN_MODES
         or measurement is None
     ):
         return PlanarCommand()
@@ -183,19 +210,39 @@ def compute_approach_command(
     if state in {TAG_LOST, TOO_CLOSE, STABILIZING, ALIGNED}:
         return PlanarCommand()
 
+    valid_state_modes = {
+        COARSE_TRACK: {TURN_LEFT, TURN_RIGHT, APPROACH},
+        NEAR_ALIGN: {APPROACH},
+        RECENTER: {TURN_LEFT, TURN_RIGHT},
+        FINAL_YAW_ALIGN: {FINE_ALIGN_LEFT, FINE_ALIGN_RIGHT},
+        FINAL_APPROACH: {FINAL_APPROACH},
+    }
+    if state not in valid_state_modes.get(mode, set()):
+        return PlanarCommand()
+
     target_bearing = atan2(measurement.target_y, measurement.target_x)
 
     if state == TURN_LEFT:
+        angular_limit = (
+            parameters.near_max_angular_speed
+            if mode == RECENTER
+            else parameters.max_raw_angular_speed
+        )
         angular = clamp(
             parameters.angular_gain * target_bearing,
-            parameters.max_raw_angular_speed,
+            angular_limit,
         )
         return PlanarCommand(angular_z=angular) if angular > 0.0 else PlanarCommand()
 
     if state == TURN_RIGHT:
+        angular_limit = (
+            parameters.near_max_angular_speed
+            if mode == RECENTER
+            else parameters.max_raw_angular_speed
+        )
         angular = clamp(
             parameters.angular_gain * target_bearing,
-            parameters.max_raw_angular_speed,
+            angular_limit,
         )
         return PlanarCommand(angular_z=angular) if angular < 0.0 else PlanarCommand()
 
@@ -207,22 +254,27 @@ def compute_approach_command(
             * hypot(measurement.target_x, measurement.target_y),
             parameters.max_raw_linear_speed,
         )
+        angular_limit = (
+            parameters.near_max_angular_speed
+            if mode == NEAR_ALIGN
+            else parameters.max_raw_angular_speed
+        )
         angular = clamp(
             parameters.angular_gain * target_bearing,
-            parameters.max_raw_angular_speed,
+            angular_limit,
         )
         return PlanarCommand(linear_x=linear, angular_z=angular)
 
     if state == FINE_ALIGN_LEFT:
         angular = clamp(
             parameters.angular_gain * measurement.target_yaw,
-            parameters.max_raw_angular_speed,
+            parameters.max_final_angular_speed,
         )
         return PlanarCommand(angular_z=angular) if angular > 0.0 else PlanarCommand()
     if state == FINE_ALIGN_RIGHT:
         angular = clamp(
             parameters.angular_gain * measurement.target_yaw,
-            parameters.max_raw_angular_speed,
+            parameters.max_final_angular_speed,
         )
         return PlanarCommand(angular_z=angular) if angular < 0.0 else PlanarCommand()
 

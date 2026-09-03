@@ -14,5 +14,6 @@
     lateral_gain: 0.50
     max_raw_linear_speed: 0.05
     max_raw_angular_speed: 0.20
+    near_max_angular_speed: 0.10
     max_final_linear_speed: 0.02
     max_final_angular_speed: 0.08

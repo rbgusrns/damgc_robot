@@ -13,6 +13,7 @@ from std_msgs.msg import Bool, Int32, String
 from std_srvs.srv import SetBool
 
 from leader_approach_control.approach_controller_logic import (
+    KNOWN_MODES,
     KNOWN_STATES,
     TAG_LOST,
     BaseControlMeasurement,
@@ -54,6 +55,12 @@ class ApproachControllerNode(Node):
             self._on_state,
             INPUT_QOS,
         )
+        self._mode_sub = self.create_subscription(
+            String,
+            "alignment/control_mode",
+            self._on_mode,
+            INPUT_QOS,
+        )
         self._detected_sub = self.create_subscription(
             Bool,
             "supply/detected",
@@ -78,6 +85,9 @@ class ApproachControllerNode(Node):
         self._latest_pose_generation = 0
         self._coherent_generation: Optional[int] = None
         self._coherent_state: Optional[str] = None
+        self._mode_generation: Optional[int] = None
+        self._coherent_mode: Optional[str] = None
+        self._mode_received_seconds: Optional[float] = None
         self._timer = self.create_timer(
             1.0 / self._publish_rate, self._on_timer
         )
@@ -109,6 +119,7 @@ class ApproachControllerNode(Node):
         self.declare_parameter("lateral_gain", 0.50)
         self.declare_parameter("max_raw_linear_speed", 0.05)
         self.declare_parameter("max_raw_angular_speed", 0.20)
+        self.declare_parameter("near_max_angular_speed", 0.10)
         self.declare_parameter("max_final_linear_speed", 0.02)
         self.declare_parameter("max_final_angular_speed", 0.08)
 
@@ -137,6 +148,9 @@ class ApproachControllerNode(Node):
             ),
             max_raw_angular_speed=float(
                 self.get_parameter("max_raw_angular_speed").value
+            ),
+            near_max_angular_speed=float(
+                self.get_parameter("near_max_angular_speed").value
             ),
             max_final_linear_speed=float(
                 self.get_parameter("max_final_linear_speed").value
@@ -219,6 +233,19 @@ class ApproachControllerNode(Node):
         self._latest_pose_generation += 1
         self._coherent_generation = None
         self._coherent_state = None
+        self._mode_generation = None
+        self._coherent_mode = None
+        self._mode_received_seconds = None
+
+    def _on_mode(self, message: String) -> None:
+        """Bind a known control mode to the latest target-pose generation."""
+        mode = str(message.data)
+        if mode not in KNOWN_MODES or self._measurement is None:
+            self._invalidate_sample()
+            return
+        self._mode_generation = self._latest_pose_generation
+        self._coherent_mode = mode
+        self._mode_received_seconds = time.monotonic()
 
     def _on_state(self, message: String) -> None:
         """Bind a known state only to the pose received immediately before it."""
@@ -231,8 +258,10 @@ class ApproachControllerNode(Node):
             state not in KNOWN_STATES
             or self._measurement is None
             or self._pose_received_seconds is None
+            or self._mode_generation != self._latest_pose_generation
+            or self._mode_received_seconds is None
             or not samples_are_coherent(
-                self._pose_received_seconds,
+                self._mode_received_seconds,
                 received_seconds,
                 self._sync_tolerance,
             )
@@ -279,6 +308,7 @@ class ApproachControllerNode(Node):
         )
         command = compute_approach_command(
             self._coherent_state or TAG_LOST,
+            self._coherent_mode or TAG_LOST,
             self._measurement,
             self._control_parameters,
             enabled=self._enabled,
@@ -296,6 +326,9 @@ class ApproachControllerNode(Node):
         self._pose_received_seconds = None
         self._coherent_generation = None
         self._coherent_state = None
+        self._mode_generation = None
+        self._coherent_mode = None
+        self._mode_received_seconds = None
 
     @staticmethod
     def _pose_is_valid(message: PoseStamped) -> bool:

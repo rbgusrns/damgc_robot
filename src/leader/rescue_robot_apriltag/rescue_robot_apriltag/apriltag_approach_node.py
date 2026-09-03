@@ -31,6 +31,7 @@ from rescue_robot_apriltag.approach_logic import (
     select_observation,
 )
 from rescue_robot_apriltag.base_alignment_logic import (
+    AlignmentDecision,
     BaseAlignmentMeasurement,
     BaseAlignmentStateMachine,
     BaseAlignmentThresholds,
@@ -42,6 +43,7 @@ from rescue_robot_apriltag.base_pose import (
     compute_target_geometry,
     is_fresh_timestamp,
     rotate_tag_z_to_base_xy,
+    select_robot_facing_normal,
     transform_pose_preserving_stamp,
 )
 
@@ -87,6 +89,9 @@ class AprilTagApproachNode(Node):
         self._base_state_pub = self.create_publisher(
             String, "base_alignment/state", 10
         )
+        self._control_mode_pub = self.create_publisher(
+            String, "alignment/control_mode", 10
+        )
         self._normal_heading_pub = self.create_publisher(
             Float64, "alignment/tag_normal_heading", 10
         )
@@ -119,12 +124,23 @@ class AprilTagApproachNode(Node):
         )
         self._base_state_machine = BaseAlignmentStateMachine(
             BaseAlignmentThresholds(
-                pre_align_position_tolerance=self._pre_align_position_tolerance,
-                pre_align_heading_tolerance_deg=(
-                    self._pre_align_heading_tolerance_deg
+                orientation_engage_distance=self._orientation_engage_distance,
+                orientation_disengage_distance=(
+                    self._orientation_disengage_distance
                 ),
+                turn_enter_error_deg=self._turn_enter_error_deg,
+                turn_exit_error_deg=self._turn_exit_error_deg,
+                tag_recenter_enter_deg=self._tag_recenter_enter_deg,
+                tag_recenter_exit_deg=self._tag_recenter_exit_deg,
+                near_normal_correction_limit_deg=(
+                    self._near_normal_correction_limit_deg
+                ),
+                pre_align_position_tolerance=self._pre_align_position_tolerance,
                 final_position_tolerance=self._final_position_tolerance,
                 final_yaw_tolerance_deg=self._final_yaw_tolerance_deg,
+                final_realign_yaw_error_deg=(
+                    self._final_realign_yaw_error_deg
+                ),
                 stable_time=self._base_stable_time,
                 sample_timeout=self._tag_timeout,
             )
@@ -153,10 +169,17 @@ class AprilTagApproachNode(Node):
         self.declare_parameter("filter_window", 5)
         self.declare_parameter("pre_align_distance", 0.30)
         self.declare_parameter("final_target_distance", 0.20)
+        self.declare_parameter("orientation_engage_distance", 0.40)
+        self.declare_parameter("orientation_disengage_distance", 0.43)
+        self.declare_parameter("turn_enter_error_deg", 8.0)
+        self.declare_parameter("turn_exit_error_deg", 3.0)
+        self.declare_parameter("tag_recenter_enter_deg", 18.0)
+        self.declare_parameter("tag_recenter_exit_deg", 11.0)
+        self.declare_parameter("near_normal_correction_limit_deg", 6.0)
         self.declare_parameter("pre_align_position_tolerance", 0.02)
-        self.declare_parameter("pre_align_heading_tolerance_deg", 5.0)
         self.declare_parameter("final_position_tolerance", 0.015)
         self.declare_parameter("final_yaw_tolerance_deg", 4.0)
+        self.declare_parameter("final_realign_yaw_error_deg", 8.0)
         self.declare_parameter("base_stable_time", 0.8)
 
     def _load_and_validate_parameters(self) -> None:
@@ -194,17 +217,38 @@ class AprilTagApproachNode(Node):
         self._final_target_distance = float(
             self.get_parameter("final_target_distance").value
         )
+        self._orientation_engage_distance = float(
+            self.get_parameter("orientation_engage_distance").value
+        )
+        self._orientation_disengage_distance = float(
+            self.get_parameter("orientation_disengage_distance").value
+        )
+        self._turn_enter_error_deg = float(
+            self.get_parameter("turn_enter_error_deg").value
+        )
+        self._turn_exit_error_deg = float(
+            self.get_parameter("turn_exit_error_deg").value
+        )
+        self._tag_recenter_enter_deg = float(
+            self.get_parameter("tag_recenter_enter_deg").value
+        )
+        self._tag_recenter_exit_deg = float(
+            self.get_parameter("tag_recenter_exit_deg").value
+        )
+        self._near_normal_correction_limit_deg = float(
+            self.get_parameter("near_normal_correction_limit_deg").value
+        )
         self._pre_align_position_tolerance = float(
             self.get_parameter("pre_align_position_tolerance").value
-        )
-        self._pre_align_heading_tolerance_deg = float(
-            self.get_parameter("pre_align_heading_tolerance_deg").value
         )
         self._final_position_tolerance = float(
             self.get_parameter("final_position_tolerance").value
         )
         self._final_yaw_tolerance_deg = float(
             self.get_parameter("final_yaw_tolerance_deg").value
+        )
+        self._final_realign_yaw_error_deg = float(
+            self.get_parameter("final_realign_yaw_error_deg").value
         )
         self._base_stable_time = float(
             self.get_parameter("base_stable_time").value
@@ -251,16 +295,29 @@ class AprilTagApproachNode(Node):
             stable_time=self._stable_time,
         ).validate()
         BaseAlignmentThresholds(
+            orientation_engage_distance=self._orientation_engage_distance,
+            orientation_disengage_distance=self._orientation_disengage_distance,
+            turn_enter_error_deg=self._turn_enter_error_deg,
+            turn_exit_error_deg=self._turn_exit_error_deg,
+            tag_recenter_enter_deg=self._tag_recenter_enter_deg,
+            tag_recenter_exit_deg=self._tag_recenter_exit_deg,
+            near_normal_correction_limit_deg=(
+                self._near_normal_correction_limit_deg
+            ),
             pre_align_position_tolerance=self._pre_align_position_tolerance,
-            pre_align_heading_tolerance_deg=self._pre_align_heading_tolerance_deg,
             final_position_tolerance=self._final_position_tolerance,
             final_yaw_tolerance_deg=self._final_yaw_tolerance_deg,
+            final_realign_yaw_error_deg=self._final_realign_yaw_error_deg,
             stable_time=self._base_stable_time,
             sample_timeout=self._tag_timeout,
         ).validate()
         if not self._pre_align_distance > self._final_target_distance > 0.0:
             raise ValueError(
                 "pre_align_distance must be greater than final_target_distance > 0"
+            )
+        if self._pre_align_distance >= self._orientation_engage_distance:
+            raise ValueError(
+                "orientation_engage_distance must exceed pre_align_distance"
             )
         if self._final_target_distance <= self._final_position_tolerance:
             raise ValueError(
@@ -365,9 +422,10 @@ class AprilTagApproachNode(Node):
     def _publish_base_lost(self, now_seconds: float) -> None:
         """Publish base-frame loss and clear its temporal alignment history."""
         self._normal_filter.reset()
-        state = self._base_state_machine.update(None, now_seconds, None)
-        self._base_state_pub.publish(String(data=state.value))
-        self._log_base_state_change(state)
+        decision = self._base_state_machine.update(None, now_seconds, None)
+        self._control_mode_pub.publish(String(data=decision.mode.value))
+        self._base_state_pub.publish(String(data=decision.state.value))
+        self._log_base_state_change(decision.state)
 
     def _publish_base_outputs(self, camera_pose: PoseStamped) -> None:
         """Transform and publish one fresh camera pose in the configured base frame."""
@@ -434,10 +492,22 @@ class AprilTagApproachNode(Node):
                     orientation.w,
                 )
             )
+            normal_x, normal_y = select_robot_facing_normal(
+                base_pose.pose.position.x,
+                base_pose.pose.position.y,
+                normal_x,
+                normal_y,
+            )
             normal_x, normal_y = self._normal_filter.add(
                 normal_x,
                 normal_y,
                 stamp.sec * 1_000_000_000 + stamp.nanosec,
+            )
+            normal_x, normal_y = select_robot_facing_normal(
+                base_pose.pose.position.x,
+                base_pose.pose.position.y,
+                normal_x,
+                normal_y,
             )
             geometry = compute_target_geometry(
                 base_pose.pose.position.x,
@@ -456,8 +526,10 @@ class AprilTagApproachNode(Node):
             self._publish_base_lost(now_seconds)
             return
 
-        state = self._base_state_machine.update(
+        decision = self._base_state_machine.update(
             BaseAlignmentMeasurement(
+                tag_x=base_pose.pose.position.x,
+                tag_y=base_pose.pose.position.y,
                 prealign_x=geometry.prealign_x,
                 prealign_y=geometry.prealign_y,
                 final_x=geometry.final_x,
@@ -471,16 +543,7 @@ class AprilTagApproachNode(Node):
 
         prealign_pose = self._make_target_pose(base_pose, geometry, prealign=True)
         final_pose = self._make_target_pose(base_pose, geometry, prealign=False)
-        control_pose = (
-            prealign_pose
-            if state
-            in {
-                ApproachState.TURN_LEFT,
-                ApproachState.TURN_RIGHT,
-                ApproachState.APPROACH,
-            }
-            else final_pose
-        )
+        control_pose = self._make_control_pose(base_pose, geometry, decision)
 
         self._base_pose_pub.publish(base_pose)
         self._base_forward_pub.publish(
@@ -499,10 +562,27 @@ class AprilTagApproachNode(Node):
         self._final_yaw_error_pub.publish(
             Float64(data=geometry.final_yaw_error)
         )
-        # Publish the authoritative control sample immediately before its state.
+        # Publish the authoritative sample, mode, then state as one generation.
         self._control_target_pub.publish(control_pose)
-        self._base_state_pub.publish(String(data=state.value))
-        self._log_base_state_change(state)
+        self._control_mode_pub.publish(String(data=decision.mode.value))
+        self._base_state_pub.publish(String(data=decision.state.value))
+        self._log_base_state_change(decision.state)
+
+    def _make_control_pose(
+        self,
+        base_pose: PoseStamped,
+        geometry: TargetGeometry,
+        decision: AlignmentDecision,
+    ) -> PoseStamped:
+        """Encode the state machine's active planar command-space target."""
+        target = PoseStamped()
+        target.header = base_pose.header
+        target.pose.position.x = decision.control_x
+        target.pose.position.y = decision.control_y
+        target.pose.position.z = 0.0
+        target.pose.orientation.z = sin(geometry.target_yaw / 2.0)
+        target.pose.orientation.w = cos(geometry.target_yaw / 2.0)
+        return target
 
     def _make_target_pose(
         self,

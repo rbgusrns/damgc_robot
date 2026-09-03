@@ -46,13 +46,14 @@ def normalize_angle(angle: float) -> float:
 def rotate_tag_z_to_base_xy(
     quaternion: Sequence[float], projection_epsilon: float = 1.0e-6
 ) -> Tuple[float, float]:
-    """Return the normalized base-XY projection of the tag's outward +Z axis.
+    """
+    Return the normalized base-XY projection of the tag frame's +Z axis.
 
-    The installed ``apriltag_ros`` TF was verified on the Leader hardware: for
-    a front-facing detection tag +Z points from the printed face toward the
-    observing robot.  The supplied quaternion already represents the tag frame
-    in ``base_link``; extracting Euler yaw from it would use the wrong pair of
-    axes for a generally tilted tag.
+    The tag-frame Z axis is perpendicular to the AprilTag plane.  Its sign is
+    intentionally not interpreted here; ``select_robot_facing_normal`` chooses
+    between the +Z and -Z candidates from current geometry.  The quaternion is
+    already expressed in ``base_link``, so extracting optical-frame Euler yaw
+    would use the wrong axes for a generally tilted tag.
     """
     normalized = normalize_quaternion(quaternion)
     if normalized is None:
@@ -67,6 +68,48 @@ def rotate_tag_z_to_base_xy(
     if not isfinite(projection_norm) or projection_norm <= projection_epsilon:
         raise ValueError("Tag normal has no usable base-XY projection")
     return normal_x / projection_norm, normal_y / projection_norm
+
+
+def select_robot_facing_normal(
+    tag_x: float,
+    tag_y: float,
+    normal_x: float,
+    normal_y: float,
+    direction_epsilon: float = 1.0e-6,
+) -> Tuple[float, float]:
+    """
+    Select the projected tag-normal sign that points toward the robot.
+
+    A plane normal is geometrically ambiguous up to sign.  Compare the supplied
+    candidate with the direction from the tag to the current ``base_link``
+    origin and flip it when necessary.  This deliberately does not assume that
+    a detector's local +Z or -Z is always the printed-front direction.
+    """
+    values = (tag_x, tag_y, normal_x, normal_y, direction_epsilon)
+    if not all(isfinite(value) for value in values):
+        raise ValueError("Tag position, normal, and epsilon must be finite")
+    if direction_epsilon <= 0.0:
+        raise ValueError("direction_epsilon must be positive")
+
+    tag_range = hypot(tag_x, tag_y)
+    normal_norm = hypot(normal_x, normal_y)
+    if tag_range <= direction_epsilon or normal_norm <= direction_epsilon:
+        raise ValueError("Tag position and projected normal must be non-zero")
+
+    candidate_x = normal_x / normal_norm
+    candidate_y = normal_y / normal_norm
+    robot_direction_x = -tag_x / tag_range
+    robot_direction_y = -tag_y / tag_range
+    dot = (
+        candidate_x * robot_direction_x
+        + candidate_y * robot_direction_y
+    )
+    if not isfinite(dot) or abs(dot) <= direction_epsilon:
+        raise ValueError("Projected tag normal has ambiguous robot-facing sign")
+    if dot < 0.0:
+        candidate_x = -candidate_x
+        candidate_y = -candidate_y
+    return candidate_x, candidate_y
 
 
 class PlanarNormalMedianFilter:
@@ -130,13 +173,9 @@ def compute_target_geometry(
     tag_range = hypot(tag_x, tag_y)
     if normal_norm <= 1.0e-6 or tag_range <= 1.0e-6:
         raise ValueError("Tag position and projected normal must be non-zero")
-    outward_x = normal_x / normal_norm
-    outward_y = normal_y / normal_norm
-    # On the verified Leader TF, tag +Z points from the tag toward the robot.
-    # The vector from base origin to the tag points the other way, so their dot
-    # product must be negative for a normal front-side observation.
-    if outward_x * tag_x + outward_y * tag_y >= 0.0:
-        raise ValueError("Tag +Z does not point from the tag toward the robot")
+    outward_x, outward_y = select_robot_facing_normal(
+        tag_x, tag_y, normal_x / normal_norm, normal_y / normal_norm
+    )
 
     prealign_x = tag_x + pre_align_distance * outward_x
     prealign_y = tag_y + pre_align_distance * outward_y

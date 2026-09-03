@@ -27,8 +27,15 @@
     # desired base_link origin and remain initial values pending grasp tuning.
     pre_align_distance: 0.30
     final_target_distance: 0.20
+    orientation_engage_distance: 0.40
+    orientation_disengage_distance: 0.43
+    turn_enter_error_deg: 8.0
+    turn_exit_error_deg: 3.0
+    tag_recenter_enter_deg: 18.0
+    tag_recenter_exit_deg: 11.0
+    near_normal_correction_limit_deg: 6.0
     pre_align_position_tolerance: 0.02
-    pre_align_heading_tolerance_deg: 5.0
     final_position_tolerance: 0.015
     final_yaw_tolerance_deg: 4.0
+    final_realign_yaw_error_deg: 8.0
     base_stable_time: 0.8
