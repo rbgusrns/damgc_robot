@@ -3,8 +3,8 @@
 from math import nan
 from types import SimpleNamespace
 
-from geometry_msgs.msg import PoseStamped
-from std_msgs.msg import String
+from geometry_msgs.msg import Pose
+from leader_alignment_msgs.msg import LeaderAlignmentCommand
 
 from leader_approach_control.approach_controller_logic import (
     BaseControlMeasurement,
@@ -13,13 +13,11 @@ from leader_approach_control.approach_controller_logic import (
 from leader_approach_control.approach_controller_node import ApproachControllerNode
 
 
-def make_pose() -> PoseStamped:
+def make_pose() -> Pose:
     """Create a finite forward-facing base pose."""
-    pose = PoseStamped()
-    pose.header.frame_id = "base_link"
-    pose.header.stamp.sec = 10
-    pose.pose.position.x = 0.60
-    pose.pose.orientation.w = 1.0
+    pose = Pose()
+    pose.position.x = 0.60
+    pose.orientation.w = 1.0
     return pose
 
 
@@ -40,41 +38,48 @@ def test_pose_validation_accepts_finite_planar_target_pose() -> None:
 
 def test_pose_validation_rejects_nonfinite_or_invalid_quaternion() -> None:
     pose = make_pose()
-    pose.pose.position.y = nan
+    pose.position.y = nan
     assert not ApproachControllerNode._pose_is_valid(pose)
 
     pose = make_pose()
-    pose.pose.orientation.w = 0.0
+    pose.orientation.w = 0.0
     assert not ApproachControllerNode._pose_is_valid(pose)
 
 
 def test_pose_validation_allows_negative_target_for_stop_state() -> None:
     pose = make_pose()
-    pose.pose.position.x = -0.01
+    pose.position.x = -0.01
     assert ApproachControllerNode._pose_is_valid(pose)
 
 
-def test_mode_is_bound_to_latest_pose_generation() -> None:
-    harness = SimpleNamespace(
-        _measurement=BaseControlMeasurement(0.1, 0.0, 0.0),
-        _latest_pose_generation=7,
-        _mode_generation=None,
-        _coherent_mode=None,
-        _mode_received_seconds=None,
-        _invalidate_sample=lambda: None,
-    )
-    ApproachControllerNode._on_mode(harness, String(data="NEAR_ALIGN"))
-    assert harness._mode_generation == 7
-    assert harness._coherent_mode == "NEAR_ALIGN"
-    assert harness._mode_received_seconds is not None
+def make_command(mode="NEAR_ALIGN", state="APPROACH") -> LeaderAlignmentCommand:
+    command = LeaderAlignmentCommand()
+    command.header.frame_id = "base_link"
+    command.header.stamp.sec = 10
+    command.target_pose = make_pose()
+    command.control_mode = mode
+    command.alignment_state = state
+    return command
 
 
-def test_unknown_mode_invalidates_cached_sample() -> None:
+def test_command_contains_coherent_pose_mode_and_state() -> None:
+    command = make_command()
+    assert command.control_mode == "NEAR_ALIGN"
+    assert command.alignment_state == "APPROACH"
+    assert command.target_pose.position.x == 0.60
+
+
+def test_invalid_command_mode_is_rejected_by_contract() -> None:
     invalidated = []
     harness = SimpleNamespace(
-        _measurement=BaseControlMeasurement(0.1, 0.0, 0.0),
-        _latest_pose_generation=1,
+        _detected=True,
+        _selected_tag_id=0,
+        _target_tag_id=0,
+        _base_frame="base_link",
+        _pose_timeout=1.0,
+        _measurement=None,
         _invalidate_sample=lambda: invalidated.append(True),
+        get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=10_000_000_000)),
     )
-    ApproachControllerNode._on_mode(harness, String(data="UNKNOWN"))
+    ApproachControllerNode._on_command(harness, make_command(mode="UNKNOWN"))
     assert invalidated == [True]

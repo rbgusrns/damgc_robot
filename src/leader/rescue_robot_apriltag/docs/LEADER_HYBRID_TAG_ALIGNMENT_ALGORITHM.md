@@ -388,6 +388,21 @@ Any phase + lost/invalid/stale          → TAG_LOST → zero
 - normal XY projection 또는 robot-facing sign이 ambiguous
 - NaN/inf, stale/future timestamp
 - pose/mode/state가 coherent하지 않음
+
+## 31. Atomic command boundary
+
+기존에는 control target pose, `control_mode`, `base_alignment/state`가 서로 다른
+ROS topic으로 전달되어 callback 지연 시 서로 다른 frame이 결합될 가능성이 있었다.
+현재 controller 입력은 `leader_alignment_msgs/msg/LeaderAlignmentCommand` 하나로
+통합된다. 이 메시지는 하나의 `header`(timestamp/frame), `target_pose`,
+`control_mode`, `alignment_state`를 포함하며 perception의 동일한 state-machine
+evaluation 결과에서 한 번 생성·publish된다.
+
+`/leader/alignment/command`는 제어용 authoritative input이고, 기존 문자열 topic과
+`control_target_pose`는 관찰/검증용 diagnostic output이다. Controller는 diagnostic
+topic을 구독해 coherence를 추정하지 않으며, command header timestamp만으로 기존
+freshness watchdog을 수행한다. stale, invalid, TAG_LOST command는 zero Twist로
+fail-closed 된다.
 - controller disabled
 - `TOO_CLOSE`, `STABILIZING`, `ALIGNED`
 

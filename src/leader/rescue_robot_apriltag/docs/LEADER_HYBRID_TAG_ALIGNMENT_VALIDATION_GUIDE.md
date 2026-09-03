@@ -73,6 +73,28 @@ ros2 topic echo /leader/cmd_vel
 부호가 아니라 robot-facing 선택과 median filter가 끝난 방향이다. FOV recenter 활성은
 `control_mode: RECENTER`로 확인한다.
 
+## Atomic command 확인
+
+Controller가 사용하는 authoritative 입력은 다음 typed topic이다.
+
+```bash
+ros2 topic type /leader/alignment/command
+ros2 topic echo /leader/alignment/command
+```
+
+출력 한 건에서 `header.stamp`, `target_pose`, `control_mode`,
+`alignment_state`가 함께 바뀌는지 확인한다. 기존 diagnostic topic은 호환성을 위해
+남아 있지만 controller decision source가 아니다.
+
+```bash
+ros2 topic echo /leader/alignment/control_mode
+ros2 topic echo /leader/base_alignment/state
+ros2 topic echo /leader/alignment/control_target_pose
+```
+
+Command header timestamp가 `controller_pose_timeout`보다 오래되면 controller는
+지연된 diagnostic 메시지의 도착 순서와 관계없이 safe zero Twist를 출력한다.
+
 ## 6. Guard-disabled static validation
 
 Guard를 enable하지 않은 채 Tag를 좌우와 정면으로 천천히 옮긴다.

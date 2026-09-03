@@ -5,11 +5,12 @@ from math import isfinite, sqrt
 from typing import List, Optional
 
 import rclpy
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import Twist
+from leader_alignment_msgs.msg import LeaderAlignmentCommand
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-from std_msgs.msg import Bool, Int32, String
+from std_msgs.msg import Bool, Int32
 from std_srvs.srv import SetBool
 
 from leader_approach_control.approach_controller_logic import (
@@ -22,7 +23,6 @@ from leader_approach_control.approach_controller_logic import (
     compute_approach_command,
     quaternion_yaw,
     sample_is_fresh,
-    samples_are_coherent,
 )
 
 
@@ -35,7 +35,7 @@ INPUT_QOS = QoSProfile(
 
 
 class ApproachControllerNode(Node):
-    """Combine one stamped control target with its state and publish raw Twist."""
+    """Consume one atomic alignment command and publish raw Twist."""
 
     def __init__(self) -> None:
         super().__init__("approach_controller")
@@ -43,22 +43,10 @@ class ApproachControllerNode(Node):
         self._load_and_validate_parameters()
 
         self._raw_pub = self.create_publisher(Twist, "approach/cmd_vel_raw", 10)
-        self._pose_sub = self.create_subscription(
-            PoseStamped,
-            "alignment/control_target_pose",
-            self._on_pose,
-            INPUT_QOS,
-        )
-        self._state_sub = self.create_subscription(
-            String,
-            "base_alignment/state",
-            self._on_state,
-            INPUT_QOS,
-        )
-        self._mode_sub = self.create_subscription(
-            String,
-            "alignment/control_mode",
-            self._on_mode,
+        self._command_sub = self.create_subscription(
+            LeaderAlignmentCommand,
+            "alignment/command",
+            self._on_command,
             INPUT_QOS,
         )
         self._detected_sub = self.create_subscription(
@@ -80,14 +68,10 @@ class ApproachControllerNode(Node):
         self._detected = False
         self._selected_tag_id = -1
         self._measurement: Optional[BaseControlMeasurement] = None
-        self._pose_stamp_seconds: Optional[float] = None
-        self._pose_received_seconds: Optional[float] = None
-        self._latest_pose_generation = 0
-        self._coherent_generation: Optional[int] = None
-        self._coherent_state: Optional[str] = None
-        self._mode_generation: Optional[int] = None
-        self._coherent_mode: Optional[str] = None
-        self._mode_received_seconds: Optional[float] = None
+        self._command_stamp_seconds: Optional[float] = None
+        self._command_received_seconds: Optional[float] = None
+        self._command_state: Optional[str] = None
+        self._command_mode: Optional[str] = None
         self._timer = self.create_timer(
             1.0 / self._publish_rate, self._on_timer
         )
@@ -111,7 +95,6 @@ class ApproachControllerNode(Node):
         self.declare_parameter("controller_enabled_on_startup", False)
         self.declare_parameter("controller_publish_rate", 20.0)
         self.declare_parameter("controller_pose_timeout", 0.35)
-        self.declare_parameter("sample_sync_tolerance", 0.10)
 
         # Provisional software-validation values, not calibrated motor tuning.
         self.declare_parameter("linear_gain", 0.20)
@@ -135,9 +118,6 @@ class ApproachControllerNode(Node):
         )
         self._pose_timeout = float(
             self.get_parameter("controller_pose_timeout").value
-        )
-        self._sync_tolerance = float(
-            self.get_parameter("sample_sync_tolerance").value
         )
         self._control_parameters = ControllerParameters(
             linear_gain=float(self.get_parameter("linear_gain").value),
@@ -167,7 +147,6 @@ class ApproachControllerNode(Node):
         timing_values = (
             self._publish_rate,
             self._pose_timeout,
-            self._sync_tolerance,
         )
         if not all(isfinite(value) for value in timing_values):
             raise ValueError("Controller timing parameters must be finite")
@@ -175,8 +154,6 @@ class ApproachControllerNode(Node):
             raise ValueError("controller_publish_rate must be greater than zero")
         if self._pose_timeout <= 0.0:
             raise ValueError("controller_pose_timeout must be greater than zero")
-        if self._sync_tolerance < 0.0:
-            raise ValueError("sample_sync_tolerance must not be negative")
         self._control_parameters.validate()
 
     def _on_detected(self, message: Bool) -> None:
@@ -193,11 +170,12 @@ class ApproachControllerNode(Node):
             self._invalidate_sample()
         self._selected_tag_id = tag_id
 
-    def _on_pose(self, message: PoseStamped) -> None:
-        """Validate and cache one authoritative stamped control target."""
+    def _on_command(self, message: LeaderAlignmentCommand) -> None:
+        """Validate and cache one atomic pose/mode/state command."""
         received_seconds = time.monotonic()
         now_seconds = self.get_clock().now().nanoseconds / 1.0e9
         stamp_seconds = message.header.stamp.sec + message.header.stamp.nanosec / 1.0e9
+        pose = message.target_pose
         if (
             not self._detected
             or self._selected_tag_id != self._target_tag_id
@@ -209,14 +187,16 @@ class ApproachControllerNode(Node):
                 received_seconds,
                 self._pose_timeout,
             )
-            or not self._pose_is_valid(message)
+            or message.control_mode not in KNOWN_MODES
+            or message.alignment_state not in KNOWN_STATES
+            or not self._pose_is_valid(pose)
         ):
             self._invalidate_sample()
             return
 
-        x = float(message.pose.position.x)
-        y = float(message.pose.position.y)
-        orientation = message.pose.orientation
+        x = float(pose.position.x)
+        y = float(pose.position.y)
+        orientation = pose.orientation
         yaw = quaternion_yaw(
             (orientation.x, orientation.y, orientation.z, orientation.w)
         )
@@ -228,48 +208,10 @@ class ApproachControllerNode(Node):
             target_y=y,
             target_yaw=yaw,
         )
-        self._pose_stamp_seconds = stamp_seconds
-        self._pose_received_seconds = received_seconds
-        self._latest_pose_generation += 1
-        self._coherent_generation = None
-        self._coherent_state = None
-        self._mode_generation = None
-        self._coherent_mode = None
-        self._mode_received_seconds = None
-
-    def _on_mode(self, message: String) -> None:
-        """Bind a known control mode to the latest target-pose generation."""
-        mode = str(message.data)
-        if mode not in KNOWN_MODES or self._measurement is None:
-            self._invalidate_sample()
-            return
-        self._mode_generation = self._latest_pose_generation
-        self._coherent_mode = mode
-        self._mode_received_seconds = time.monotonic()
-
-    def _on_state(self, message: String) -> None:
-        """Bind a known state only to the pose received immediately before it."""
-        state = str(message.data)
-        received_seconds = time.monotonic()
-        if state == TAG_LOST:
-            self._invalidate_sample()
-            return
-        if (
-            state not in KNOWN_STATES
-            or self._measurement is None
-            or self._pose_received_seconds is None
-            or self._mode_generation != self._latest_pose_generation
-            or self._mode_received_seconds is None
-            or not samples_are_coherent(
-                self._mode_received_seconds,
-                received_seconds,
-                self._sync_tolerance,
-            )
-        ):
-            self._invalidate_sample()
-            return
-        self._coherent_generation = self._latest_pose_generation
-        self._coherent_state = state
+        self._command_stamp_seconds = stamp_seconds
+        self._command_received_seconds = received_seconds
+        self._command_mode = str(message.control_mode)
+        self._command_state = str(message.alignment_state)
 
     def _on_enable(
         self, request: SetBool.Request, response: SetBool.Response
@@ -292,49 +234,42 @@ class ApproachControllerNode(Node):
         now_seconds = self.get_clock().now().nanoseconds / 1.0e9
         received_now_seconds = time.monotonic()
         fresh = (
-            self._pose_stamp_seconds is not None
-            and self._pose_received_seconds is not None
+            self._command_stamp_seconds is not None
+            and self._command_received_seconds is not None
             and sample_is_fresh(
                 now_seconds,
-                self._pose_stamp_seconds,
+                self._command_stamp_seconds,
                 received_now_seconds,
-                self._pose_received_seconds,
+                self._command_received_seconds,
                 self._pose_timeout,
             )
         )
-        coherent = (
-            self._coherent_generation is not None
-            and self._coherent_generation == self._latest_pose_generation
-        )
         command = compute_approach_command(
-            self._coherent_state or TAG_LOST,
-            self._coherent_mode or TAG_LOST,
+            self._command_state or TAG_LOST,
+            self._command_mode or TAG_LOST,
             self._measurement,
             self._control_parameters,
             enabled=self._enabled,
             detected=self._detected,
             tag_valid=self._selected_tag_id == self._target_tag_id,
             fresh=fresh,
-            coherent=coherent,
+            coherent=self._measurement is not None,
         )
         self._raw_pub.publish(self._to_twist(command))
 
     def _invalidate_sample(self) -> None:
         """Discard every value that could otherwise reactivate an old command."""
         self._measurement = None
-        self._pose_stamp_seconds = None
-        self._pose_received_seconds = None
-        self._coherent_generation = None
-        self._coherent_state = None
-        self._mode_generation = None
-        self._coherent_mode = None
-        self._mode_received_seconds = None
+        self._command_stamp_seconds = None
+        self._command_received_seconds = None
+        self._command_state = None
+        self._command_mode = None
 
     @staticmethod
-    def _pose_is_valid(message: PoseStamped) -> bool:
+    def _pose_is_valid(message) -> bool:
         """Validate all pose components even though control uses only x and y."""
-        position = message.pose.position
-        orientation = message.pose.orientation
+        position = message.position
+        orientation = message.orientation
         values = (
             position.x,
             position.y,

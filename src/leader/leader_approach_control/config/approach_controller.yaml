@@ -5,7 +5,7 @@
     controller_enabled_on_startup: false
     controller_publish_rate: 20.0
     controller_pose_timeout: 0.35
-    sample_sync_tolerance: 0.10
+    # Pose, mode, and state arrive together on leader_alignment_msgs.
 
     # The perception node owns target distances and publishes the active target
     # pose. Gains and raw limits remain conservative initial hardware values.

@@ -7,6 +7,7 @@ find_package(ament_cmake_python REQUIRED)
 ament_python_install_package(${PROJECT_NAME})
 
 install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY docs DESTINATION share/${PROJECT_NAME}/docs)
 install(PROGRAMS
   scripts/camera_info_qos_bridge.py
   DESTINATION lib/${PROJECT_NAME}

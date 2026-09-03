@@ -12,6 +12,7 @@ from typing import List, Optional, Sequence
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
+from leader_alignment_msgs.msg import LeaderAlignmentCommand
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -103,6 +104,9 @@ class AprilTagApproachNode(Node):
         )
         self._control_target_pub = self.create_publisher(
             PoseStamped, "alignment/control_target_pose", 10
+        )
+        self._command_pub = self.create_publisher(
+            LeaderAlignmentCommand, "alignment/command", 10
         )
         self._final_position_error_pub = self.create_publisher(
             Float64, "alignment/final_position_error", 10
@@ -423,6 +427,7 @@ class AprilTagApproachNode(Node):
         """Publish base-frame loss and clear its temporal alignment history."""
         self._normal_filter.reset()
         decision = self._base_state_machine.update(None, now_seconds, None)
+        self._publish_atomic_command(None, decision)
         self._control_mode_pub.publish(String(data=decision.mode.value))
         self._base_state_pub.publish(String(data=decision.state.value))
         self._log_base_state_change(decision.state)
@@ -563,10 +568,28 @@ class AprilTagApproachNode(Node):
             Float64(data=geometry.final_yaw_error)
         )
         # Publish the authoritative sample, mode, then state as one generation.
+        self._publish_atomic_command(control_pose, decision)
         self._control_target_pub.publish(control_pose)
         self._control_mode_pub.publish(String(data=decision.mode.value))
         self._base_state_pub.publish(String(data=decision.state.value))
         self._log_base_state_change(decision.state)
+
+    def _publish_atomic_command(
+        self,
+        control_pose: Optional[PoseStamped],
+        decision: AlignmentDecision,
+    ) -> None:
+        """Publish pose, mode, and state from one evaluated decision atomically."""
+        command = LeaderAlignmentCommand()
+        if control_pose is not None:
+            command.header = control_pose.header
+            command.target_pose = control_pose.pose
+        else:
+            command.header.stamp = self.get_clock().now().to_msg()
+            command.header.frame_id = self._base_frame
+        command.control_mode = decision.mode.value
+        command.alignment_state = decision.state.value
+        self._command_pub.publish(command)
 
     def _make_control_pose(
         self,

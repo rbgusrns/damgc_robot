@@ -7,6 +7,7 @@ from typing import Tuple
 import pytest
 from geometry_msgs.msg import Pose, PoseStamped, TransformStamped
 from tf2_ros import TransformException
+from rclpy.time import Time
 
 import rescue_robot_apriltag.base_pose as base_pose_module
 from rescue_robot_apriltag.approach_logic import (
@@ -475,6 +476,7 @@ def make_base_publish_harness(tf_buffer: object) -> SimpleNamespace:
         _prealign_target_pub=RecordingPublisher(),
         _final_target_pub=RecordingPublisher(),
         _control_target_pub=RecordingPublisher(),
+        _command_pub=RecordingPublisher(),
         _control_mode_pub=RecordingPublisher(),
         _final_position_error_pub=RecordingPublisher(),
         _final_yaw_error_pub=RecordingPublisher(),
@@ -482,7 +484,7 @@ def make_base_publish_harness(tf_buffer: object) -> SimpleNamespace:
         _base_state_machine=BaseAlignmentStateMachine(make_alignment_thresholds()),
         _log_base_state_change=lambda _state: None,
         get_clock=lambda: SimpleNamespace(
-            now=lambda: SimpleNamespace(nanoseconds=12_500_000_000)
+            now=lambda: Time(nanoseconds=12_500_000_000)
         ),
         get_logger=lambda: SimpleNamespace(warning=lambda _message, **_kwargs: None),
     )
@@ -497,6 +499,11 @@ def make_base_publish_harness(tf_buffer: object) -> SimpleNamespace:
     harness._make_control_pose = lambda base_pose, geometry, decision: (
         AprilTagApproachNode._make_control_pose(
             harness, base_pose, geometry, decision
+        )
+    )
+    harness._publish_atomic_command = lambda control_pose, decision: (
+        AprilTagApproachNode._publish_atomic_command(
+            harness, control_pose, decision
         )
     )
     return harness
@@ -525,6 +532,8 @@ def test_node_base_branch_looks_up_input_pose_timestamp() -> None:
     assert harness._prealign_target_pub.messages[0].pose.position.x == pytest.approx(0.70)
     assert harness._final_target_pub.messages[0].pose.position.x == pytest.approx(0.80)
     assert harness._control_target_pub.messages[0].header.stamp == camera_pose.header.stamp
+    assert harness._command_pub.messages[0].header.stamp == camera_pose.header.stamp
+    assert harness._command_pub.messages[0].alignment_state == harness._base_state_pub.messages[0].data
 
 
 def test_node_base_branch_publishes_nothing_on_tf_failure() -> None:
@@ -556,6 +565,7 @@ def test_camera_lost_cycle_also_publishes_base_tag_lost() -> None:
     harness = SimpleNamespace(
         _translation_filter=SimpleNamespace(reset=lambda: None),
         _normal_filter=SimpleNamespace(reset=lambda: None),
+        _base_frame="base_link",
         _active_tag_id=0,
         _state_machine=camera_state_machine,
         _base_state_machine=BaseAlignmentStateMachine(make_alignment_thresholds()),
@@ -564,8 +574,17 @@ def test_camera_lost_cycle_also_publishes_base_tag_lost() -> None:
         _state_pub=RecordingPublisher(),
         _base_state_pub=RecordingPublisher(),
         _control_mode_pub=RecordingPublisher(),
+        _command_pub=RecordingPublisher(),
         _log_state_change=lambda _state: None,
         _log_base_state_change=lambda _state: None,
+            get_clock=lambda: SimpleNamespace(
+                now=lambda: Time(nanoseconds=12_500_000_000)
+        ),
+        _publish_atomic_command=lambda control_pose, decision: (
+            AprilTagApproachNode._publish_atomic_command(
+                harness, control_pose, decision
+            )
+        ),
     )
     harness._publish_base_lost = lambda now_seconds: (
         AprilTagApproachNode._publish_base_lost(harness, now_seconds)
