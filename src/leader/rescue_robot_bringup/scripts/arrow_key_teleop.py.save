@@ -21,12 +21,6 @@ ARROW_KEYS = {
     "\x1b[D": "left",
 }
 
-COMBINATION_KEYS = {
-    "q": "forward_left",
-    "w": "forward_right",
-    "a": "reverse_left",
-    "s": "reverse_right",
-}
 
 class ArrowKeyTeleop(Node):
     """Publish Twist commands while terminal key-repeat remains active."""
@@ -45,7 +39,12 @@ class ArrowKeyTeleop(Node):
 
         command_topic = str(self.get_parameter("command_topic").value)
         publish_rate = float(self.get_parameter("publish_rate").value)
-        if publish_rate <= 0.0:
+COMBINATION_KEYS = {
+    "q": "forward_left",
+    "w": "forward_right",
+    "a": "reverse_left",
+    "s": "reverse_right",
+}        if publish_rate <= 0.0:
             raise ValueError("publish_rate must be greater than zero")
 
         self._publisher = self.create_publisher(Twist, command_topic, 10)
@@ -98,17 +97,6 @@ class ArrowKeyTeleop(Node):
                 motion = ARROW_KEYS.get(sequence)
                 if motion is not None:
                     self._motion = motion
-
-            key = self._input_buffer[0]
-            self._input_buffer = self._input_buffer[1:]
-
-            if key == " ":
-                self._motion = None
-                self._last_motion_key_time = 0.0
-            else:
-                motion = COMBINATION_KEYS.get(key.lower())
-                if motion is not None:
-                    self._motion = motion
                     self._last_motion_key_time = time.monotonic()
                 continue
 
@@ -121,7 +109,7 @@ class ArrowKeyTeleop(Node):
     def _command_for_current_state(self):
         command = Twist()
         timeout = float(self.get_parameter("key_timeout").value)
-        if (           
+        if (
             self._motion is None
             or time.monotonic() - self._last_motion_key_time > timeout
         ):
@@ -132,32 +120,12 @@ class ArrowKeyTeleop(Node):
         angular_speed = float(self.get_parameter("angular_speed").value)
         if self._motion == "forward":
             command.linear.x = linear_speed
-
         elif self._motion == "reverse":
             command.linear.x = -linear_speed
-
         elif self._motion == "left":
             command.angular.z = angular_speed
-
         elif self._motion == "right":
             command.angular.z = -angular_speed
-
-        elif self._motion == "forward_left":
-            command.linear.x = linear_speed
-            command.angular.z = angular_speed
-
-        elif self._motion == "forward_right":
-            command.linear.x = linear_speed
-            command.angular.z = -angular_speed
-
-        elif self._motion == "reverse_left":
-            command.linear.x = -linear_speed
-            command.angular.z = angular_speed
-
-        elif self._motion == "reverse_right":
-            command.linear.x = -linear_speed
-            command.angular.z = -angular_speed
-
         return command
 
     def stop(self):
