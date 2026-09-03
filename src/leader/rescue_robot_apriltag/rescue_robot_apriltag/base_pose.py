@@ -46,12 +46,13 @@ def normalize_angle(angle: float) -> float:
 def rotate_tag_z_to_base_xy(
     quaternion: Sequence[float], projection_epsilon: float = 1.0e-6
 ) -> Tuple[float, float]:
-    """Return the normalized base-XY projection of the tag's inward +Z axis.
+    """Return the normalized base-XY projection of the tag's outward +Z axis.
 
-    ``apriltag_ros`` PnP uses the AprilTag convention in which tag +Z points
-    through the printed face into the tag.  The supplied quaternion already
-    represents the tag frame in ``base_link``; extracting Euler yaw from it
-    would use the wrong pair of axes for a generally tilted tag.
+    The installed ``apriltag_ros`` TF was verified on the Leader hardware: for
+    a front-facing detection tag +Z points from the printed face toward the
+    observing robot.  The supplied quaternion already represents the tag frame
+    in ``base_link``; extracting Euler yaw from it would use the wrong pair of
+    axes for a generally tilted tag.
     """
     normalized = normalize_quaternion(quaternion)
     if normalized is None:
@@ -129,21 +130,24 @@ def compute_target_geometry(
     tag_range = hypot(tag_x, tag_y)
     if normal_norm <= 1.0e-6 or tag_range <= 1.0e-6:
         raise ValueError("Tag position and projected normal must be non-zero")
-    inward_x = normal_x / normal_norm
-    inward_y = normal_y / normal_norm
-    # A front-facing detection has inward +Z pointing generally from robot to tag.
-    if inward_x * tag_x + inward_y * tag_y <= 0.0:
-        raise ValueError("Tag +Z does not point away from the robot into the tag")
+    outward_x = normal_x / normal_norm
+    outward_y = normal_y / normal_norm
+    # On the verified Leader TF, tag +Z points from the tag toward the robot.
+    # The vector from base origin to the tag points the other way, so their dot
+    # product must be negative for a normal front-side observation.
+    if outward_x * tag_x + outward_y * tag_y >= 0.0:
+        raise ValueError("Tag +Z does not point from the tag toward the robot")
 
-    prealign_x = tag_x - pre_align_distance * inward_x
-    prealign_y = tag_y - pre_align_distance * inward_y
-    final_x = tag_x - final_target_distance * inward_x
-    final_y = tag_y - final_target_distance * inward_y
-    target_yaw = atan2(inward_y, inward_x)
+    prealign_x = tag_x + pre_align_distance * outward_x
+    prealign_y = tag_y + pre_align_distance * outward_y
+    final_x = tag_x + final_target_distance * outward_x
+    final_y = tag_y + final_target_distance * outward_y
+    # Robot +X must face the tag, opposite the tag's outward surface normal.
+    target_yaw = atan2(-outward_y, -outward_x)
     final_yaw_error = normalize_angle(target_yaw)
     return TargetGeometry(
-        normal_x=inward_x,
-        normal_y=inward_y,
+        normal_x=outward_x,
+        normal_y=outward_y,
         target_yaw=target_yaw,
         prealign_x=prealign_x,
         prealign_y=prealign_y,

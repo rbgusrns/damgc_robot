@@ -7,13 +7,14 @@
 정상처럼 보여 잘못 ALIGNED가 될 수 있었다.
 
 새 알고리즘은 `apriltag_ros`가 제공한 tag pose orientation으로 tag frame `+Z`를
-`base_link`에 회전한 뒤 XY 평면에 projection한다. AprilTag PnP convention에서 정면에서
-본 tag `+Z`는 인쇄면 안쪽이고 접근측은 `-Z`다. 따라서 target은 다음처럼 생성한다.
+`base_link`에 회전한 뒤 XY 평면에 projection한다. Leader 실차의 `apriltag_ros` TF를
+검증한 결과, 정면에서 본 tag `+Z`는 인쇄면에서 관측 로봇 쪽으로 나오는 outward
+normal이다. 로봇의 최종 진행 방향은 그 반대인 `-Z`다.
 
 ```text
              TAG
               ■
-              │  tag front normal (-Z)
+              │  tag outward normal (+Z, toward robot)
        0.20 m X  final target pose
               │
        0.30 m O  pre-align target pose
@@ -22,13 +23,22 @@
 ```
 
 ```text
-pre_target   = tag_position - 0.30 * tag_inward_normal
-final_target = tag_position - 0.20 * tag_inward_normal
-target_yaw   = heading(tag_inward_normal)
+tag_outward_normal = project_xy(R_base_tag * tag_Z)
+pre_target         = tag_position + 0.30 * tag_outward_normal
+final_target       = tag_position + 0.20 * tag_outward_normal
+target_yaw         = heading(-tag_outward_normal)
 ```
 
 Raw quaternion에서 camera-frame planar yaw를 직접 추출하지 않는다. Projected normal이
-퇴화하거나 tag `+Z`가 로봇 쪽을 가리키는 invalid pose는 base `TAG_LOST`로 처리한다.
+퇴화하거나 `tag_outward_normal · tag_position >= 0`인 뒤집힌 pose는 base `TAG_LOST`로
+처리한다. 정상적인 정면 관측에서는 tag `+Z`가 태그에서 base origin 쪽을 향하므로 이
+내적은 음수다.
+
+2026-09-03 Leader 실측에서는 tag 위치 약 `(0.312, 0.056) m`, tag `+Z`의 base XY
+projection 약 `(-0.970, -0.244)`로 내적이 약 `-0.316`이었다. 과거 구현은 이 부호를
+반대로 검사해 검출과 TF가 정상이어도 `TAG_LOST`를 출력했다. 현재 계산과 회귀 테스트는
+이 실측 convention을 기준으로 한다.
+
 현재 camera/base TF calibration은 실차 검증 완료 상태이므로 이 알고리즘 검증 중에는
 URDF camera transform을 변경하지 않는다.
 
@@ -77,7 +87,7 @@ Controller 설정의 `max_final_linear_speed=0.02 m/s`,
 
 | Diagnostic topic | Type |
 |---|---|
-| `/leader/alignment/tag_normal_heading` | `std_msgs/msg/Float64` |
+| `/leader/alignment/tag_normal_heading` | `std_msgs/msg/Float64` (outward `+Z` heading) |
 | `/leader/alignment/prealign_target_pose` | `geometry_msgs/msg/PoseStamped` |
 | `/leader/alignment/final_target_pose` | `geometry_msgs/msg/PoseStamped` |
 | `/leader/alignment/control_target_pose` | `geometry_msgs/msg/PoseStamped` |
@@ -86,6 +96,8 @@ Controller 설정의 `max_final_linear_speed=0.02 m/s`,
 
 Pose topic은 모두 `base_link` frame과 원본 tag timestamp를 사용하므로 RViz Fixed Frame을
 `base_link`로 설정해 표시할 수 있다. Heading/yaw 단위는 radian이다.
+`tag_normal_heading`은 태그의 outward `+Z` 방향이며, final target pose의 robot yaw는
+태그를 바라봐야 하므로 이 heading과 π rad 반대 방향이다.
 
 ## 5. 빌드와 자동 테스트
 
@@ -185,3 +197,23 @@ Pre-align에서 tag plane과 base origin 사이 normal 거리 약 0.30 m, ALIGNE
 - 먼 거리에서 `TURN_*↔TAG_LOST`가 반복되는 검출 불안정은 별도 known issue다. 이번
   작업은 debounce, detector tuning, 해상도, tag size를 변경하지 않는다.
 - ALIGNED 이후 gripper grasp sequence 연결은 후속 작업이다.
+
+## 11. 검출은 정상인데 base state가 TAG_LOST인 경우
+
+먼저 detector와 TF를 분리해 확인한다.
+
+```bash
+ros2 topic echo /leader/apriltag/detections --once
+ros2 topic echo /leader/supply/detected --once
+ros2 run tf2_ros tf2_echo base_link 'leader/tag36h11:0'
+ros2 topic echo /leader/supply/base_relative_pose --once
+```
+
+- detection이 있고 `supply/detected=true`인데 base pose만 없으면 base TF 또는 geometry
+  validation 구간을 확인한다.
+- 정상 정면 관측에서는 base XY로 projection한 tag `+Z`와 tag position의 내적이
+  음수여야 한다.
+- quaternion, XY projection 또는 내적 검증 실패 시 안전상 `TAG_LOST`를 출력한다.
+- 이 경우 `apriltag_approach` 로그에 `tag-normal geometry is invalid` 경고와 구체적인
+  검증 실패 원인이 5초 간격으로 출력된다.
+- 이 진단을 위해 camera TF나 calibration offset을 변경하지 않는다.

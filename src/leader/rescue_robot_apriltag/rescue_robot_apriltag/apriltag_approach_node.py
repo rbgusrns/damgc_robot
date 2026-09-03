@@ -7,7 +7,7 @@ right, y points down, and z points forward.  Camera-frame alignment outputs are
 preserved while additional observations are transformed into ``base_link``.
 """
 
-from math import cos, isfinite, sin
+from math import atan2, cos, isfinite, sin
 from typing import List, Optional, Sequence
 
 import rclpy
@@ -447,7 +447,12 @@ class AprilTagApproachNode(Node):
                 self._pre_align_distance,
                 self._final_target_distance,
             )
-        except ValueError:
+        except ValueError as error:
+            self.get_logger().warning(
+                "Skipping base outputs because tag-normal geometry is invalid: %s"
+                % error,
+                throttle_duration_sec=5.0,
+            )
             self._publish_base_lost(now_seconds)
             return
 
@@ -483,7 +488,9 @@ class AprilTagApproachNode(Node):
         )
         self._base_lateral_pub.publish(Float64(data=metrics.lateral_error))
         self._base_bearing_pub.publish(Float64(data=metrics.bearing))
-        self._normal_heading_pub.publish(Float64(data=geometry.target_yaw))
+        self._normal_heading_pub.publish(
+            Float64(data=atan2(geometry.normal_y, geometry.normal_x))
+        )
         self._prealign_target_pub.publish(prealign_pose)
         self._final_target_pub.publish(final_pose)
         self._final_position_error_pub.publish(

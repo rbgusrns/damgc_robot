@@ -117,24 +117,44 @@ def test_invalid_or_vertical_tag_normal_projection_is_rejected(
 
 
 def test_targets_are_on_apriltag_printed_front_side_at_configured_distances() -> None:
-    geometry = compute_target_geometry(0.50, 0.0, 1.0, 0.0, 0.30, 0.20)
+    geometry = compute_target_geometry(0.50, 0.0, -1.0, 0.0, 0.30, 0.20)
     assert geometry.prealign_x == pytest.approx(0.20)
     assert geometry.final_x == pytest.approx(0.30)
     assert geometry.prealign_y == pytest.approx(0.0)
     assert geometry.final_y == pytest.approx(0.0)
-    assert (geometry.prealign_x - 0.50) * geometry.normal_x == pytest.approx(-0.30)
-    assert (geometry.final_x - 0.50) * geometry.normal_x == pytest.approx(-0.20)
+    assert (geometry.prealign_x - 0.50) * geometry.normal_x == pytest.approx(0.30)
+    assert (geometry.final_x - 0.50) * geometry.normal_x == pytest.approx(0.20)
     assert geometry.target_yaw == pytest.approx(0.0)
 
 
-def test_target_geometry_rejects_tag_normal_pointing_toward_robot() -> None:
+def test_target_geometry_rejects_tag_normal_pointing_away_from_robot() -> None:
     with pytest.raises(ValueError):
-        compute_target_geometry(0.50, 0.0, -1.0, 0.0, 0.30, 0.20)
+        compute_target_geometry(0.50, 0.0, 1.0, 0.0, 0.30, 0.20)
+
+
+def test_measured_leader_tf_outward_normal_produces_front_side_targets() -> None:
+    # Regression from the Leader hardware TF observed on 2026-09-03:
+    # tag position ~= (0.312, 0.056), quaternion ~= (0.545,-0.428,-0.441,0.571).
+    normal_x, normal_y = rotate_tag_z_to_base_xy(
+        (0.545, -0.428, -0.441, 0.571)
+    )
+    geometry = compute_target_geometry(
+        0.312, 0.056, normal_x, normal_y, 0.30, 0.20
+    )
+
+    assert normal_x == pytest.approx(-0.970, abs=0.002)
+    assert normal_y == pytest.approx(-0.244, abs=0.002)
+    assert normal_x * 0.312 + normal_y * 0.056 < 0.0
+    assert geometry.prealign_x == pytest.approx(0.021, abs=0.002)
+    assert geometry.prealign_y == pytest.approx(-0.017, abs=0.002)
+    assert geometry.final_x == pytest.approx(0.118, abs=0.002)
+    assert geometry.final_y == pytest.approx(0.007, abs=0.002)
+    assert geometry.target_yaw == pytest.approx(0.247, abs=0.002)
 
 
 def test_robot_looking_at_tag_from_the_side_must_not_be_aligned() -> None:
     geometry = compute_target_geometry(
-        0.50, 0.0, cos(radians(45.0)), cos(radians(45.0)), 0.30, 0.20
+        0.50, 0.0, -cos(radians(45.0)), cos(radians(45.0)), 0.30, 0.20
     )
     assert geometry.final_position_error > 0.015
     assert abs(geometry.final_yaw_error) > radians(4.0)
@@ -418,7 +438,8 @@ def test_node_base_branch_looks_up_input_pose_timestamp() -> None:
     harness = make_base_publish_harness(tf_buffer)
     camera_pose = make_pose(
         position=(1.0, 0.2, 0.0),
-        quaternion=(0.0, sqrt(0.5), 0.0, sqrt(0.5)),
+        # -90 degrees about Y maps tag +Z toward the observing base (-X).
+        quaternion=(0.0, -sqrt(0.5), 0.0, sqrt(0.5)),
     )
 
     AprilTagApproachNode._publish_base_outputs(harness, camera_pose)
