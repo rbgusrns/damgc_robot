@@ -1,7 +1,7 @@
 """Publish conservative raw Leader approach commands from coherent base samples."""
 
 import time
-from math import atan2, isfinite, sqrt
+from math import isfinite, sqrt
 from typing import List, Optional
 
 import rclpy
@@ -19,6 +19,7 @@ from leader_approach_control.approach_controller_logic import (
     ControllerParameters,
     PlanarCommand,
     compute_approach_command,
+    quaternion_yaw,
     sample_is_fresh,
     samples_are_coherent,
 )
@@ -33,7 +34,7 @@ INPUT_QOS = QoSProfile(
 
 
 class ApproachControllerNode(Node):
-    """Combine one stamped base pose with its following state and publish raw Twist."""
+    """Combine one stamped control target with its state and publish raw Twist."""
 
     def __init__(self) -> None:
         super().__init__("approach_controller")
@@ -43,7 +44,7 @@ class ApproachControllerNode(Node):
         self._raw_pub = self.create_publisher(Twist, "approach/cmd_vel_raw", 10)
         self._pose_sub = self.create_subscription(
             PoseStamped,
-            "supply/base_relative_pose",
+            "alignment/control_target_pose",
             self._on_pose,
             INPUT_QOS,
         )
@@ -82,13 +83,14 @@ class ApproachControllerNode(Node):
         )
 
         self.get_logger().info(
-            "Approach controller ready: enabled=%s, target=%.3fm, raw limits="
-            "(%.3fm/s, %.3frad/s)"
+            "Approach controller ready: enabled=%s, raw limits="
+            "(%.3fm/s, %.3frad/s), final limits=(%.3fm/s, %.3frad/s)"
             % (
                 self._enabled,
-                self._control_parameters.target_forward,
                 self._control_parameters.max_raw_linear_speed,
                 self._control_parameters.max_raw_angular_speed,
+                self._control_parameters.max_final_linear_speed,
+                self._control_parameters.max_final_angular_speed,
             )
         )
 
@@ -102,13 +104,13 @@ class ApproachControllerNode(Node):
         self.declare_parameter("sample_sync_tolerance", 0.10)
 
         # Provisional software-validation values, not calibrated motor tuning.
-        self.declare_parameter("target_forward", 0.50)
         self.declare_parameter("linear_gain", 0.20)
         self.declare_parameter("angular_gain", 0.80)
         self.declare_parameter("lateral_gain", 0.50)
         self.declare_parameter("max_raw_linear_speed", 0.05)
         self.declare_parameter("max_raw_angular_speed", 0.20)
-        self.declare_parameter("allow_reverse", False)
+        self.declare_parameter("max_final_linear_speed", 0.02)
+        self.declare_parameter("max_final_angular_speed", 0.08)
 
     def _load_and_validate_parameters(self) -> None:
         """Load parameters and reject non-finite or unsafe configurations."""
@@ -127,7 +129,6 @@ class ApproachControllerNode(Node):
             self.get_parameter("sample_sync_tolerance").value
         )
         self._control_parameters = ControllerParameters(
-            target_forward=float(self.get_parameter("target_forward").value),
             linear_gain=float(self.get_parameter("linear_gain").value),
             angular_gain=float(self.get_parameter("angular_gain").value),
             lateral_gain=float(self.get_parameter("lateral_gain").value),
@@ -137,7 +138,12 @@ class ApproachControllerNode(Node):
             max_raw_angular_speed=float(
                 self.get_parameter("max_raw_angular_speed").value
             ),
-            allow_reverse=bool(self.get_parameter("allow_reverse").value),
+            max_final_linear_speed=float(
+                self.get_parameter("max_final_linear_speed").value
+            ),
+            max_final_angular_speed=float(
+                self.get_parameter("max_final_angular_speed").value
+            ),
         )
 
         if not self._base_frame:
@@ -174,7 +180,7 @@ class ApproachControllerNode(Node):
         self._selected_tag_id = tag_id
 
     def _on_pose(self, message: PoseStamped) -> None:
-        """Validate and cache one authoritative stamped base measurement."""
+        """Validate and cache one authoritative stamped control target."""
         received_seconds = time.monotonic()
         now_seconds = self.get_clock().now().nanoseconds / 1.0e9
         stamp_seconds = message.header.stamp.sec + message.header.stamp.nanosec / 1.0e9
@@ -196,10 +202,17 @@ class ApproachControllerNode(Node):
 
         x = float(message.pose.position.x)
         y = float(message.pose.position.y)
+        orientation = message.pose.orientation
+        yaw = quaternion_yaw(
+            (orientation.x, orientation.y, orientation.z, orientation.w)
+        )
+        if yaw is None:
+            self._invalidate_sample()
+            return
         self._measurement = BaseControlMeasurement(
-            forward_distance=x,
-            lateral_error=y,
-            bearing=atan2(y, x),
+            target_x=x,
+            target_y=y,
+            target_yaw=yaw,
         )
         self._pose_stamp_seconds = stamp_seconds
         self._pose_received_seconds = received_seconds
@@ -298,7 +311,7 @@ class ApproachControllerNode(Node):
             orientation.z,
             orientation.w,
         )
-        if not all(isfinite(value) for value in values) or position.x <= 0.0:
+        if not all(isfinite(value) for value in values):
             return False
         norm = sqrt(
             orientation.x * orientation.x

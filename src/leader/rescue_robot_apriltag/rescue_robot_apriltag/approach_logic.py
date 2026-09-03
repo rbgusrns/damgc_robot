@@ -23,6 +23,7 @@ class ApproachState(str, Enum):
     TOO_CLOSE = "TOO_CLOSE"
     FINE_ALIGN_LEFT = "FINE_ALIGN_LEFT"
     FINE_ALIGN_RIGHT = "FINE_ALIGN_RIGHT"
+    FINAL_APPROACH = "FINAL_APPROACH"
     STABILIZING = "STABILIZING"
     ALIGNED = "ALIGNED"
 
@@ -265,4 +266,3 @@ class ApproachStateMachine:
         """Reset continuous stability and return a non-aligned state."""
         self._stable_since = None
         return state
-

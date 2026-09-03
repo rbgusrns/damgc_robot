@@ -1,6 +1,6 @@
 """Tests for validated Leader base-frame pose conversion and metrics."""
 
-from math import atan2, inf, nan, pi, sqrt
+from math import atan2, cos, inf, nan, pi, radians, sqrt
 from types import SimpleNamespace
 from typing import Tuple
 
@@ -15,13 +15,18 @@ from rescue_robot_apriltag.approach_logic import (
     compute_measurement,
 )
 from rescue_robot_apriltag.base_alignment_logic import (
+    BaseAlignmentMeasurement,
     BaseAlignmentStateMachine,
     BaseAlignmentThresholds,
 )
 from rescue_robot_apriltag.apriltag_approach_node import AprilTagApproachNode
 from rescue_robot_apriltag.base_pose import (
+    PlanarNormalMedianFilter,
     compute_base_metrics,
+    compute_target_geometry,
     is_fresh_timestamp,
+    normalize_angle,
+    rotate_tag_z_to_base_xy,
     transform_pose_preserving_stamp,
 )
 
@@ -92,6 +97,81 @@ def test_base_bearing_boundaries(x: float, y: float, expected: float) -> None:
 def test_base_metrics_reject_nan_and_inf(x: float, y: float) -> None:
     with pytest.raises(ValueError):
         compute_base_metrics(x, y)
+
+
+def test_tag_plus_z_is_rotated_then_projected_instead_of_using_raw_yaw() -> None:
+    # +90 degrees about tag Y maps tag +Z to base +X.
+    normal = rotate_tag_z_to_base_xy((0.0, sqrt(0.5), 0.0, sqrt(0.5)))
+    assert normal == pytest.approx((1.0, 0.0))
+
+
+@pytest.mark.parametrize(
+    "quaternion",
+    [(0.0, 0.0, 0.0, 0.0), (nan, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0, 1.0)],
+)
+def test_invalid_or_vertical_tag_normal_projection_is_rejected(
+    quaternion: Tuple[float, float, float, float],
+) -> None:
+    with pytest.raises(ValueError):
+        rotate_tag_z_to_base_xy(quaternion)
+
+
+def test_targets_are_on_apriltag_printed_front_side_at_configured_distances() -> None:
+    geometry = compute_target_geometry(0.50, 0.0, 1.0, 0.0, 0.30, 0.20)
+    assert geometry.prealign_x == pytest.approx(0.20)
+    assert geometry.final_x == pytest.approx(0.30)
+    assert geometry.prealign_y == pytest.approx(0.0)
+    assert geometry.final_y == pytest.approx(0.0)
+    assert (geometry.prealign_x - 0.50) * geometry.normal_x == pytest.approx(-0.30)
+    assert (geometry.final_x - 0.50) * geometry.normal_x == pytest.approx(-0.20)
+    assert geometry.target_yaw == pytest.approx(0.0)
+
+
+def test_target_geometry_rejects_tag_normal_pointing_toward_robot() -> None:
+    with pytest.raises(ValueError):
+        compute_target_geometry(0.50, 0.0, -1.0, 0.0, 0.30, 0.20)
+
+
+def test_robot_looking_at_tag_from_the_side_must_not_be_aligned() -> None:
+    geometry = compute_target_geometry(
+        0.50, 0.0, cos(radians(45.0)), cos(radians(45.0)), 0.30, 0.20
+    )
+    assert geometry.final_position_error > 0.015
+    assert abs(geometry.final_yaw_error) > radians(4.0)
+    machine = BaseAlignmentStateMachine(
+        BaseAlignmentThresholds(
+            pre_align_position_tolerance=0.02,
+            pre_align_heading_tolerance_deg=5.0,
+            final_position_tolerance=0.015,
+            final_yaw_tolerance_deg=4.0,
+            stable_time=0.8,
+            sample_timeout=1.0,
+        )
+    )
+    measurement = BaseAlignmentMeasurement(
+        geometry.prealign_x,
+        geometry.prealign_y,
+        geometry.final_x,
+        geometry.final_y,
+        geometry.final_yaw_error,
+        10.0,
+    )
+    state = machine.update(measurement, 10.0, 0)
+    assert state not in {ApproachState.STABILIZING, ApproachState.ALIGNED}
+
+
+def test_angle_wraparound_uses_short_rotation() -> None:
+    error = normalize_angle(radians(179.0) - radians(-179.0))
+    assert error == pytest.approx(radians(-2.0))
+
+
+def test_normal_filter_ignores_duplicate_timestamp_and_normalizes_median() -> None:
+    filter_ = PlanarNormalMedianFilter(3)
+    assert filter_.add(1.0, 0.0, 1) == pytest.approx((1.0, 0.0))
+    assert filter_.add(0.0, 1.0, 1) == pytest.approx((1.0, 0.0))
+    x, y = filter_.add(1.0, 0.1, 2)
+    assert x > 0.99
+    assert y > 0.0
 
 
 def test_timestamp_freshness_includes_timeout_boundary() -> None:
@@ -290,19 +370,28 @@ def make_base_publish_harness(tf_buffer: object) -> SimpleNamespace:
         _base_frame="base_link",
         _tf_lookup_timeout=0.0,
         _tag_timeout=1.0,
+        _pre_align_distance=0.30,
+        _final_target_distance=0.20,
         _active_tag_id=0,
         _tf_buffer=tf_buffer,
+        _normal_filter=PlanarNormalMedianFilter(5),
         _base_pose_pub=RecordingPublisher(),
         _base_forward_pub=RecordingPublisher(),
         _base_lateral_pub=RecordingPublisher(),
         _base_bearing_pub=RecordingPublisher(),
+        _normal_heading_pub=RecordingPublisher(),
+        _prealign_target_pub=RecordingPublisher(),
+        _final_target_pub=RecordingPublisher(),
+        _control_target_pub=RecordingPublisher(),
+        _final_position_error_pub=RecordingPublisher(),
+        _final_yaw_error_pub=RecordingPublisher(),
         _base_state_pub=RecordingPublisher(),
         _base_state_machine=BaseAlignmentStateMachine(
             BaseAlignmentThresholds(
-                target_forward=0.50,
-                forward_tolerance=0.03,
-                lateral_tolerance=0.02,
-                bearing_tolerance_deg=5.0,
+                pre_align_position_tolerance=0.02,
+                pre_align_heading_tolerance_deg=5.0,
+                final_position_tolerance=0.015,
+                final_yaw_tolerance_deg=4.0,
                 stable_time=0.8,
                 sample_timeout=1.0,
             )
@@ -316,13 +405,21 @@ def make_base_publish_harness(tf_buffer: object) -> SimpleNamespace:
     harness._publish_base_lost = lambda now_seconds: (
         AprilTagApproachNode._publish_base_lost(harness, now_seconds)
     )
+    harness._make_target_pose = lambda base_pose, geometry, prealign: (
+        AprilTagApproachNode._make_target_pose(
+            harness, base_pose, geometry, prealign=prealign
+        )
+    )
     return harness
 
 
 def test_node_base_branch_looks_up_input_pose_timestamp() -> None:
     tf_buffer = RecordingBuffer(make_identity_transform())
     harness = make_base_publish_harness(tf_buffer)
-    camera_pose = make_pose(position=(1.0, 0.2, 0.0))
+    camera_pose = make_pose(
+        position=(1.0, 0.2, 0.0),
+        quaternion=(0.0, sqrt(0.5), 0.0, sqrt(0.5)),
+    )
 
     AprilTagApproachNode._publish_base_outputs(harness, camera_pose)
 
@@ -335,6 +432,9 @@ def test_node_base_branch_looks_up_input_pose_timestamp() -> None:
     assert harness._base_lateral_pub.messages[0].data == pytest.approx(0.2)
     assert harness._base_bearing_pub.messages[0].data > 0.0
     assert harness._base_state_pub.messages[0].data == ApproachState.TURN_LEFT.value
+    assert harness._prealign_target_pub.messages[0].pose.position.x == pytest.approx(0.70)
+    assert harness._final_target_pub.messages[0].pose.position.x == pytest.approx(0.80)
+    assert harness._control_target_pub.messages[0].header.stamp == camera_pose.header.stamp
 
 
 def test_node_base_branch_publishes_nothing_on_tf_failure() -> None:
@@ -365,14 +465,15 @@ def test_camera_lost_cycle_also_publishes_base_tag_lost() -> None:
     )
     harness = SimpleNamespace(
         _translation_filter=SimpleNamespace(reset=lambda: None),
+        _normal_filter=SimpleNamespace(reset=lambda: None),
         _active_tag_id=0,
         _state_machine=camera_state_machine,
         _base_state_machine=BaseAlignmentStateMachine(
             BaseAlignmentThresholds(
-                target_forward=0.50,
-                forward_tolerance=0.03,
-                lateral_tolerance=0.02,
-                bearing_tolerance_deg=5.0,
+                pre_align_position_tolerance=0.02,
+                pre_align_heading_tolerance_deg=5.0,
+                final_position_tolerance=0.015,
+                final_yaw_tolerance_deg=4.0,
                 stable_time=0.8,
                 sample_timeout=1.0,
             )

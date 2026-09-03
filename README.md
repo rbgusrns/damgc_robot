@@ -143,13 +143,17 @@ ros2 launch leader_approach_control approach_controller.launch.py
 ros2 launch leader_approach_control velocity_guard.launch.py
 ```
 
-Controller와 guard는 모두 disabled로 시작하므로 enable 전에는 raw/final command가 zero입니다.
-현재 `base_target_forward`와 `target_forward`는 모두 `0.25 m`이며, 실제 grasp/TCP 거리가 아닌
-software-validation 값입니다. STM32/UART/motor에는 연결하지 않습니다.
+Component 단독 launch에서는 controller와 guard가 모두 disabled로 시작하므로 enable
+전에는 raw/final command가 zero입니다. 현재 tag-normal 정렬 기본값은 pre-align
+`0.30 m`, final target `0.20 m`이며 실제 grasp 자세를 확인한 뒤 조정할 초기값입니다.
+STM32/UART/motor에는 연결하지 않습니다.
 
 전체 topic, state priority, enable 순서, 파라미터와 실기·자동시험 결과는
 [Leader velocity pipeline 검증 가이드](src/leader/rescue_robot_apriltag/docs/LEADER_VELOCITY_PIPELINE_VALIDATION_GUIDE.md)를
 참고합니다.
+Tag orientation, target pose 및 side-looking regression의 현행 절차는
+[Leader Tag-Normal 정렬 검증 가이드](src/leader/rescue_robot_apriltag/docs/LEADER_TAG_NORMAL_ALIGNMENT_VALIDATION_GUIDE.md)를
+따릅니다.
 
 ## 리더 DDS 협력 통신
 

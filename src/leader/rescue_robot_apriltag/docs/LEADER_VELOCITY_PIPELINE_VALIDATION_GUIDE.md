@@ -1,5 +1,11 @@
 # Leader base-link velocity command software pipeline 재현·검증 가이드
 
+> 이 문서는 position-only controller를 처음 연결했을 당시의 검증 기록이다.
+> 현재 tag-normal target-pose 알고리즘의 authoritative interface와 실차 절차는
+> [Leader Tag-Normal 최종 정렬 검증 가이드](LEADER_TAG_NORMAL_ALIGNMENT_VALIDATION_GUIDE.md)를
+> 따른다. 아래의 `base_target_forward`/controller `target_forward` 설명은 현행
+> 파라미터가 아니라 변경 전 구조를 기록한 것이다.
+
 ## 1. 목적과 범위
 
 이 문서는 Jetson에서 `damgc_robot` repository를 clone 또는 pull한 개발자가

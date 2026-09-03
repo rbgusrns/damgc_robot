@@ -1,8 +1,8 @@
 """ROS-independent Leader approach command calculation and sample checks."""
 
 from dataclasses import dataclass
-from math import isfinite
-from typing import Optional
+from math import atan2, hypot, isfinite, sqrt
+from typing import Optional, Sequence
 
 
 TAG_LOST = "TAG_LOST"
@@ -12,6 +12,7 @@ APPROACH = "APPROACH"
 TOO_CLOSE = "TOO_CLOSE"
 FINE_ALIGN_LEFT = "FINE_ALIGN_LEFT"
 FINE_ALIGN_RIGHT = "FINE_ALIGN_RIGHT"
+FINAL_APPROACH = "FINAL_APPROACH"
 STABILIZING = "STABILIZING"
 ALIGNED = "ALIGNED"
 
@@ -24,6 +25,7 @@ KNOWN_STATES = frozenset(
         TOO_CLOSE,
         FINE_ALIGN_LEFT,
         FINE_ALIGN_RIGHT,
+        FINAL_APPROACH,
         STABILIZING,
         ALIGNED,
     }
@@ -34,28 +36,27 @@ KNOWN_STATES = frozenset(
 class ControllerParameters:
     """Provisional gains and raw-output limits for software validation."""
 
-    target_forward: float
     linear_gain: float
     angular_gain: float
     lateral_gain: float
     max_raw_linear_speed: float
     max_raw_angular_speed: float
-    allow_reverse: bool
+    max_final_linear_speed: float
+    max_final_angular_speed: float
 
     def validate(self) -> None:
         """Raise ``ValueError`` when command calculation would be ambiguous."""
         numeric_values = (
-            self.target_forward,
             self.linear_gain,
             self.angular_gain,
             self.lateral_gain,
             self.max_raw_linear_speed,
             self.max_raw_angular_speed,
+            self.max_final_linear_speed,
+            self.max_final_angular_speed,
         )
         if not all(isfinite(value) for value in numeric_values):
             raise ValueError("Controller parameters must be finite")
-        if self.target_forward <= 0.0:
-            raise ValueError("target_forward must be greater than zero")
         if self.linear_gain <= 0.0:
             raise ValueError("linear_gain must be greater than zero")
         if self.angular_gain <= 0.0:
@@ -66,15 +67,23 @@ class ControllerParameters:
             raise ValueError("max_raw_linear_speed must be greater than zero")
         if self.max_raw_angular_speed <= 0.0:
             raise ValueError("max_raw_angular_speed must be greater than zero")
+        if not 0.0 < self.max_final_linear_speed <= self.max_raw_linear_speed:
+            raise ValueError(
+                "max_final_linear_speed must be positive and no greater than raw max"
+            )
+        if not 0.0 < self.max_final_angular_speed <= self.max_raw_angular_speed:
+            raise ValueError(
+                "max_final_angular_speed must be positive and no greater than raw max"
+            )
 
 
 @dataclass(frozen=True)
 class BaseControlMeasurement:
-    """Continuous planar errors derived from one stamped base-frame pose."""
+    """Continuous errors encoded by one planar control-target pose."""
 
-    forward_distance: float
-    lateral_error: float
-    bearing: float
+    target_x: float
+    target_y: float
+    target_yaw: float
 
 
 @dataclass(frozen=True)
@@ -88,6 +97,17 @@ class PlanarCommand:
 def clamp(value: float, limit: float) -> float:
     """Clamp a finite scalar to a symmetric limit."""
     return max(-limit, min(limit, value))
+
+
+def quaternion_yaw(quaternion: Sequence[float]) -> Optional[float]:
+    """Extract yaw from an explicitly planar target-pose quaternion."""
+    if len(quaternion) != 4 or not all(isfinite(value) for value in quaternion):
+        return None
+    norm = sqrt(sum(value * value for value in quaternion))
+    if norm <= 1.0e-12:
+        return None
+    x, y, z, w = (value / norm for value in quaternion)
+    return atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
 
 def sample_is_fresh(
@@ -154,49 +174,70 @@ def compute_approach_command(
         return PlanarCommand()
 
     values = (
-        measurement.forward_distance,
-        measurement.lateral_error,
-        measurement.bearing,
+        measurement.target_x,
+        measurement.target_y,
+        measurement.target_yaw,
     )
     if not all(isfinite(value) for value in values):
         return PlanarCommand()
-    if measurement.forward_distance <= 0.0:
-        return PlanarCommand()
-
     if state in {TAG_LOST, TOO_CLOSE, STABILIZING, ALIGNED}:
         return PlanarCommand()
 
+    target_bearing = atan2(measurement.target_y, measurement.target_x)
+
     if state == TURN_LEFT:
         angular = clamp(
-            parameters.angular_gain * measurement.bearing,
+            parameters.angular_gain * target_bearing,
             parameters.max_raw_angular_speed,
         )
         return PlanarCommand(angular_z=angular) if angular > 0.0 else PlanarCommand()
 
     if state == TURN_RIGHT:
         angular = clamp(
-            parameters.angular_gain * measurement.bearing,
+            parameters.angular_gain * target_bearing,
             parameters.max_raw_angular_speed,
         )
         return PlanarCommand(angular_z=angular) if angular < 0.0 else PlanarCommand()
 
-    angular = clamp(
-        parameters.angular_gain * measurement.bearing
-        + parameters.lateral_gain * measurement.lateral_error,
-        parameters.max_raw_angular_speed,
-    )
-
     if state == APPROACH:
-        forward_error = measurement.forward_distance - parameters.target_forward
-        linear = parameters.linear_gain * forward_error
-        if not parameters.allow_reverse:
-            linear = max(0.0, linear)
-        linear = clamp(linear, parameters.max_raw_linear_speed)
+        if measurement.target_x <= 0.0:
+            return PlanarCommand()
+        linear = min(
+            parameters.linear_gain
+            * hypot(measurement.target_x, measurement.target_y),
+            parameters.max_raw_linear_speed,
+        )
+        angular = clamp(
+            parameters.angular_gain * target_bearing,
+            parameters.max_raw_angular_speed,
+        )
         return PlanarCommand(linear_x=linear, angular_z=angular)
 
     if state == FINE_ALIGN_LEFT:
+        angular = clamp(
+            parameters.angular_gain * measurement.target_yaw,
+            parameters.max_raw_angular_speed,
+        )
         return PlanarCommand(angular_z=angular) if angular > 0.0 else PlanarCommand()
     if state == FINE_ALIGN_RIGHT:
+        angular = clamp(
+            parameters.angular_gain * measurement.target_yaw,
+            parameters.max_raw_angular_speed,
+        )
         return PlanarCommand(angular_z=angular) if angular < 0.0 else PlanarCommand()
+
+    if state == FINAL_APPROACH:
+        if measurement.target_x <= 0.0:
+            return PlanarCommand()
+        linear = min(
+            parameters.linear_gain * measurement.target_x,
+            parameters.max_final_linear_speed,
+        )
+        angular = clamp(
+            parameters.angular_gain * measurement.target_yaw
+            + parameters.lateral_gain * measurement.target_y,
+            parameters.max_final_angular_speed,
+        )
+        return PlanarCommand(linear_x=linear, angular_z=angular)
 
     return PlanarCommand()

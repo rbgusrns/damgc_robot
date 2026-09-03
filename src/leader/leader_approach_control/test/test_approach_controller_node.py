@@ -29,19 +29,21 @@ def test_twist_populates_only_differential_drive_axes() -> None:
     assert twist.angular.y == 0.0
 
 
-def test_pose_validation_accepts_finite_forward_pose() -> None:
+def test_pose_validation_accepts_finite_planar_target_pose() -> None:
     assert ApproachControllerNode._pose_is_valid(make_pose())
 
 
-def test_pose_validation_rejects_nonfinite_or_nonforward_pose() -> None:
+def test_pose_validation_rejects_nonfinite_or_invalid_quaternion() -> None:
     pose = make_pose()
     pose.pose.position.y = nan
     assert not ApproachControllerNode._pose_is_valid(pose)
 
     pose = make_pose()
-    pose.pose.position.x = 0.0
-    assert not ApproachControllerNode._pose_is_valid(pose)
-
-    pose = make_pose()
     pose.pose.orientation.w = 0.0
     assert not ApproachControllerNode._pose_is_valid(pose)
+
+
+def test_pose_validation_allows_negative_target_for_stop_state() -> None:
+    pose = make_pose()
+    pose.pose.position.x = -0.01
+    assert ApproachControllerNode._pose_is_valid(pose)

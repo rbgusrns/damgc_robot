@@ -1,5 +1,9 @@
 # Leader AprilTag Drive Run Guide
 
+Tag orientation을 사용하는 최종 정렬의 target pose, parameter, RViz 및 단계별 실차
+검증은 [Leader Tag-Normal 최종 정렬 검증 가이드](../../rescue_robot_apriltag/docs/LEADER_TAG_NORMAL_ALIGNMENT_VALIDATION_GUIDE.md)를
+함께 따른다.
+
 ## 1. 목적
 
 이 문서는 ROS 2 명령에 익숙하지 않은 사용자가 Leader 로봇의 AprilTag 실제
@@ -130,13 +134,14 @@ ros2 topic echo /leader/base_alignment/state
 
 | 상태 | 의미 |
 |---|---|
-| `TURN_LEFT` | 태그 방향으로 좌회전이 필요하다. |
-| `TURN_RIGHT` | 태그 방향으로 우회전이 필요하다. |
-| `APPROACH` | 방향이 허용 범위이고 앞으로 접근해야 한다. |
-| `FINE_ALIGN_LEFT` / `FINE_ALIGN_RIGHT` | 목표 부근에서 미세 회전 정렬이 필요하다. |
-| `TOO_CLOSE` | 목표보다 가까워 정지한다. |
-| `STABILIZING` | 정렬 상태가 안정적으로 유지되는지 기다린다. |
-| `ALIGNED` | 정렬 완료 상태이며 정지한다. |
+| `TURN_LEFT` | pre-align target 방향으로 좌회전이 필요하다. |
+| `TURN_RIGHT` | pre-align target 방향으로 우회전이 필요하다. |
+| `APPROACH` | pre-align target을 향해 접근한다. |
+| `FINE_ALIGN_LEFT` / `FINE_ALIGN_RIGHT` | tag normal 기반 final yaw 제자리 정렬이 필요하다. |
+| `FINAL_APPROACH` | final target까지 낮은 속도로 접근한다. |
+| `TOO_CLOSE` | final target을 지나 후진 없이 복구할 수 없어 정지한다. |
+| `STABILIZING` | final position과 yaw의 연속 안정성을 확인한다. |
+| `ALIGNED` | final position과 yaw 정렬 완료 상태이며 정지한다. |
 | `TAG_LOST` | 유효한 태그를 찾지 못해 정지한다. |
 
 controller의 startup 설정은 다음과 같이 확인한다.
@@ -224,10 +229,11 @@ ros2 service call /leader/velocity_guard/enable std_srvs/srv/SetBool "{data: fal
 
 | AprilTag 조건 | state | raw command | guard enabled 후 final command | motor 동작 |
 |---|---|---|---|---|
-| 왼쪽 | `TURN_LEFT` | `angular.z > 0` | `angular.z > 0` | 좌회전 |
-| 오른쪽 | `TURN_RIGHT` | `angular.z < 0` | `angular.z < 0` | 우회전 |
-| 멀고 중앙 | `APPROACH` | `linear.x > 0` | `linear.x > 0` | 전진 |
-| 목표 부근 좌/우 오차 | `FINE_ALIGN_LEFT/RIGHT` | 해당 방향 angular command | 제한된 angular command | 미세 회전 |
+| pre-align target 왼쪽 | `TURN_LEFT` | `angular.z > 0` | `angular.z > 0` | 좌회전 |
+| pre-align target 오른쪽 | `TURN_RIGHT` | `angular.z < 0` | `angular.z < 0` | 우회전 |
+| pre-align target 정면 | `APPROACH` | `linear.x > 0` | `linear.x > 0` | 전진 |
+| final yaw 오차 | `FINE_ALIGN_LEFT/RIGHT` | 해당 방향 angular command | 제한된 angular command | 제자리 미세 회전 |
+| final yaw 정렬 후 | `FINAL_APPROACH` | 낮은 `linear.x > 0` | 제한된 저속 command | 최종 접근 |
 | 숨김 또는 timeout | `TAG_LOST` | zero | zero | 정지 |
 | 너무 가까움/안정화/정렬 완료 | `TOO_CLOSE`, `STABILIZING`, `ALIGNED` | zero | zero | 정지 |
 

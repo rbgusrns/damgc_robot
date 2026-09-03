@@ -16,7 +16,7 @@ def yaml_scalar(path: Path, key: str) -> float:
     raise AssertionError("Missing parameter %s in %s" % (key, path))
 
 
-def test_controller_and_base_state_targets_match_leader_distance() -> None:
+def test_follower_controller_and_base_state_targets_match() -> None:
     follower_root = Path(__file__).resolve().parents[2]
     controller_config = (
         follower_root / "follower_approach_control/config/approach_controller.yaml"
@@ -24,16 +24,24 @@ def test_controller_and_base_state_targets_match_leader_distance() -> None:
     perception_config = (
         follower_root / "follower_supply_perception/config/approach.yaml"
     )
-    leader_config = (
-        follower_root.parent
-        / "leader/leader_approach_control/config/approach_controller.yaml"
-    )
     controller_target = yaml_scalar(controller_config, "target_forward")
     perception_target = yaml_scalar(perception_config, "base_target_forward")
-    leader_target = yaml_scalar(leader_config, "target_forward")
     assert controller_target == pytest.approx(0.25)
     assert perception_target == pytest.approx(0.25)
-    assert controller_target == perception_target == leader_target
+    assert controller_target == perception_target
+
+
+def test_leader_owns_tag_normal_distances_only_in_perception() -> None:
+    follower_root = Path(__file__).resolve().parents[2]
+    leader_root = follower_root.parent / "leader"
+    controller_config = (
+        leader_root / "leader_approach_control/config/approach_controller.yaml"
+    )
+    perception_config = leader_root / "rescue_robot_apriltag/config/approach.yaml"
+
+    assert yaml_scalar(perception_config, "pre_align_distance") == pytest.approx(0.30)
+    assert yaml_scalar(perception_config, "final_target_distance") == pytest.approx(0.20)
+    assert "target_forward:" not in controller_config.read_text(encoding="utf-8")
 
 
 def test_live_camera_mode_and_controller_freshness_contract() -> None:

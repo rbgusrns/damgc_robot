@@ -23,10 +23,12 @@
     publish_rate: 20.0
     filter_window: 5
 
-    # Provisional base_link alignment values for topic-level software testing.
-    # These are not a calibrated grasp distance or a physical gripper target.
-    base_target_forward: 0.25
-    base_forward_tolerance: 0.03
-    base_lateral_tolerance: 0.02
-    base_bearing_tolerance_deg: 5.0
+    # Tag-normal target-pose alignment. Distances are from the tag plane to the
+    # desired base_link origin and remain initial values pending grasp tuning.
+    pre_align_distance: 0.30
+    final_target_distance: 0.20
+    pre_align_position_tolerance: 0.02
+    pre_align_heading_tolerance_deg: 5.0
+    final_position_tolerance: 0.015
+    final_yaw_tolerance_deg: 4.0
     base_stable_time: 0.8
