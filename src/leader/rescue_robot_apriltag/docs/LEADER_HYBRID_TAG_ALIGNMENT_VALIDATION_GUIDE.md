@@ -385,6 +385,13 @@ angular.z = 0
 `odom_forward_progress`가 증가하여 계획 거리 이상이 되면 command는 즉시
 `linear.x=0`, `angular.z=0`이 되고 public state가 `ALIGNED`가 된다.
 
+`/leader/supply/base_relative_pose.header.stamp` 또는 입력 TF의
+`transform.header.stamp`를 함께 확인한다. TF lookup이 계속 성공하더라도 같은 source
+stamp가 반복되면 새 AprilTag sample이 아니다. `blind_last_tag_max_age` 이후에는
+`tag_timeout` 전체를 기다리지 않고 close-range eligibility가 평가되어야 한다.
+정상적으로 source stamp가 증가하는 동안에는 기존 visual `FINAL_APPROACH`가 유지되고
+blind mode가 시작되지 않아야 한다.
+
 ### 19.4 Wheels-up and ground test
 
 먼저 바퀴를 들어 올린 상태에서 Tag를 근접 loss시켜 blind mode 진입, forward-only command,
@@ -412,6 +419,21 @@ progress, completion zero를 확인한다. 이후 ground low-speed test에서 �
 
 Blind 중 valid Tag를 다시 보이게 하면 `BLIND_FINAL_APPROACH`가 해제되고 현재 pose 기반
 visual alignment로 복귀해야 한다. Invalid pose는 복귀를 유발하지 않는다.
+
+Blind가 odometry 목표를 정상 완료한 뒤에는 `/leader/base_alignment/state`가 한 번만
+`ALIGNED`가 아니라 다음 cycle들에서도 계속 `ALIGNED`여야 한다. completed 상태에서
+Tag가 다시 검출되어도 명시적인 새 approach cycle 없이 재주행하지 않는다. 현재 구현의
+새 cycle 시작 방법은 `apriltag_approach` node/process 재시작이다.
+
+```bash
+ros2 topic echo /leader/base_alignment/state
+ros2 topic echo /leader/alignment/control_mode
+ros2 topic echo /leader/cmd_vel
+```
+
+완료 후 기대 결과는 반복되는 `ALIGNED`, `control_mode=ALIGNED`,
+`linear.x=0`, `angular.z=0`이다. FAR/TURN/RECENTER 또는 misaligned final loss는
+기존처럼 `TAG_LOST`와 zero command를 유지해야 한다.
 
 Guard OFF 상태에서 raw command를 확인한 뒤 velocity guard를 enable하면 guard가 false인
 명령을 최종 `/leader/cmd_vel`에 내보내지 않는지 확인한다. Emergency stop과 controller/guard

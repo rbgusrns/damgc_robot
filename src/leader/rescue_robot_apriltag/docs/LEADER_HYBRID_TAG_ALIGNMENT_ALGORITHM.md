@@ -483,24 +483,35 @@ hysteresis, final yaw와 visual final approach는 변경하지 않는다. 마지
 ```text
 FINAL_APPROACH
       │
-  Tag visible?
-    /       \
-  YES        NO
-   │          │
-visual     eligible?
-control     /    \
-           NO     YES
-           │       │
-          STOP   BLIND_FINAL_APPROACH
-                    │
-                 odometry
-                    │
-                  STOP
-                    │
-                 ALIGNED
+  new Tag samples continue?
+    /               \
+  YES                NO
+   │                  │
+ visual final       source-stamp freshness timeout
+ approach             │
+                    eligibility
+                    /        \
+                  NO          YES
+                  │             │
+                 STOP       BLIND_FINAL_APPROACH
+                                │
+                             odometry
+                                │
+                         target reached
+                                │
+                      ALIGNED + zero latched
 ```
 
-Generic `TAG_LOST`는 여전히 즉시 zero command다. 오직 직전 valid phase가 실제
+TF lookup 성공은 새로운 AprilTag detection을 의미하지 않는다. `lookup_transform(...,
+Time())`은 detector가 publish를 멈춘 뒤에도 TF buffer가 보관한 마지막 transform을
+반환할 수 있다. 따라서 timer 실행 시각이 아니라 transform `header.stamp`를 source
+timestamp로 사용한다. 같은 tag의 source stamp가 이전에 처리한 stamp보다 클 때만 새
+visual observation으로 인정하며, 같은 stamp를 반복해서 읽어도 last-valid snapshot과
+freshness를 갱신하지 않는다.
+
+Generic `TAG_LOST`는 여전히 즉시 zero command다. 다만 FINAL_APPROACH에서 실제 source
+stamp가 `blind_last_tag_max_age` 동안 갱신되지 않은 경우에는 global `tag_timeout`을
+기다리지 않고 close-range loss 후보를 평가한다. 오직 직전 valid phase가 실제
 `FINAL_APPROACH`였고, close range·fresh pose·작은 yaw/cross-track 오차·짧은 remaining
 distance·valid odometry를 모두 만족하는 경우에만 internal mode
 `BLIND_FINAL_APPROACH`를 사용한다. `FINE_ALIGN_LEFT/RIGHT`, TURN, COARSE, NEAR,
@@ -529,13 +540,18 @@ forward_progress = cos(start_yaw) * dx + sin(start_yaw) * dy
 
 이 방식은 odom/world X축과 로봇의 시작 전진 방향이 달라도 실제 전진량을 측정한다.
 Blind 중에는 저속 positive `linear.x`만 사용하고 `angular.z`는 0이다. 진행량이 계획량에
-도달하면 zero command를 publish하고 `ALIGNED`로 전환한다.
+도달하면 zero command를 publish하고 `ALIGNED`로 전환한 뒤 completion latch를 설정한다.
+Latch가 유지되는 동안 Tag loss나 cached TF는 `TAG_LOST`로 되돌리거나 같은 blind plan을
+다시 만들지 못한다.
 
 ### 31.4 Re-acquisition과 safety
 
 Blind 중 valid Tag가 재검출되면 기존 visual 정보를 우선한다. blind snapshot과 plan을
 폐기하고 현재 pose를 기존 hybrid state machine에 입력한다. Invalid/stale pose는 재검출로
-인정하지 않는다.
+인정하지 않으며, 동일한 TF stamp도 재검출로 인정하지 않는다. 반대로 blind 완료 후의
+Tag 재검출은 terminal `ALIGNED`를 해제하지 않는다. 현재 Leader node에는 perception
+reset service가 없으므로 새 approach cycle은 `apriltag_approach` 프로세스 재시작으로
+시작하며, 그때 completion latch가 초기화된다.
 
 Odom이 stale/unavailable/invalid이거나 NaN/inf, 비정상 jump, 음수 progress 또는 watchdog
 timeout이 발생하면 즉시 zero하고 `ALIGNED`로 전환하지 않는다. 시간은 주행거리의 대체가

@@ -16,9 +16,11 @@ from rescue_robot_apriltag.approach_logic import (
     compute_measurement,
 )
 from rescue_robot_apriltag.base_alignment_logic import (
+    AlignmentDecision,
     BaseAlignmentMeasurement,
     BaseAlignmentStateMachine,
     BaseAlignmentThresholds,
+    ControlMode,
 )
 from rescue_robot_apriltag.apriltag_approach_node import AprilTagApproachNode
 from rescue_robot_apriltag.base_pose import (
@@ -422,7 +424,7 @@ def test_valid_cycle_keeps_camera_outputs_and_passes_same_pose_to_base() -> None
         _angle_pub=publishers[6],
         _state_pub=publishers[7],
         _log_state_change=lambda _state: None,
-        _publish_base_outputs=base_inputs.append,
+        _publish_base_outputs=lambda pose, _is_new: base_inputs.append(pose),
     )
     selected = TagObservation(
         tag_id=0,
@@ -596,3 +598,166 @@ def test_camera_lost_cycle_also_publishes_base_tag_lost() -> None:
     assert harness._tag_id_pub.messages[-1].data == -1
     assert harness._state_pub.messages[-1].data == ApproachState.TAG_LOST.value
     assert harness._base_state_pub.messages[-1].data == ApproachState.TAG_LOST.value
+
+
+def make_tag_observation(stamp_nanoseconds: int) -> TagObservation:
+    """Create a valid source-stamped observation for lifecycle tests."""
+    return TagObservation(
+        tag_id=0,
+        x=0.27,
+        y=0.0,
+        z=1.0,
+        quaternion=(0.0, 0.0, 0.0, 1.0),
+        stamp_nanoseconds=stamp_nanoseconds,
+    )
+
+
+def test_cached_tf_stamp_is_not_a_new_observation_or_snapshot_refresh() -> None:
+    harness = SimpleNamespace(
+        _last_processed_observation_stamps={},
+        _last_valid_tag_x=None,
+        _last_valid_timestamp=None,
+        _last_valid_yaw_error=None,
+        _last_valid_cross_track=None,
+    )
+    first = make_tag_observation(10_000_000_000)
+
+    assert AprilTagApproachNode._accept_observation_stamp(harness, first)
+    assert not AprilTagApproachNode._accept_observation_stamp(harness, first)
+
+    AprilTagApproachNode._remember_last_valid_final_sample(
+        harness,
+        SimpleNamespace(forward_distance=0.27),
+        SimpleNamespace(final_yaw_error=0.0, final_y=0.0),
+        AlignmentDecision(ApproachState.FINAL_APPROACH, ControlMode.FINAL_APPROACH),
+        10.0,
+        True,
+    )
+    AprilTagApproachNode._remember_last_valid_final_sample(
+        harness,
+        SimpleNamespace(forward_distance=0.10),
+        SimpleNamespace(final_yaw_error=0.5, final_y=0.5),
+        AlignmentDecision(ApproachState.FINAL_APPROACH, ControlMode.FINAL_APPROACH),
+        10.0,
+        False,
+    )
+
+    assert harness._last_valid_tag_x == pytest.approx(0.27)
+    assert harness._last_valid_timestamp == pytest.approx(10.0)
+    assert harness._last_valid_yaw_error == pytest.approx(0.0)
+    assert harness._last_valid_cross_track == pytest.approx(0.0)
+
+
+def test_close_range_freshness_can_plan_before_global_tag_timeout() -> None:
+    harness = SimpleNamespace(
+        _last_valid_tag_x=0.27,
+        _last_valid_timestamp=10.0,
+        _last_valid_yaw_error=0.0,
+        _last_valid_cross_track=0.0,
+        _blind_last_tag_max_age=0.25,
+        _final_target_distance=0.20,
+        _blind_max_distance=0.12,
+        _blind_final_approach_enabled=True,
+        _blind_activation_max_tag_x=0.30,
+        _final_yaw_tolerance_deg=4.0,
+        _final_position_tolerance=0.015,
+        _fresh_odom=lambda _now: (0.0, 0.0, 0.0),
+    )
+
+    planned = AprilTagApproachNode._blind_plan(harness, 10.25)
+
+    assert planned == pytest.approx(0.07)
+
+
+def test_blind_completion_sets_terminal_latch_and_lost_cannot_reenter() -> None:
+    published = []
+    harness = SimpleNamespace(
+        _blind_start_time=10.0,
+        _blind_max_duration=5.0,
+        _blind_start_odom=(0.0, 0.0, 0.0),
+        _blind_previous_odom=(0.05, 0.0, 0.0),
+        _blind_planned_distance=0.07,
+        _blind_active=True,
+        _fresh_odom=lambda _now: (0.071, 0.0, 0.0),
+        _last_odom_progress=0.05,
+        _publish_blind_command=lambda state, mode, _now: published.append(
+            (state, mode)
+        ),
+        _publish_completed_cycle=lambda _now: published.append("latched"),
+    )
+
+    AprilTagApproachNode._publish_blind_cycle(harness, 10.2)
+
+    assert harness._blind_active is False
+    assert harness._blind_completed is True
+    assert published[-1] == (ApproachState.ALIGNED, ControlMode.ALIGNED)
+
+    AprilTagApproachNode._publish_lost(harness, 10.3)
+
+    assert published[-1] == "latched"
+    assert harness._blind_active is False
+
+
+def test_timer_treats_duplicate_tf_as_loss_candidate_at_close_range() -> None:
+    selected = make_tag_observation(10_000_000_000)
+    lost_cycles = []
+    harness = SimpleNamespace(
+        _blind_completed=False,
+        _blind_active=False,
+        _last_processed_observation_stamps={0: selected.stamp_nanoseconds},
+        _blind_last_tag_max_age=0.25,
+        _last_valid_timestamp=10.0,
+        _accept_observation_stamp=lambda observation: AprilTagApproachNode._accept_observation_stamp(
+            harness, observation
+        ),
+        _final_sample_age=lambda now: AprilTagApproachNode._final_sample_age(
+            harness, now
+        ),
+        _selection_mode="priority",
+        _candidate_ids=lambda: (0,),
+        _lookup_observation=lambda _tag_id, _now: selected,
+        get_clock=lambda: SimpleNamespace(now=lambda: Time(nanoseconds=10_250_000_000)),
+        _publish_lost=lambda now: lost_cycles.append(now),
+    )
+
+    AprilTagApproachNode._on_timer(harness)
+
+    assert lost_cycles == [pytest.approx(10.25)]
+
+
+def test_timer_does_not_abort_active_blind_for_duplicate_tf() -> None:
+    selected = make_tag_observation(10_000_000_000)
+    blind_cycles = []
+    harness = SimpleNamespace(
+        _blind_completed=False,
+        _blind_active=True,
+        _last_processed_observation_stamps={0: selected.stamp_nanoseconds},
+        _accept_observation_stamp=lambda observation: AprilTagApproachNode._accept_observation_stamp(
+            harness, observation
+        ),
+        _selection_mode="priority",
+        _candidate_ids=lambda: (0,),
+        _lookup_observation=lambda _tag_id, _now: selected,
+        get_clock=lambda: SimpleNamespace(now=lambda: Time(nanoseconds=10_100_000_000)),
+        _publish_blind_cycle=lambda now: blind_cycles.append(now),
+    )
+
+    AprilTagApproachNode._on_timer(harness)
+
+    assert blind_cycles == [pytest.approx(10.1)]
+
+
+def test_timer_prioritizes_completed_latch_over_tag_reacquisition() -> None:
+    completed_cycles = []
+    lookups = []
+    harness = SimpleNamespace(
+        _blind_completed=True,
+        get_clock=lambda: SimpleNamespace(now=lambda: Time(nanoseconds=10_100_000_000)),
+        _publish_completed_cycle=lambda now: completed_cycles.append(now),
+        _candidate_ids=lambda: lookups.append(True),
+    )
+
+    AprilTagApproachNode._on_timer(harness)
+
+    assert completed_cycles == [pytest.approx(10.1)]
+    assert not lookups

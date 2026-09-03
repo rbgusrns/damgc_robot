@@ -177,8 +177,10 @@ class AprilTagApproachNode(Node):
         self._last_valid_timestamp: Optional[float] = None
         self._last_valid_yaw_error: Optional[float] = None
         self._last_valid_cross_track: Optional[float] = None
+        self._last_processed_observation_stamps = {}
         self._last_odom: Optional[tuple] = None
         self._blind_active = False
+        self._blind_completed = False
         self._blind_planned_distance = 0.0
         self._blind_start_odom: Optional[tuple] = None
         self._blind_previous_odom: Optional[tuple] = None
@@ -413,6 +415,10 @@ class AprilTagApproachNode(Node):
     def _on_timer(self) -> None:
         """Look up candidates, select and filter one, then publish one cycle."""
         now = self.get_clock().now()
+        now_seconds = now.nanoseconds / 1.0e9
+        if getattr(self, "_blind_completed", False):
+            self._publish_completed_cycle(now_seconds)
+            return
         candidate_ids = self._candidate_ids()
         observations = [
             observation
@@ -423,12 +429,25 @@ class AprilTagApproachNode(Node):
             observations, list(candidate_ids), self._selection_mode
         )
         if selected is None:
-            self._publish_lost(now.nanoseconds / 1.0e9)
+            self._publish_lost(now_seconds)
             return
 
+        is_new_observation = self._accept_observation_stamp(selected)
         if getattr(self, "_blind_active", False):
-            # A fresh valid pose supersedes the blind plan immediately.
-            self._clear_blind_plan()
+            if is_new_observation:
+                # A fresh valid pose supersedes the blind plan immediately.
+                self._clear_blind_plan()
+            else:
+                # A cached TF is not a reacquisition; continue the odometry plan.
+                self._publish_blind_cycle(now_seconds)
+                return
+
+        if (
+            not is_new_observation
+            and self._final_sample_age(now_seconds) >= self._blind_last_tag_max_age
+        ):
+            self._publish_lost(now_seconds)
+            return
 
         if selected.tag_id != self._active_tag_id:
             self._translation_filter.reset()
@@ -446,7 +465,7 @@ class AprilTagApproachNode(Node):
         state = self._state_machine.update(
             measurement, now.nanoseconds / 1.0e9, selected.tag_id
         )
-        self._publish_valid(selected, measurement, state)
+        self._publish_valid(selected, measurement, state, is_new_observation)
 
     def _on_odom(self, message: Odometry) -> None:
         """Cache the existing Leader wheel odometry with local receipt time."""
@@ -519,21 +538,40 @@ class AprilTagApproachNode(Node):
         geometry: TargetGeometry,
         decision: AlignmentDecision,
         stamp_seconds: float,
+        is_new_observation: bool = True,
     ) -> None:
         """Keep only the latest sample from the visual final-approach phase."""
         if (
-            decision.mode == ControlMode.FINAL_APPROACH
+            is_new_observation
+            and decision.mode == ControlMode.FINAL_APPROACH
             and decision.state == ApproachState.FINAL_APPROACH
         ):
             self._last_valid_tag_x = metrics.forward_distance
             self._last_valid_timestamp = stamp_seconds
             self._last_valid_yaw_error = geometry.final_yaw_error
             self._last_valid_cross_track = geometry.final_y
-        else:
+        elif is_new_observation:
             self._last_valid_tag_x = None
             self._last_valid_timestamp = None
             self._last_valid_yaw_error = None
             self._last_valid_cross_track = None
+
+    def _accept_observation_stamp(self, observation: TagObservation) -> bool:
+        """Accept only a strictly newer source-stamped observation as new."""
+        stamp = observation.stamp_nanoseconds
+        if stamp <= 0:
+            return False
+        previous = self._last_processed_observation_stamps.get(observation.tag_id)
+        if previous is not None and stamp <= previous:
+            return False
+        self._last_processed_observation_stamps[observation.tag_id] = stamp
+        return True
+
+    def _final_sample_age(self, now_seconds: float) -> float:
+        """Return age of the last actual visual final-approach sample."""
+        if self._last_valid_timestamp is None:
+            return float("inf")
+        return now_seconds - self._last_valid_timestamp
 
     def _blind_plan(self, now_seconds: float) -> Optional[float]:
         """Build a blind plan only from a fresh visual final-approach sample."""
@@ -583,6 +621,15 @@ class AprilTagApproachNode(Node):
         self._blind_previous_odom = None
         self._blind_start_time = None
         self._last_odom_progress = 0.0
+
+    def _publish_completed_cycle(self, now_seconds: float) -> None:
+        """Hold a completed blind approach at ALIGNED with zero motion."""
+        self._detected_pub.publish(Bool(data=False))
+        self._tag_id_pub.publish(Int32(data=-1))
+        self._state_pub.publish(String(data=ApproachState.TAG_LOST.value))
+        self._publish_blind_command(
+            ApproachState.ALIGNED, ControlMode.ALIGNED, now_seconds
+        )
 
     def _publish_blind_diagnostics(self, active: bool) -> None:
         """Publish the small set of blind-fallback values used in field tests."""
@@ -666,6 +713,7 @@ class AprilTagApproachNode(Node):
         self._last_odom_progress = max(0.0, progress)
         if self._last_odom_progress >= self._blind_planned_distance:
             self._blind_active = False
+            self._blind_completed = True
             self._publish_blind_command(
                 ApproachState.ALIGNED, ControlMode.ALIGNED, now_seconds
             )
@@ -713,6 +761,9 @@ class AprilTagApproachNode(Node):
 
     def _publish_lost(self, now_seconds: float) -> None:
         """Publish only loss outputs and clear all temporal measurement state."""
+        if getattr(self, "_blind_completed", False):
+            self._publish_completed_cycle(now_seconds)
+            return
         if getattr(self, "_blind_active", False):
             self._detected_pub.publish(Bool(data=False))
             self._tag_id_pub.publish(Int32(data=-1))
@@ -757,7 +808,9 @@ class AprilTagApproachNode(Node):
         self._base_state_pub.publish(String(data=decision.state.value))
         self._log_base_state_change(decision.state)
 
-    def _publish_base_outputs(self, camera_pose: PoseStamped) -> None:
+    def _publish_base_outputs(
+        self, camera_pose: PoseStamped, is_new_observation: bool = True
+    ) -> None:
         """Transform and publish one fresh camera pose in the configured base frame."""
         stamp = camera_pose.header.stamp
         now_nanoseconds = self.get_clock().now().nanoseconds
@@ -877,6 +930,7 @@ class AprilTagApproachNode(Node):
                 geometry,
                 decision,
                 stamp.sec + stamp.nanosec / 1.0e9,
+                is_new_observation,
             )
         if hasattr(self, "_blind_active_pub"):
             self._publish_blind_diagnostics(False)
@@ -968,6 +1022,7 @@ class AprilTagApproachNode(Node):
         selected: TagObservation,
         measurement: RelativeMeasurement,
         state: ApproachState,
+        is_new_observation: bool = True,
     ) -> None:
         """Publish a fresh pose, metrics, selected identity, and approach state."""
         pose = PoseStamped()
@@ -990,7 +1045,7 @@ class AprilTagApproachNode(Node):
         self._angle_pub.publish(Float64(data=measurement.angle))
         self._state_pub.publish(String(data=state.value))
         self._log_state_change(state)
-        self._publish_base_outputs(pose)
+        self._publish_base_outputs(pose, is_new_observation)
 
     def _log_state_change(self, state: ApproachState) -> None:
         """Log state transitions once instead of logging at timer frequency."""
