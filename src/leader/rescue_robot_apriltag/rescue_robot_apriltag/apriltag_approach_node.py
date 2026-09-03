@@ -7,12 +7,13 @@ right, y points down, and z points forward.  Camera-frame alignment outputs are
 preserved while additional observations are transformed into ``base_link``.
 """
 
-from math import atan2, cos, isfinite, sin
+from math import atan2, cos, hypot, isfinite, radians, sin, sqrt
 from typing import List, Optional, Sequence
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
 from leader_alignment_msgs.msg import LeaderAlignmentCommand
+from nav_msgs.msg import Odometry
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -36,6 +37,11 @@ from rescue_robot_apriltag.base_alignment_logic import (
     BaseAlignmentMeasurement,
     BaseAlignmentStateMachine,
     BaseAlignmentThresholds,
+    ControlMode,
+    compute_blind_remaining_distance,
+    compute_forward_progress,
+    is_blind_final_approach_eligible,
+    normalize_angle,
 )
 from rescue_robot_apriltag.base_pose import (
     PlanarNormalMedianFilter,
@@ -114,6 +120,21 @@ class AprilTagApproachNode(Node):
         self._final_yaw_error_pub = self.create_publisher(
             Float64, "alignment/final_yaw_error", 10
         )
+        self._blind_active_pub = self.create_publisher(
+            Bool, "alignment/blind_final_approach_active", 10
+        )
+        self._last_valid_tag_x_pub = self.create_publisher(
+            Float64, "alignment/last_valid_tag_x", 10
+        )
+        self._blind_distance_pub = self.create_publisher(
+            Float64, "alignment/blind_planned_distance", 10
+        )
+        self._odom_progress_pub = self.create_publisher(
+            Float64, "alignment/odom_forward_progress", 10
+        )
+        self._odom_sub = self.create_subscription(
+            Odometry, self._odom_topic, self._on_odom, 10
+        )
 
         self._translation_filter = MedianTranslationFilter(self._filter_window)
         self._normal_filter = PlanarNormalMedianFilter(self._filter_window)
@@ -152,6 +173,17 @@ class AprilTagApproachNode(Node):
         self._active_tag_id: Optional[int] = None
         self._last_logged_state: Optional[ApproachState] = None
         self._last_logged_base_state: Optional[ApproachState] = None
+        self._last_valid_tag_x: Optional[float] = None
+        self._last_valid_timestamp: Optional[float] = None
+        self._last_valid_yaw_error: Optional[float] = None
+        self._last_valid_cross_track: Optional[float] = None
+        self._last_odom: Optional[tuple] = None
+        self._blind_active = False
+        self._blind_planned_distance = 0.0
+        self._blind_start_odom: Optional[tuple] = None
+        self._blind_previous_odom: Optional[tuple] = None
+        self._blind_start_time: Optional[float] = None
+        self._last_odom_progress = 0.0
         self._timer = self.create_timer(1.0 / self._publish_rate, self._on_timer)
 
     def _declare_parameters(self) -> None:
@@ -185,6 +217,12 @@ class AprilTagApproachNode(Node):
         self.declare_parameter("final_yaw_tolerance_deg", 4.0)
         self.declare_parameter("final_realign_yaw_error_deg", 8.0)
         self.declare_parameter("base_stable_time", 0.8)
+        self.declare_parameter("blind_final_approach_enabled", True)
+        self.declare_parameter("blind_activation_max_tag_x", 0.30)
+        self.declare_parameter("blind_max_distance", 0.12)
+        self.declare_parameter("blind_last_tag_max_age", 0.25)
+        self.declare_parameter("blind_max_duration", 5.0)
+        self.declare_parameter("odom_topic", "/leader/odom/raw")
 
     def _load_and_validate_parameters(self) -> None:
         """Load parameters and reject ambiguous or unsafe configurations."""
@@ -257,6 +295,22 @@ class AprilTagApproachNode(Node):
         self._base_stable_time = float(
             self.get_parameter("base_stable_time").value
         )
+        self._blind_final_approach_enabled = bool(
+            self.get_parameter("blind_final_approach_enabled").value
+        )
+        self._blind_activation_max_tag_x = float(
+            self.get_parameter("blind_activation_max_tag_x").value
+        )
+        self._blind_max_distance = float(
+            self.get_parameter("blind_max_distance").value
+        )
+        self._blind_last_tag_max_age = float(
+            self.get_parameter("blind_last_tag_max_age").value
+        )
+        self._blind_max_duration = float(
+            self.get_parameter("blind_max_duration").value
+        )
+        self._odom_topic = str(self.get_parameter("odom_topic").value)
 
         if not self._source_frame:
             raise ValueError("source_frame must not be empty")
@@ -288,6 +342,10 @@ class AprilTagApproachNode(Node):
             self._stable_time,
             self._publish_rate,
             self._tf_lookup_timeout,
+            self._blind_activation_max_tag_x,
+            self._blind_max_distance,
+            self._blind_last_tag_max_age,
+            self._blind_max_duration,
         )
         if not all(isfinite(value) for value in numeric_values):
             raise ValueError("Numeric parameters must be finite")
@@ -335,6 +393,16 @@ class AprilTagApproachNode(Node):
             raise ValueError("filter_window must be at least 1")
         if self._tf_lookup_timeout < 0.0:
             raise ValueError("tf_lookup_timeout must not be negative")
+        if self._blind_activation_max_tag_x <= 0.0:
+            raise ValueError("blind_activation_max_tag_x must be positive")
+        if self._blind_max_distance < 0.0:
+            raise ValueError("blind_max_distance must not be negative")
+        if self._blind_last_tag_max_age < 0.0:
+            raise ValueError("blind_last_tag_max_age must not be negative")
+        if self._blind_max_duration <= 0.0:
+            raise ValueError("blind_max_duration must be positive")
+        if not self._odom_topic:
+            raise ValueError("odom_topic must not be empty")
 
     def _candidate_ids(self) -> Sequence[int]:
         """Return the tag IDs eligible for the current lookup cycle."""
@@ -358,6 +426,10 @@ class AprilTagApproachNode(Node):
             self._publish_lost(now.nanoseconds / 1.0e9)
             return
 
+        if getattr(self, "_blind_active", False):
+            # A fresh valid pose supersedes the blind plan immediately.
+            self._clear_blind_plan()
+
         if selected.tag_id != self._active_tag_id:
             self._translation_filter.reset()
             self._normal_filter.reset()
@@ -375,6 +447,234 @@ class AprilTagApproachNode(Node):
             measurement, now.nanoseconds / 1.0e9, selected.tag_id
         )
         self._publish_valid(selected, measurement, state)
+
+    def _on_odom(self, message: Odometry) -> None:
+        """Cache the existing Leader wheel odometry with local receipt time."""
+        now_seconds = self.get_clock().now().nanoseconds / 1.0e9
+        position = message.pose.pose.position
+        orientation = message.pose.pose.orientation
+        values = (
+            position.x,
+            position.y,
+            orientation.x,
+            orientation.y,
+            orientation.z,
+            orientation.w,
+        )
+        norm = sqrt(
+            orientation.x * orientation.x
+            + orientation.y * orientation.y
+            + orientation.z * orientation.z
+            + orientation.w * orientation.w
+        )
+        if not all(isfinite(value) for value in values) or not isfinite(norm):
+            self._last_odom = None
+            return
+        if norm <= 1.0e-12:
+            self._last_odom = None
+            return
+        qx, qy, qz, qw = (
+            orientation.x / norm,
+            orientation.y / norm,
+            orientation.z / norm,
+            orientation.w / norm,
+        )
+        yaw = atan2(
+            2.0 * (qw * qz + qx * qy),
+            1.0 - 2.0 * (qy * qy + qz * qz),
+        )
+        stamp = message.header.stamp.sec + message.header.stamp.nanosec / 1.0e9
+        if not all(isfinite(value) for value in (now_seconds, stamp, yaw)) or stamp <= 0.0:
+            self._last_odom = None
+            return
+        self._last_odom = (
+            float(position.x),
+            float(position.y),
+            float(yaw),
+            float(stamp),
+            float(now_seconds),
+        )
+
+    def _fresh_odom(self, now_seconds: float) -> Optional[tuple]:
+        """Return odometry only while both source and receipt data are fresh."""
+        if self._last_odom is None:
+            return None
+        odom_x, odom_y, odom_yaw, stamp, received = self._last_odom
+        if not all(isfinite(value) for value in self._last_odom):
+            return None
+        source_age = now_seconds - stamp
+        receipt_age = now_seconds - received
+        if (
+            source_age < 0.0
+            or source_age > self._blind_last_tag_max_age
+            or receipt_age < 0.0
+            or receipt_age > self._blind_last_tag_max_age
+        ):
+            return None
+        return odom_x, odom_y, odom_yaw
+
+    def _remember_last_valid_final_sample(
+        self,
+        metrics,
+        geometry: TargetGeometry,
+        decision: AlignmentDecision,
+        stamp_seconds: float,
+    ) -> None:
+        """Keep only the latest sample from the visual final-approach phase."""
+        if (
+            decision.mode == ControlMode.FINAL_APPROACH
+            and decision.state == ApproachState.FINAL_APPROACH
+        ):
+            self._last_valid_tag_x = metrics.forward_distance
+            self._last_valid_timestamp = stamp_seconds
+            self._last_valid_yaw_error = geometry.final_yaw_error
+            self._last_valid_cross_track = geometry.final_y
+        else:
+            self._last_valid_tag_x = None
+            self._last_valid_timestamp = None
+            self._last_valid_yaw_error = None
+            self._last_valid_cross_track = None
+
+    def _blind_plan(self, now_seconds: float) -> Optional[float]:
+        """Build a blind plan only from a fresh visual final-approach sample."""
+        if (
+            self._last_valid_tag_x is None
+            or self._last_valid_timestamp is None
+            or self._last_valid_yaw_error is None
+            or self._last_valid_cross_track is None
+        ):
+            return None
+        odom = self._fresh_odom(now_seconds)
+        if odom is None:
+            return None
+        phase = AlignmentDecision(
+            ApproachState.FINAL_APPROACH,
+            # The cached values are written only for this exact visual phase.
+            ControlMode.FINAL_APPROACH,
+        )
+        if not is_blind_final_approach_eligible(
+            enabled=self._blind_final_approach_enabled,
+            phase=phase,
+            last_valid_tag_x=self._last_valid_tag_x,
+            last_valid_timestamp=self._last_valid_timestamp,
+            now_seconds=now_seconds,
+            last_valid_yaw_error=self._last_valid_yaw_error,
+            last_valid_cross_track=self._last_valid_cross_track,
+            final_target_distance=self._final_target_distance,
+            activation_max_tag_x=self._blind_activation_max_tag_x,
+            max_distance=self._blind_max_distance,
+            last_tag_max_age=self._blind_last_tag_max_age,
+            yaw_tolerance=self._final_yaw_tolerance_deg * 3.141592653589793 / 180.0,
+            cross_track_tolerance=self._final_position_tolerance,
+            odometry_valid=True,
+        ):
+            return None
+        return compute_blind_remaining_distance(
+            self._last_valid_tag_x,
+            self._final_target_distance,
+            self._blind_max_distance,
+        )
+
+    def _clear_blind_plan(self) -> None:
+        """Cancel blind execution and discard its one-shot odometry snapshot."""
+        self._blind_active = False
+        self._blind_planned_distance = 0.0
+        self._blind_start_odom = None
+        self._blind_previous_odom = None
+        self._blind_start_time = None
+        self._last_odom_progress = 0.0
+
+    def _publish_blind_diagnostics(self, active: bool) -> None:
+        """Publish the small set of blind-fallback values used in field tests."""
+        self._blind_active_pub.publish(Bool(data=active))
+        self._last_valid_tag_x_pub.publish(
+            Float64(data=self._last_valid_tag_x or 0.0)
+        )
+        self._blind_distance_pub.publish(
+            Float64(data=self._blind_planned_distance)
+        )
+        self._odom_progress_pub.publish(Float64(data=self._last_odom_progress))
+
+    def _publish_blind_command(
+        self, state: ApproachState, mode: ControlMode, now_seconds: float
+    ) -> None:
+        pose = PoseStamped()
+        pose.header.frame_id = self._base_frame
+        pose.header.stamp = self.get_clock().now().to_msg()
+        pose.pose.position.x = self._blind_planned_distance
+        pose.pose.orientation.w = 1.0
+        decision = AlignmentDecision(state, mode)
+        self._publish_atomic_command(pose, decision)
+        self._control_target_pub.publish(pose)
+        self._control_mode_pub.publish(String(data=mode.value))
+        self._base_state_pub.publish(String(data=state.value))
+        self._publish_blind_diagnostics(
+            mode == ControlMode.BLIND_FINAL_APPROACH
+        )
+        self._log_base_state_change(state)
+
+    def _publish_blind_cycle(self, now_seconds: float) -> None:
+        """Advance the fixed blind plan using projected odometry only."""
+        if (
+            self._blind_start_time is None
+            or now_seconds < self._blind_start_time
+            or now_seconds - self._blind_start_time > self._blind_max_duration
+        ):
+            self._clear_blind_plan()
+            self._publish_base_lost(now_seconds)
+            return
+        odom = self._fresh_odom(now_seconds)
+        if odom is None or self._blind_start_odom is None:
+            self._clear_blind_plan()
+            self._publish_base_lost(now_seconds)
+            return
+        progress = compute_forward_progress(
+            self._blind_start_odom[0],
+            self._blind_start_odom[1],
+            self._blind_start_odom[2],
+            odom[0],
+            odom[1],
+        )
+        if progress is None or progress < -0.01:
+            self._clear_blind_plan()
+            self._publish_base_lost(now_seconds)
+            return
+        if self._blind_previous_odom is not None:
+            step = hypot(
+                odom[0] - self._blind_previous_odom[0],
+                odom[1] - self._blind_previous_odom[1],
+            )
+            total_dx = odom[0] - self._blind_start_odom[0]
+            total_dy = odom[1] - self._blind_start_odom[1]
+            lateral_deviation = abs(
+                -sin(self._blind_start_odom[2]) * total_dx
+                + cos(self._blind_start_odom[2]) * total_dy
+            )
+            yaw_deviation = abs(
+                normalize_angle(odom[2] - self._blind_start_odom[2])
+            )
+            if (
+                not isfinite(step)
+                or step > 0.05
+                or lateral_deviation > 0.03
+                or yaw_deviation > radians(12.0)
+            ):
+                self._clear_blind_plan()
+                self._publish_base_lost(now_seconds)
+                return
+        self._blind_previous_odom = odom
+        self._last_odom_progress = max(0.0, progress)
+        if self._last_odom_progress >= self._blind_planned_distance:
+            self._blind_active = False
+            self._publish_blind_command(
+                ApproachState.ALIGNED, ControlMode.ALIGNED, now_seconds
+            )
+            return
+        self._publish_blind_command(
+            ApproachState.FINAL_APPROACH,
+            ControlMode.BLIND_FINAL_APPROACH,
+            now_seconds,
+        )
 
     def _lookup_observation(self, tag_id: int, now: Time) -> Optional[TagObservation]:
         """Return one fresh, valid tag transform or ``None`` when unavailable."""
@@ -413,6 +713,18 @@ class AprilTagApproachNode(Node):
 
     def _publish_lost(self, now_seconds: float) -> None:
         """Publish only loss outputs and clear all temporal measurement state."""
+        if getattr(self, "_blind_active", False):
+            self._detected_pub.publish(Bool(data=False))
+            self._tag_id_pub.publish(Int32(data=-1))
+            self._state_pub.publish(String(data=ApproachState.TAG_LOST.value))
+            self._publish_blind_cycle(now_seconds)
+            return
+
+        planned_distance = (
+            self._blind_plan(now_seconds)
+            if hasattr(self, "_blind_final_approach_enabled")
+            else None
+        )
         self._translation_filter.reset()
         self._normal_filter.reset()
         self._active_tag_id = None
@@ -421,7 +733,20 @@ class AprilTagApproachNode(Node):
         self._tag_id_pub.publish(Int32(data=-1))
         self._state_pub.publish(String(data=state.value))
         self._log_state_change(state)
-        self._publish_base_lost(now_seconds)
+        if planned_distance is None:
+            self._publish_base_lost(now_seconds)
+            return
+        odom = self._fresh_odom(now_seconds)
+        if odom is None:
+            self._publish_base_lost(now_seconds)
+            return
+        self._blind_active = True
+        self._blind_planned_distance = planned_distance
+        self._blind_start_odom = odom
+        self._blind_previous_odom = odom
+        self._blind_start_time = now_seconds
+        self._last_odom_progress = 0.0
+        self._publish_blind_cycle(now_seconds)
 
     def _publish_base_lost(self, now_seconds: float) -> None:
         """Publish base-frame loss and clear its temporal alignment history."""
@@ -545,6 +870,16 @@ class AprilTagApproachNode(Node):
             now_seconds,
             self._active_tag_id,
         )
+        remember = getattr(self, "_remember_last_valid_final_sample", None)
+        if remember is not None:
+            remember(
+                metrics,
+                geometry,
+                decision,
+                stamp.sec + stamp.nanosec / 1.0e9,
+            )
+        if hasattr(self, "_blind_active_pub"):
+            self._publish_blind_diagnostics(False)
 
         prealign_pose = self._make_target_pose(base_pose, geometry, prealign=True)
         final_pose = self._make_target_pose(base_pose, geometry, prealign=False)

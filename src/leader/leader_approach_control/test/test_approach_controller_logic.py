@@ -7,6 +7,7 @@ import pytest
 from leader_approach_control.approach_controller_logic import (
     ALIGNED,
     APPROACH,
+    BLIND_FINAL_APPROACH,
     COARSE_TRACK,
     FINAL_APPROACH,
     FINAL_YAW_ALIGN,
@@ -119,6 +120,28 @@ def test_final_approach_never_reverses() -> None:
         FINAL_APPROACH,
         BaseControlMeasurement(-0.01, 0.0, 0.0),
         mode=FINAL_APPROACH,
+    ) == PlanarCommand()
+
+
+def test_blind_final_approach_is_low_speed_forward_only_without_detection() -> None:
+    command = compute(
+        FINAL_APPROACH,
+        BaseControlMeasurement(0.07, 0.0, 0.0),
+        mode=BLIND_FINAL_APPROACH,
+        detected=False,
+        tag_valid=False,
+    )
+    assert command.linear_x == pytest.approx(0.015)
+    assert command.angular_z == 0.0
+
+
+def test_blind_final_approach_rejects_wrong_state() -> None:
+    assert compute(
+        TAG_LOST,
+        BaseControlMeasurement(0.07, 0.0, 0.0),
+        mode=BLIND_FINAL_APPROACH,
+        detected=False,
+        tag_valid=False,
     ) == PlanarCommand()
 
 

@@ -10,7 +10,11 @@ from rescue_robot_apriltag.base_alignment_logic import (
     BaseAlignmentStateMachine,
     BaseAlignmentThresholds,
     ControlMode,
+    AlignmentDecision,
+    compute_blind_remaining_distance,
+    compute_forward_progress,
     compute_near_control,
+    is_blind_final_approach_eligible,
 )
 
 
@@ -297,6 +301,118 @@ def test_overshot_final_target_stops_without_reverse() -> None:
         0,
     )
     assert decision.state == ApproachState.TOO_CLOSE
+
+
+def final_approach_decision() -> object:
+    return AlignmentDecision(
+        ApproachState.FINAL_APPROACH, ControlMode.FINAL_APPROACH
+    )
+
+
+def test_blind_distance_is_forward_only_and_bounded() -> None:
+    assert compute_blind_remaining_distance(0.27, 0.20, 0.12) == pytest.approx(0.07)
+    assert compute_blind_remaining_distance(0.20, 0.20, 0.12) == pytest.approx(0.0)
+    assert compute_blind_remaining_distance(0.19, 0.20, 0.12) is None
+    assert compute_blind_remaining_distance(0.50, 0.20, 0.12) is None
+
+
+def test_blind_eligibility_requires_visual_final_approach_and_fresh_alignment() -> None:
+    kwargs = dict(
+        enabled=True,
+        phase=final_approach_decision(),
+        last_valid_tag_x=0.27,
+        last_valid_timestamp=10.0,
+        now_seconds=10.1,
+        last_valid_yaw_error=radians(2.0),
+        last_valid_cross_track=0.01,
+        final_target_distance=0.20,
+        activation_max_tag_x=0.30,
+        max_distance=0.12,
+        last_tag_max_age=0.25,
+        yaw_tolerance=radians(4.0),
+        cross_track_tolerance=0.015,
+        odometry_valid=True,
+    )
+    assert is_blind_final_approach_eligible(**kwargs)
+    invalid_odom = dict(kwargs)
+    invalid_odom["odometry_valid"] = False
+    assert not is_blind_final_approach_eligible(**invalid_odom)
+    for key, value in (
+        ("last_valid_yaw_error", radians(6.0)),
+        ("last_valid_cross_track", 0.02),
+        ("last_valid_timestamp", 9.0),
+    ):
+        invalid = dict(kwargs)
+        invalid[key] = value
+        assert not is_blind_final_approach_eligible(**invalid)
+
+
+@pytest.mark.parametrize(
+    "phase",
+    [
+        AlignmentDecision(ApproachState.TURN_LEFT, ControlMode.COARSE_TRACK),
+        AlignmentDecision(ApproachState.FINE_ALIGN_LEFT, ControlMode.FINAL_YAW_ALIGN),
+        AlignmentDecision(ApproachState.TURN_RIGHT, ControlMode.RECENTER),
+    ],
+)
+def test_blind_eligibility_rejects_non_final_phases(phase) -> None:
+    assert not is_blind_final_approach_eligible(
+        enabled=True,
+        phase=phase,
+        last_valid_tag_x=0.27,
+        last_valid_timestamp=10.0,
+        now_seconds=10.1,
+        last_valid_yaw_error=0.0,
+        last_valid_cross_track=0.0,
+        final_target_distance=0.20,
+        activation_max_tag_x=0.30,
+        max_distance=0.12,
+        last_tag_max_age=0.25,
+        yaw_tolerance=radians(4.0),
+        cross_track_tolerance=0.015,
+        odometry_valid=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("start_yaw", "dx", "dy", "expected"),
+    [
+        (0.0, 0.07, 0.0, 0.07),
+        (radians(90.0), 0.0, 0.07, 0.07),
+        (radians(45.0), 0.05, 0.05, 0.05 * 2**0.5),
+        (0.0, 0.0, 0.07, 0.0),
+    ],
+)
+def test_forward_progress_projects_onto_blind_start_heading(
+    start_yaw, dx, dy, expected
+) -> None:
+    progress = compute_forward_progress(
+        1.0, 2.0, start_yaw, 1.0 + dx, 2.0 + dy
+    )
+    assert progress == pytest.approx(expected)
+
+
+def test_forward_progress_rejects_nonfinite_odom() -> None:
+    assert compute_forward_progress(0.0, 0.0, nan, 1.0, 0.0) is None
+
+
+def test_blind_eligibility_rejects_nonfinite_cached_tag_data() -> None:
+    assert not is_blind_final_approach_eligible(
+        enabled=True,
+        phase=final_approach_decision(),
+        last_valid_tag_x=nan,
+        last_valid_timestamp=10.0,
+        now_seconds=10.1,
+        last_valid_yaw_error=0.0,
+        last_valid_cross_track=0.0,
+        final_target_distance=0.20,
+        activation_max_tag_x=0.30,
+        max_distance=0.12,
+        last_tag_max_age=0.25,
+        yaw_tolerance=radians(4.0),
+        cross_track_tolerance=0.015,
+        odometry_valid=True,
+    )
 
 
 def test_tag_loss_restarts_final_phase() -> None:

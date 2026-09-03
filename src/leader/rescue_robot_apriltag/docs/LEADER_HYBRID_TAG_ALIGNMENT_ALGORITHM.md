@@ -465,3 +465,113 @@ FAR에서 Tag 중심을 보존하고, NEAR에서 robot-facing normal을 고른 �
 향후 연결 지점은 `ALIGNED`다. Gripper sequence는 `ALIGNED`가 final position과 yaw를
 안정적으로 만족한 뒤에만 시작해야 한다. 현재 알고리즘의 최종 목적은 Tag 부착 물체의
 정면으로 robot/gripper를 정렬해 파지 가능한 pose를 제공하는 것이다.
+
+## 31. Close-Range Tag Loss and Odometry Blind Final Approach
+
+### 31.1 문제 배경
+
+Final approach에서 로봇이 Tag 면에 너무 가까워지면 AprilTag 사각형 전체가 D435
+image frame 안에 들어오지 않을 수 있다. 이 경우 정렬이 잘못되어서가 아니라 Tag의
+일부가 잘려 detector가 유효한 pose를 만들지 못해 `TAG_LOST`가 발생한다.
+
+### 31.2 제한적인 sensor handoff
+
+기존 FAR center tracking, NEAR normal alignment, robot-facing normal 선택, FOV recenter,
+hysteresis, final yaw와 visual final approach는 변경하지 않는다. 마지막 final 몇 cm에서
+발생하는 close-range loss만 다음의 제한된 handoff로 처리한다.
+
+```text
+FINAL_APPROACH
+      │
+  Tag visible?
+    /       \
+  YES        NO
+   │          │
+visual     eligible?
+control     /    \
+           NO     YES
+           │       │
+          STOP   BLIND_FINAL_APPROACH
+                    │
+                 odometry
+                    │
+                  STOP
+                    │
+                 ALIGNED
+```
+
+Generic `TAG_LOST`는 여전히 즉시 zero command다. 오직 직전 valid phase가 실제
+`FINAL_APPROACH`였고, close range·fresh pose·작은 yaw/cross-track 오차·짧은 remaining
+distance·valid odometry를 모두 만족하는 경우에만 internal mode
+`BLIND_FINAL_APPROACH`를 사용한다. `FINE_ALIGN_LEFT/RIGHT`, TURN, COARSE, NEAR,
+RECENTER 중 loss는 항상 stop한다.
+
+### 31.3 거리와 odometry
+
+`last_valid_tag_x`는 camera optical `z`가 아니라 `base_link`의 +X 전방 거리다.
+마지막 valid final-approach sample에서 다음 식으로 blind 계획을 한 번 계산한다.
+
+```text
+planned_blind_distance = last_valid_tag_x - final_target_distance
+```
+
+예를 들어 `0.265 m - 0.200 m = 0.065 m`이다. 음수면 reverse하지 않으며, 작은 음수는
+zero로 취급하고, 큰 음수 또는 `blind_max_distance` 초과는 blind를 거부한다.
+
+Blind 시작 순간 `odom` frame의 `x`, `y`, `yaw`를 한 번 snapshot한다. 진행거리는 odom
+X 차이가 아니라 시작 heading 방향으로 displacement를 projection한다.
+
+```text
+dx = current_x - start_x
+dy = current_y - start_y
+forward_progress = cos(start_yaw) * dx + sin(start_yaw) * dy
+```
+
+이 방식은 odom/world X축과 로봇의 시작 전진 방향이 달라도 실제 전진량을 측정한다.
+Blind 중에는 저속 positive `linear.x`만 사용하고 `angular.z`는 0이다. 진행량이 계획량에
+도달하면 zero command를 publish하고 `ALIGNED`로 전환한다.
+
+### 31.4 Re-acquisition과 safety
+
+Blind 중 valid Tag가 재검출되면 기존 visual 정보를 우선한다. blind snapshot과 plan을
+폐기하고 현재 pose를 기존 hybrid state machine에 입력한다. Invalid/stale pose는 재검출로
+인정하지 않는다.
+
+Odom이 stale/unavailable/invalid이거나 NaN/inf, 비정상 jump, 음수 progress 또는 watchdog
+timeout이 발생하면 즉시 zero하고 `ALIGNED`로 전환하지 않는다. 시간은 주행거리의 대체가
+아니며 `blind_max_duration`은 stuck/odom failure용 watchdog일 뿐이다. Blind는 forward-only이고
+reverse command를 만들지 않는다.
+
+### 31.5 ALIGNED 의미
+
+일반 visual `ALIGNED`는 AprilTag pose로 최종 위치와 yaw를 확인한 상태다.
+Blind-final `ALIGNED`는 마지막 valid fine-aligned visual pose와 짧은 odometry translation으로
+추정한 상태다. Public state는 기존 호환성을 위해 `ALIGNED`로 유지하지만
+`alignment/control_mode`와 blind diagnostic으로 경로를 구분할 수 있다.
+
+### 31.6 Parameters and diagnostics
+
+| Parameter | Default | Unit | Meaning |
+|---|---:|---|---|
+| `blind_final_approach_enabled` | `true` | bool | fallback enable |
+| `blind_activation_max_tag_x` | `0.30` | m | blind 허용 최대 base +X |
+| `blind_max_distance` | `0.12` | m | 계획 가능한 최대 remaining distance |
+| `blind_last_tag_max_age` | `0.25` | s | 마지막 valid pose freshness |
+| `blind_max_duration` | `5.0` | s | blind watchdog |
+| `odom_topic` | `/leader/odom/raw` | topic | 기존 Leader wheel odometry |
+| `blind_final_speed` | `0.015` | m/s | blind forward speed; final speed 이하 |
+
+기존 `final_yaw_tolerance_deg`와 `final_position_tolerance`를 각각 yaw와 lateral/cross-track
+gate에 재사용한다. 다음 diagnostic으로 blind 상태를 확인한다.
+
+```text
+/leader/alignment/blind_final_approach_active
+/leader/alignment/last_valid_tag_x
+/leader/alignment/blind_planned_distance
+/leader/alignment/odom_forward_progress
+```
+
+설계 이유는 전체 hybrid controller를 다시 바꾸는 것이 아니라, 카메라가 마지막 몇 cm를
+관측하지 못하는 한정된 상황에서만 vision에서 기존 odometry로 sensor handoff하기 위해서다.
+이 fallback은 vision-confirmed final pose를 대체하지 않으며, visual 또는 blind 어느 경로든
+후속 gripper sequence의 연결점은 기존 `ALIGNED`다.

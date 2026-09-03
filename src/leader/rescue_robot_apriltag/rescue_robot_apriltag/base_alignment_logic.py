@@ -17,6 +17,7 @@ class ControlMode(str, Enum):
     RECENTER = "RECENTER"
     FINAL_YAW_ALIGN = "FINAL_YAW_ALIGN"
     FINAL_APPROACH = "FINAL_APPROACH"
+    BLIND_FINAL_APPROACH = "BLIND_FINAL_APPROACH"
     STABILIZING = "STABILIZING"
     ALIGNED = "ALIGNED"
     TOO_CLOSE = "TOO_CLOSE"
@@ -131,6 +132,106 @@ class AlignmentDecision:
     mode: ControlMode
     control_x: float = 0.0
     control_y: float = 0.0
+
+
+def compute_blind_remaining_distance(
+    last_valid_tag_x: float,
+    final_target_distance: float,
+    max_distance: float,
+    zero_tolerance: float = 1.0e-3,
+) -> Optional[float]:
+    """Return one safe, forward-only blind distance, or ``None``."""
+    values = (
+        last_valid_tag_x,
+        final_target_distance,
+        max_distance,
+        zero_tolerance,
+    )
+    if not all(isfinite(value) for value in values):
+        return None
+    if final_target_distance <= 0.0 or max_distance < 0.0 or zero_tolerance < 0.0:
+        return None
+    remaining = last_valid_tag_x - final_target_distance
+    if remaining < -zero_tolerance or remaining > max_distance:
+        return None
+    return max(0.0, remaining)
+
+
+def is_blind_final_approach_eligible(
+    *,
+    enabled: bool,
+    phase: AlignmentDecision,
+    last_valid_tag_x: float,
+    last_valid_timestamp: float,
+    now_seconds: float,
+    last_valid_yaw_error: float,
+    last_valid_cross_track: float,
+    final_target_distance: float,
+    activation_max_tag_x: float,
+    max_distance: float,
+    last_tag_max_age: float,
+    yaw_tolerance: float,
+    cross_track_tolerance: float,
+    odometry_valid: bool,
+) -> bool:
+    """Gate blind motion to a fresh, close, final visual alignment sample."""
+    if not enabled or not odometry_valid:
+        return False
+    if phase.state != ApproachState.FINAL_APPROACH:
+        return False
+    if phase.mode != ControlMode.FINAL_APPROACH:
+        return False
+    values = (
+        last_valid_tag_x,
+        last_valid_timestamp,
+        now_seconds,
+        last_valid_yaw_error,
+        last_valid_cross_track,
+        activation_max_tag_x,
+        last_tag_max_age,
+        yaw_tolerance,
+        cross_track_tolerance,
+    )
+    if not all(isfinite(value) for value in values):
+        return False
+    if (
+        activation_max_tag_x <= 0.0
+        or last_tag_max_age < 0.0
+        or yaw_tolerance < 0.0
+        or cross_track_tolerance < 0.0
+    ):
+        return False
+    age = now_seconds - last_valid_timestamp
+    if age < 0.0 or age > last_tag_max_age:
+        return False
+    if last_valid_tag_x > activation_max_tag_x:
+        return False
+    if abs(last_valid_yaw_error) > yaw_tolerance:
+        return False
+    if abs(last_valid_cross_track) > cross_track_tolerance:
+        return False
+    return compute_blind_remaining_distance(
+        last_valid_tag_x,
+        final_target_distance,
+        max_distance,
+    ) is not None
+
+
+def compute_forward_progress(
+    start_x: float,
+    start_y: float,
+    start_yaw: float,
+    current_x: float,
+    current_y: float,
+) -> Optional[float]:
+    """Project odometry displacement onto the blind-start forward heading."""
+    values = (start_x, start_y, start_yaw, current_x, current_y)
+    if not all(isfinite(value) for value in values):
+        return None
+    dx = current_x - start_x
+    dy = current_y - start_y
+    progress = cos(start_yaw) * dx + sin(start_yaw) * dy
+    return progress if isfinite(progress) else None
 
 
 def normalize_angle(angle: float) -> float:

@@ -322,6 +322,112 @@ ros2 param get /leader/approach_controller controller_enabled_on_startup
 
 Pose→mode→state coherent sample, target Tag ID, timeout을 확인한다.
 
+## 19. Close-Range Blind Final Approach Validation
+
+### 19.1 Prerequisite and build
+
+기존 prerequisite, D435/TF 설정, emergency stop 준비를 먼저 완료한다. Build와 테스트는
+다음처럼 실행한다.
+
+```bash
+cd ~/damgc_robot
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install --packages-select \
+  rescue_robot_apriltag leader_approach_control
+source install/local_setup.bash
+colcon test --packages-select rescue_robot_apriltag leader_approach_control
+colcon test-result --verbose
+```
+
+통합 환경에서는 기존 guide의 integrated launch command를 사용한다. Guard는 처음에 OFF로
+두고 `/leader/cmd_vel`이 zero인지 확인한다.
+
+### 19.2 Diagnostics and static check
+
+```bash
+ros2 param get /leader/apriltag_approach blind_final_approach_enabled
+ros2 param get /leader/apriltag_approach blind_activation_max_tag_x
+ros2 param get /leader/apriltag_approach blind_max_distance
+ros2 topic echo /leader/alignment/blind_final_approach_active
+ros2 topic echo /leader/alignment/last_valid_tag_x
+ros2 topic echo /leader/alignment/blind_planned_distance
+ros2 topic echo /leader/alignment/odom_forward_progress
+ros2 topic echo /leader/odom/raw nav_msgs/msg/Odometry
+ros2 topic echo /leader/alignment/control_mode
+ros2 topic echo /leader/base_alignment/state
+ros2 topic echo /leader/approach/cmd_vel_raw
+ros2 topic echo /leader/cmd_vel
+```
+
+Tag가 보이는 동안에는 기존 `COARSE_TRACK`, `NEAR_ALIGN`, `RECENTER`,
+`FINAL_YAW_ALIGN`, `FINAL_APPROACH` 흐름과 command가 이전과 같아야 한다.
+
+### 19.3 Close-range positive test
+
+Final approach에서 다음을 확인한다.
+
+```text
+last_valid_tag_x ≈ 0.27 m
+final_target_distance = 0.20 m
+planned_blind_distance ≈ 0.07 m
+```
+
+Tag를 가까이 이동시켜 image에서 사라지게 하면, 직전 phase가 aligned
+`FINAL_APPROACH`였을 때만 다음이 나타난다.
+
+```text
+control_mode = BLIND_FINAL_APPROACH
+blind_active = true
+linear.x > 0, low speed
+angular.z = 0
+```
+
+`odom_forward_progress`가 증가하여 계획 거리 이상이 되면 command는 즉시
+`linear.x=0`, `angular.z=0`이 되고 public state가 `ALIGNED`가 된다.
+
+### 19.4 Wheels-up and ground test
+
+먼저 바퀴를 들어 올린 상태에서 Tag를 근접 loss시켜 blind mode 진입, forward-only command,
+progress, completion zero를 확인한다. 이후 ground low-speed test에서 약 7 cm만 추가 이동하는지
+확인한다. Blind 중 회전이나 reverse가 나오면 즉시 emergency stop한다.
+
+### 19.5 Negative regression tests
+
+다음 모든 경우는 `TAG_LOST`, zero command, no `ALIGNED`여야 한다.
+
+| 상황 | 기대 결과 |
+|---|---|
+| far Tag loss | 즉시 stop |
+| TURN_LEFT/RIGHT loss | 즉시 stop |
+| COARSE/APPROACH loss | 즉시 stop |
+| RECENTER loss | 즉시 stop |
+| close하지만 큰 yaw error | 즉시 stop |
+| close하지만 큰 cross-track error | 즉시 stop |
+| stale/invalid last pose | 즉시 stop |
+| remaining distance 초과 | 즉시 stop |
+| stale/invalid/NaN odom | blind abort, no ALIGNED |
+| watchdog timeout | blind abort, no ALIGNED |
+
+### 19.6 Re-acquisition and emergency stop
+
+Blind 중 valid Tag를 다시 보이게 하면 `BLIND_FINAL_APPROACH`가 해제되고 현재 pose 기반
+visual alignment로 복귀해야 한다. Invalid pose는 복귀를 유발하지 않는다.
+
+Guard OFF 상태에서 raw command를 확인한 뒤 velocity guard를 enable하면 guard가 false인
+명령을 최종 `/leader/cmd_vel`에 내보내지 않는지 확인한다. Emergency stop과 controller/guard
+disable은 blind completion보다 우선해야 한다.
+
+### 19.7 Troubleshooting
+
+- blind가 시작되지 않으면 `control_mode`, last valid timestamp, last x, yaw/cross-track,
+  `/leader/odom/raw` freshness를 함께 확인한다.
+- far loss에서 blind가 시작되면 eligibility gate 또는 last-valid phase cache가 잘못된 것이므로
+  ground test를 중단한다.
+- progress가 증가하지 않으면 odom topic, frame, wheel odometry와 watchdog을 확인한다.
+- angular command가 발생하면 blind mode가 아닌 visual mode가 남아 있는지 atomic command와
+  raw command를 같은 시각에 확인한다.
+- visual path가 이전과 달라지면 blind 관련 변경 외의 hybrid diff를 먼저 조사한다.
+
 ### Final command만 zero
 
 ```bash

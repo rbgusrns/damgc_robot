@@ -16,8 +16,10 @@ from std_srvs.srv import SetBool
 from leader_approach_control.approach_controller_logic import (
     KNOWN_MODES,
     KNOWN_STATES,
+    FINAL_APPROACH,
     TAG_LOST,
     BaseControlMeasurement,
+    BLIND_FINAL_APPROACH,
     ControllerParameters,
     PlanarCommand,
     compute_approach_command,
@@ -105,6 +107,7 @@ class ApproachControllerNode(Node):
         self.declare_parameter("near_max_angular_speed", 0.10)
         self.declare_parameter("max_final_linear_speed", 0.02)
         self.declare_parameter("max_final_angular_speed", 0.08)
+        self.declare_parameter("blind_final_speed", 0.015)
 
     def _load_and_validate_parameters(self) -> None:
         """Load parameters and reject non-finite or unsafe configurations."""
@@ -137,6 +140,9 @@ class ApproachControllerNode(Node):
             ),
             max_final_angular_speed=float(
                 self.get_parameter("max_final_angular_speed").value
+            ),
+            blind_final_speed=float(
+                self.get_parameter("blind_final_speed").value
             ),
         )
 
@@ -176,9 +182,13 @@ class ApproachControllerNode(Node):
         now_seconds = self.get_clock().now().nanoseconds / 1.0e9
         stamp_seconds = message.header.stamp.sec + message.header.stamp.nanosec / 1.0e9
         pose = message.target_pose
+        blind_command = (
+            message.control_mode == BLIND_FINAL_APPROACH
+            and message.alignment_state == FINAL_APPROACH
+        )
         if (
-            not self._detected
-            or self._selected_tag_id != self._target_tag_id
+            (not blind_command and not self._detected)
+            or (not blind_command and self._selected_tag_id != self._target_tag_id)
             or message.header.frame_id != self._base_frame
             or not sample_is_fresh(
                 now_seconds,

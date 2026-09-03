@@ -35,6 +35,7 @@ COARSE_TRACK = "COARSE_TRACK"
 NEAR_ALIGN = "NEAR_ALIGN"
 RECENTER = "RECENTER"
 FINAL_YAW_ALIGN = "FINAL_YAW_ALIGN"
+BLIND_FINAL_APPROACH = "BLIND_FINAL_APPROACH"
 
 KNOWN_MODES = frozenset(
     {
@@ -43,6 +44,7 @@ KNOWN_MODES = frozenset(
         NEAR_ALIGN,
         RECENTER,
         FINAL_YAW_ALIGN,
+        BLIND_FINAL_APPROACH,
         FINAL_APPROACH,
         STABILIZING,
         ALIGNED,
@@ -63,6 +65,7 @@ class ControllerParameters:
     near_max_angular_speed: float
     max_final_linear_speed: float
     max_final_angular_speed: float
+    blind_final_speed: float = 0.015
 
     def validate(self) -> None:
         """Raise ``ValueError`` when command calculation would be ambiguous."""
@@ -75,6 +78,7 @@ class ControllerParameters:
             self.near_max_angular_speed,
             self.max_final_linear_speed,
             self.max_final_angular_speed,
+            self.blind_final_speed,
         )
         if not all(isfinite(value) for value in numeric_values):
             raise ValueError("Controller parameters must be finite")
@@ -99,6 +103,10 @@ class ControllerParameters:
         if not 0.0 < self.max_final_angular_speed <= self.max_raw_angular_speed:
             raise ValueError(
                 "max_final_angular_speed must be positive and no greater than raw max"
+            )
+        if not 0.0 < self.blind_final_speed <= self.max_final_linear_speed:
+            raise ValueError(
+                "blind_final_speed must be positive and no greater than final speed"
             )
 
 
@@ -190,8 +198,6 @@ def compute_approach_command(
     parameters.validate()
     if (
         not enabled
-        or not detected
-        or not tag_valid
         or not fresh
         or not coherent
         or state not in KNOWN_STATES
@@ -206,6 +212,13 @@ def compute_approach_command(
         measurement.target_yaw,
     )
     if not all(isfinite(value) for value in values):
+        return PlanarCommand()
+    if mode == BLIND_FINAL_APPROACH:
+        if state != FINAL_APPROACH:
+            return PlanarCommand()
+        # This is the only command allowed while detected/tag_valid are false.
+        return PlanarCommand(linear_x=parameters.blind_final_speed)
+    if not detected or not tag_valid:
         return PlanarCommand()
     if state in {TAG_LOST, TOO_CLOSE, STABILIZING, ALIGNED}:
         return PlanarCommand()
