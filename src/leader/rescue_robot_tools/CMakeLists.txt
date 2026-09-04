@@ -5,7 +5,14 @@ find_package(ament_cmake REQUIRED)
 
 install(PROGRAMS
   scripts/depth_to_csv.py
+  scripts/dynamixel_orin.py
+  scripts/dynamixel_orin_node.py
   DESTINATION lib/${PROJECT_NAME}
+)
+
+install(
+  DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
 )
 
 ament_package()

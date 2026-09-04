@@ -13,7 +13,7 @@ def generate_launch_description():
     urdf_path = os.path.join(
         package_path,
         "urdf",
-        "rescue_robot.urdf"
+        "rescue_robot_cad.urdf"
     )
 
     rviz_path = os.path.join(
@@ -42,4 +42,3 @@ def generate_launch_description():
             arguments=["-d", rviz_path]
         )
     ])
-
