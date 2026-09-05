@@ -55,7 +55,7 @@ CAMERA_OPTICAL_FRAME = "follower/follower_camera_optical_frame"
 BASE_TO_CAMERA_BODY = FixedTransform(
     parent_frame=BASE_FRAME,
     child_frame=CAMERA_BODY_FRAME,
-    xyz=(0.042, 0.0, 0.120),
+    xyz=(0.042, 0.01, 0.120),
     rpy=(0.0, 0.0, 0.0),
 )
 

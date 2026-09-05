@@ -11,12 +11,14 @@
 
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>apriltag_ros</exec_depend>
+  <exec_depend>follower_alignment_msgs</exec_depend>
   <exec_depend>follower_approach_control</exec_depend>
   <exec_depend>follower_command_selector</exec_depend>
   <exec_depend>follower_control</exec_depend>
   <exec_depend>image_proc</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>stm32_bridge</exec_depend>

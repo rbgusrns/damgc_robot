@@ -1,8 +1,10 @@
 """Validation, TF application, and metrics for Follower base-frame tag poses."""
 
+from collections import deque
 from dataclasses import dataclass
-from math import atan2, isfinite
-from typing import Optional
+from math import atan2, hypot, isfinite, sin, cos
+from statistics import median
+from typing import Deque, Optional, Sequence, Tuple
 
 from geometry_msgs.msg import Pose, PoseStamped, TransformStamped
 from tf2_geometry_msgs import do_transform_pose
@@ -17,6 +19,155 @@ class BaseMetrics:
     forward_distance: float
     lateral_error: float
     bearing: float
+
+
+@dataclass(frozen=True)
+class TargetGeometry:
+    """Planar tag-normal targets expressed in the current ``base_link``."""
+
+    normal_x: float
+    normal_y: float
+    target_yaw: float
+    prealign_x: float
+    prealign_y: float
+    final_x: float
+    final_y: float
+    final_position_error: float
+    final_yaw_error: float
+
+
+def normalize_angle(angle: float) -> float:
+    """Wrap one finite angle to ``[-pi, pi]``."""
+    if not isfinite(angle):
+        raise ValueError("Angle must be finite")
+    return atan2(sin(angle), cos(angle))
+
+
+def rotate_tag_z_to_base_xy(
+    quaternion: Sequence[float], projection_epsilon: float = 1.0e-6
+) -> Tuple[float, float]:
+    """Return the normalized base-XY projection of the tag frame's +Z axis."""
+    normalized = normalize_quaternion(quaternion)
+    if normalized is None:
+        raise ValueError("Tag quaternion must be finite and non-zero")
+    if not isfinite(projection_epsilon) or projection_epsilon <= 0.0:
+        raise ValueError("projection_epsilon must be finite and positive")
+    qx, qy, qz, qw = normalized
+    normal_x = 2.0 * (qx * qz + qw * qy)
+    normal_y = 2.0 * (qy * qz - qw * qx)
+    projection_norm = hypot(normal_x, normal_y)
+    if not isfinite(projection_norm) or projection_norm <= projection_epsilon:
+        raise ValueError("Tag normal has no usable base-XY projection")
+    return normal_x / projection_norm, normal_y / projection_norm
+
+
+def select_robot_facing_normal(
+    tag_x: float,
+    tag_y: float,
+    normal_x: float,
+    normal_y: float,
+    direction_epsilon: float = 1.0e-6,
+) -> Tuple[float, float]:
+    """Select the projected tag-normal sign that points toward the robot."""
+    values = (tag_x, tag_y, normal_x, normal_y, direction_epsilon)
+    if not all(isfinite(value) for value in values):
+        raise ValueError("Tag position, normal, and epsilon must be finite")
+    if direction_epsilon <= 0.0:
+        raise ValueError("direction_epsilon must be positive")
+    tag_range = hypot(tag_x, tag_y)
+    normal_norm = hypot(normal_x, normal_y)
+    if tag_range <= direction_epsilon or normal_norm <= direction_epsilon:
+        raise ValueError("Tag position and projected normal must be non-zero")
+    candidate_x = normal_x / normal_norm
+    candidate_y = normal_y / normal_norm
+    robot_x = -tag_x / tag_range
+    robot_y = -tag_y / tag_range
+    dot = candidate_x * robot_x + candidate_y * robot_y
+    if not isfinite(dot) or abs(dot) <= direction_epsilon:
+        raise ValueError("Projected tag normal has ambiguous robot-facing sign")
+    if dot < 0.0:
+        candidate_x = -candidate_x
+        candidate_y = -candidate_y
+    return candidate_x, candidate_y
+
+
+class PlanarNormalMedianFilter:
+    """Median-filter unique timestamped unit normal vectors."""
+
+    def __init__(self, window_size: int) -> None:
+        if window_size < 1:
+            raise ValueError("filter_window must be at least 1")
+        self._samples: Deque[Tuple[float, float]] = deque(maxlen=window_size)
+        self._last_stamp_nanoseconds: Optional[int] = None
+
+    def reset(self) -> None:
+        self._samples.clear()
+        self._last_stamp_nanoseconds = None
+
+    def add(
+        self, normal_x: float, normal_y: float, stamp_nanoseconds: int
+    ) -> Tuple[float, float]:
+        norm = hypot(normal_x, normal_y)
+        if not all(isfinite(value) for value in (normal_x, normal_y, norm)):
+            raise ValueError("Normal components must be finite")
+        if norm <= 1.0e-6:
+            raise ValueError("Normal projection must be non-zero")
+        if stamp_nanoseconds != self._last_stamp_nanoseconds:
+            self._samples.append((normal_x / norm, normal_y / norm))
+            self._last_stamp_nanoseconds = stamp_nanoseconds
+        filtered_x = float(median(sample[0] for sample in self._samples))
+        filtered_y = float(median(sample[1] for sample in self._samples))
+        filtered_norm = hypot(filtered_x, filtered_y)
+        if filtered_norm <= 1.0e-6:
+            raise ValueError("Filtered tag normal is ambiguous")
+        return filtered_x / filtered_norm, filtered_y / filtered_norm
+
+
+def compute_target_geometry(
+    tag_x: float,
+    tag_y: float,
+    normal_x: float,
+    normal_y: float,
+    pre_align_distance: float,
+    final_target_distance: float,
+) -> TargetGeometry:
+    """Build robot target poses on the printed/front side of an AprilTag."""
+    values = (
+        tag_x,
+        tag_y,
+        normal_x,
+        normal_y,
+        pre_align_distance,
+        final_target_distance,
+    )
+    if not all(isfinite(value) for value in values):
+        raise ValueError("Target geometry inputs must be finite")
+    if not pre_align_distance > final_target_distance > 0.0:
+        raise ValueError(
+            "pre_align_distance must be greater than final_target_distance > 0"
+        )
+    if hypot(tag_x, tag_y) <= 1.0e-6 or hypot(normal_x, normal_y) <= 1.0e-6:
+        raise ValueError("Tag position and projected normal must be non-zero")
+    outward_x, outward_y = select_robot_facing_normal(
+        tag_x, tag_y, normal_x, normal_y
+    )
+    prealign_x = tag_x + pre_align_distance * outward_x
+    prealign_y = tag_y + pre_align_distance * outward_y
+    final_x = tag_x + final_target_distance * outward_x
+    final_y = tag_y + final_target_distance * outward_y
+    target_yaw = atan2(-outward_y, -outward_x)
+    final_yaw_error = normalize_angle(target_yaw)
+    return TargetGeometry(
+        normal_x=outward_x,
+        normal_y=outward_y,
+        target_yaw=target_yaw,
+        prealign_x=prealign_x,
+        prealign_y=prealign_y,
+        final_x=final_x,
+        final_y=final_y,
+        final_position_error=hypot(final_x, final_y),
+        final_yaw_error=final_yaw_error,
+    )
 
 
 def is_fresh_timestamp(

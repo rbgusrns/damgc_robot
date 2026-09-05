@@ -18,10 +18,15 @@ from follower_supply_perception.apriltag_approach_node import AprilTagApproachNo
 from follower_supply_perception.base_alignment_logic import (
     BaseAlignmentStateMachine,
     BaseAlignmentThresholds,
+    ControlMode,
 )
 from follower_supply_perception.base_pose import (
+    PlanarNormalMedianFilter,
+    compute_target_geometry,
     compute_base_metrics,
     is_fresh_timestamp,
+    rotate_tag_z_to_base_xy,
+    select_robot_facing_normal,
     transform_pose_preserving_stamp,
 )
 
@@ -73,6 +78,40 @@ def test_base_metrics_use_x_forward_y_lateral_and_atan2() -> None:
 def test_base_metrics_reject_non_finite_values(x: float, y: float) -> None:
     with pytest.raises(ValueError):
         compute_base_metrics(x, y)
+
+
+def test_tag_normal_projection_and_robot_facing_sign() -> None:
+    # 90 degrees around Y maps tag +Z onto base +X.
+    candidate = rotate_tag_z_to_base_xy((0.0, sqrt(0.5), 0.0, sqrt(0.5)))
+    assert candidate == pytest.approx((1.0, 0.0))
+    assert select_robot_facing_normal(0.5, 0.0, *candidate) == pytest.approx(
+        (-1.0, 0.0)
+    )
+
+
+@pytest.mark.parametrize(
+    "quaternion",
+    [(0.0, 0.0, 0.0, 0.0), (nan, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0, 1.0)],
+)
+def test_invalid_or_degenerate_tag_normal_is_rejected(quaternion) -> None:
+    with pytest.raises(ValueError):
+        rotate_tag_z_to_base_xy(quaternion)
+
+
+def test_normal_filter_ignores_duplicate_stamp_and_normalizes_median() -> None:
+    normal_filter = PlanarNormalMedianFilter(3)
+    assert normal_filter.add(-1.0, 0.0, 10) == pytest.approx((-1.0, 0.0))
+    normal_filter.add(0.0, 1.0, 10)
+    filtered = normal_filter.add(-0.8, -0.2, 11)
+    assert filtered[0] < 0.0
+    assert sqrt(filtered[0] ** 2 + filtered[1] ** 2) == pytest.approx(1.0)
+
+
+def test_target_geometry_preserves_follower_final_distance() -> None:
+    geometry = compute_target_geometry(0.60, 0.0, -1.0, 0.0, 0.35, 0.25)
+    assert geometry.prealign_x == pytest.approx(0.25)
+    assert geometry.final_x == pytest.approx(0.35)
+    assert geometry.target_yaw == pytest.approx(0.0)
 
 
 def test_timestamp_freshness_boundaries_and_invalid_values() -> None:
@@ -224,38 +263,87 @@ class RecordingBuffer:
 
 def base_harness(tf_buffer: object, now_ns: int = 12_500_000_000) -> SimpleNamespace:
     """Create the attributes used by the node's base output branch."""
+    thresholds = BaseAlignmentThresholds(
+        orientation_engage_distance=0.40,
+        orientation_disengage_distance=0.43,
+        turn_enter_error_deg=8.0,
+        turn_exit_error_deg=3.0,
+        tag_recenter_enter_deg=18.0,
+        tag_recenter_exit_deg=11.0,
+        near_normal_correction_limit_deg=6.0,
+        pre_align_position_tolerance=0.03,
+        final_forward_tolerance=0.03,
+        final_lateral_tolerance=0.02,
+        final_yaw_tolerance_deg=4.0,
+        final_realign_yaw_error_deg=8.0,
+        stable_time=0.8,
+        sample_timeout=1.0,
+    )
     harness = SimpleNamespace(
         _base_frame="base_link",
         _tf_lookup_timeout=0.05,
         _tag_timeout=1.0,
         _active_tag_id=0,
+        _pre_align_distance=0.35,
+        _base_target_forward=0.25,
         _tf_buffer=tf_buffer,
+        _normal_filter=PlanarNormalMedianFilter(3),
         _base_pose_pub=RecordingPublisher(),
         _base_forward_pub=RecordingPublisher(),
         _base_lateral_pub=RecordingPublisher(),
         _base_bearing_pub=RecordingPublisher(),
         _base_state_pub=RecordingPublisher(),
-        _base_state_machine=BaseAlignmentStateMachine(
-            BaseAlignmentThresholds(0.50, 0.03, 0.02, 5.0, 0.8, 1.0)
-        ),
+        _control_mode_pub=RecordingPublisher(),
+        _normal_heading_pub=RecordingPublisher(),
+        _prealign_target_pub=RecordingPublisher(),
+        _final_target_pub=RecordingPublisher(),
+        _control_target_pub=RecordingPublisher(),
+        _command_pub=RecordingPublisher(),
+        _final_position_error_pub=RecordingPublisher(),
+        _final_yaw_error_pub=RecordingPublisher(),
+        _blind_active_pub=RecordingPublisher(),
+        _last_valid_tag_x_pub=RecordingPublisher(),
+        _blind_distance_pub=RecordingPublisher(),
+        _odom_progress_pub=RecordingPublisher(),
+        _last_valid_tag_x=None,
+        _last_valid_receipt=None,
+        _last_valid_yaw_error=None,
+        _last_valid_cross_track=None,
+        _blind_planned_distance=0.0,
+        _last_odom_progress=0.0,
+        _base_state_machine=BaseAlignmentStateMachine(thresholds),
         _log_base_state_change=lambda _state: None,
         get_clock=lambda: SimpleNamespace(
             now=lambda: SimpleNamespace(nanoseconds=now_ns)
         ),
         get_logger=lambda: SimpleNamespace(warning=lambda _message, **_kwargs: None),
     )
-    harness._publish_base_lost = lambda now_seconds: (
-        AprilTagApproachNode._publish_base_lost(harness, now_seconds)
+    harness._publish_base_lost = lambda ros_now, receipt_now: (
+        AprilTagApproachNode._publish_base_lost(harness, ros_now, receipt_now)
     )
+    harness._make_target_pose = lambda pose, geometry, prealign: (
+        AprilTagApproachNode._make_target_pose(harness, pose, geometry, prealign)
+    )
+    harness._make_control_pose = lambda pose, geometry, decision: (
+        AprilTagApproachNode._make_control_pose(harness, pose, geometry, decision)
+    )
+    harness._publish_atomic_command = lambda pose, decision: (
+        harness._command_pub.publish((pose, decision))
+    )
+    harness._publish_blind_diagnostics = lambda active: None
+    harness._remember_last_valid_final_sample = lambda *args: None
     return harness
 
 
 def test_valid_node_cycle_uses_exact_pose_stamp_and_coherent_outputs() -> None:
     tf_buffer = RecordingBuffer(identity_transform())
     harness = base_harness(tf_buffer)
-    camera_pose = make_pose(position=(1.0, 0.2, 0.0))
+    camera_pose = make_pose(
+        position=(1.0, 0.2, 0.0),
+        quaternion=(0.0, sqrt(0.5), 0.0, sqrt(0.5)),
+    )
 
-    AprilTagApproachNode._publish_base_outputs(harness, camera_pose)
+    AprilTagApproachNode._publish_base_outputs(harness, camera_pose, 12.4, 12.5, True)
 
     assert tf_buffer.calls == [("base_link", CAMERA_FRAME, 12_000_000_345, 50_000_000)]
     base_pose = harness._base_pose_pub.messages[0]
@@ -265,6 +353,10 @@ def test_valid_node_cycle_uses_exact_pose_stamp_and_coherent_outputs() -> None:
     assert harness._base_lateral_pub.messages[0].data == pytest.approx(0.2)
     assert harness._base_bearing_pub.messages[0].data > 0.0
     assert harness._base_state_pub.messages[0].data == ApproachState.TURN_LEFT.value
+    pose, decision = harness._command_pub.messages[0]
+    assert pose is harness._control_target_pub.messages[0]
+    assert decision.state == ApproachState.TURN_LEFT
+    assert decision.mode == ControlMode.COARSE_TRACK
 
 
 def test_camera_publish_uses_same_pose_for_base_branch() -> None:
@@ -281,16 +373,22 @@ def test_camera_publish_uses_same_pose_for_base_branch() -> None:
         _angle_pub=publishers[6],
         _state_pub=publishers[7],
         _log_state_change=lambda _state: None,
-        _publish_base_outputs=base_inputs.append,
+        _publish_base_outputs=lambda *args: base_inputs.append(args),
     )
     selected = TagObservation(
         0, 0.1, 0.0, 1.0, (0.0, 0.0, 0.0, 1.0), 12_000_000_345
     )
     AprilTagApproachNode._publish_valid(
-        harness, selected, compute_measurement(0.1, 0.0, 1.0), ApproachState.APPROACH
+        harness,
+        selected,
+        compute_measurement(0.1, 0.0, 1.0),
+        ApproachState.APPROACH,
+        12.4,
+        12.5,
+        True,
     )
     assert all(len(publisher.messages) == 1 for publisher in publishers)
-    assert base_inputs == [publishers[2].messages[0]]
+    assert base_inputs == [(publishers[2].messages[0], 12.4, 12.5, True)]
 
 
 @pytest.mark.parametrize("failure", ["tf", "stale"])
@@ -305,7 +403,11 @@ def test_tf_failure_or_stale_pose_skips_base_pose_and_metrics(failure: str) -> N
         else base_harness(RecordingBuffer(identity_transform()), 14_000_000_000)
     )
     AprilTagApproachNode._publish_base_outputs(
-        harness, make_pose(position=(1.0, 0.0, 0.0))
+        harness,
+        make_pose(position=(1.0, 0.0, 0.0)),
+        12.4,
+        12.5,
+        True,
     )
     assert not harness._base_pose_pub.messages
     assert not harness._base_forward_pub.messages
@@ -315,26 +417,35 @@ def test_tf_failure_or_stale_pose_skips_base_pose_and_metrics(failure: str) -> N
 
 
 def test_camera_lost_publishes_only_loss_outputs_and_base_lost() -> None:
+    thresholds = BaseAlignmentThresholds(
+        0.40, 0.43, 8.0, 3.0, 18.0, 11.0, 6.0,
+        0.03, 0.03, 0.02, 4.0, 8.0, 0.8, 1.0
+    )
     harness = SimpleNamespace(
         _translation_filter=SimpleNamespace(reset=lambda: None),
+        _normal_filter=SimpleNamespace(reset=lambda: None),
         _active_tag_id=0,
+        _blind_active=False,
+        _blind_completed=False,
         _state_machine=SimpleNamespace(
             update=lambda _sample, _now, _tag: ApproachState.TAG_LOST
         ),
-        _base_state_machine=BaseAlignmentStateMachine(
-            BaseAlignmentThresholds(0.50, 0.03, 0.02, 5.0, 0.8, 1.0)
-        ),
+        _base_state_machine=BaseAlignmentStateMachine(thresholds),
         _detected_pub=RecordingPublisher(),
         _tag_id_pub=RecordingPublisher(),
         _state_pub=RecordingPublisher(),
         _base_state_pub=RecordingPublisher(),
+        _control_mode_pub=RecordingPublisher(),
+        _command_pub=RecordingPublisher(),
         _log_state_change=lambda _state: None,
         _log_base_state_change=lambda _state: None,
     )
-    harness._publish_base_lost = lambda now_seconds: (
-        AprilTagApproachNode._publish_base_lost(harness, now_seconds)
+    harness._blind_plan = lambda *_args: None
+    harness._clear_final_sample = lambda: None
+    harness._publish_base_lost = lambda *_args: harness._base_state_pub.publish(
+        SimpleNamespace(data=ApproachState.TAG_LOST.value)
     )
-    AprilTagApproachNode._publish_lost(harness, 10.0)
+    AprilTagApproachNode._publish_lost(harness, 10.0, 20.0)
     assert harness._detected_pub.messages[-1].data is False
     assert harness._tag_id_pub.messages[-1].data == -1
     assert harness._state_pub.messages[-1].data == ApproachState.TAG_LOST.value

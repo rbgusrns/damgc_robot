@@ -1,176 +1,260 @@
-"""ROS-independent tests for Follower base-frame alignment decisions."""
+"""Pure tests for Follower hybrid alignment and blind eligibility."""
 
-from math import atan2, inf, nan, radians
+from math import nan, radians
 
 import pytest
 
 from follower_supply_perception.approach_logic import ApproachState
 from follower_supply_perception.base_alignment_logic import (
+    AlignmentDecision,
     BaseAlignmentMeasurement,
     BaseAlignmentStateMachine,
     BaseAlignmentThresholds,
+    ControlMode,
+    compute_blind_remaining_distance,
+    compute_forward_progress,
+    compute_near_control,
+    is_blind_final_approach_eligible,
 )
 
 
-def thresholds(**overrides: float) -> BaseAlignmentThresholds:
-    """Create provisional thresholds that make every state reachable."""
-    values = {
-        "target_forward": 0.50,
-        "forward_tolerance": 0.03,
-        "lateral_tolerance": 0.02,
-        "bearing_tolerance_deg": 5.0,
-        "stable_time": 0.8,
-        "sample_timeout": 1.0,
-    }
+def thresholds(**overrides) -> BaseAlignmentThresholds:
+    values = dict(
+        orientation_engage_distance=0.40,
+        orientation_disengage_distance=0.43,
+        turn_enter_error_deg=8.0,
+        turn_exit_error_deg=3.0,
+        tag_recenter_enter_deg=18.0,
+        tag_recenter_exit_deg=11.0,
+        near_normal_correction_limit_deg=6.0,
+        pre_align_position_tolerance=0.03,
+        final_forward_tolerance=0.03,
+        final_lateral_tolerance=0.02,
+        final_yaw_tolerance_deg=5.0,
+        final_realign_yaw_error_deg=8.0,
+        stable_time=0.8,
+        sample_timeout=0.35,
+    )
     values.update(overrides)
     return BaseAlignmentThresholds(**values)
 
 
 def measurement(
-    forward: float = 0.50,
-    lateral: float = 0.0,
-    bearing: float = 0.0,
-    stamp: float = 10.0,
+    *,
+    tag_x=0.60,
+    tag_y=0.0,
+    prealign_x=0.25,
+    prealign_y=0.0,
+    final_x=0.35,
+    final_y=0.0,
+    yaw=0.0,
+    stamp=10.0,
 ) -> BaseAlignmentMeasurement:
-    """Create one timestamped base sample."""
-    return BaseAlignmentMeasurement(forward, lateral, bearing, stamp)
-
-
-def evaluate(sample: BaseAlignmentMeasurement) -> ApproachState:
-    """Evaluate a fresh sample with standard test thresholds."""
-    return BaseAlignmentStateMachine(thresholds()).update(sample, 10.0, 0)
-
-
-@pytest.mark.parametrize(
-    ("sample", "expected"),
-    [
-        (measurement(bearing=radians(6.0)), ApproachState.TURN_LEFT),
-        (measurement(bearing=radians(-6.0)), ApproachState.TURN_RIGHT),
-        (measurement(forward=0.54), ApproachState.APPROACH),
-        (measurement(forward=0.46), ApproachState.TOO_CLOSE),
-        (
-            measurement(lateral=0.03, bearing=atan2(0.03, 0.50)),
-            ApproachState.FINE_ALIGN_LEFT,
-        ),
-        (
-            measurement(lateral=-0.03, bearing=atan2(-0.03, 0.50)),
-            ApproachState.FINE_ALIGN_RIGHT,
-        ),
-        (measurement(), ApproachState.STABILIZING),
-    ],
-)
-def test_base_state_priority_states(
-    sample: BaseAlignmentMeasurement, expected: ApproachState
-) -> None:
-    assert evaluate(sample) == expected
-
-
-def test_lost_measurement_reports_tag_lost() -> None:
-    machine = BaseAlignmentStateMachine(thresholds())
-    assert machine.update(None, 10.0, None) == ApproachState.TAG_LOST
-
-
-def test_continuous_stability_reaches_aligned() -> None:
-    machine = BaseAlignmentStateMachine(thresholds())
-    assert machine.update(measurement(stamp=10.0), 10.0, 0) == ApproachState.STABILIZING
-    assert machine.update(measurement(stamp=10.5), 10.79, 0) == ApproachState.STABILIZING
-    assert machine.update(measurement(stamp=10.8), 10.8, 0) == ApproachState.ALIGNED
-
-
-@pytest.mark.parametrize(
-    "sample",
-    [
-        measurement(forward=0.47),
-        measurement(forward=0.53),
-        measurement(lateral=0.02),
-        measurement(lateral=-0.02),
-        measurement(bearing=radians(5.0)),
-        measurement(bearing=radians(-5.0)),
-    ],
-)
-def test_exact_tolerance_boundaries_are_inside(
-    sample: BaseAlignmentMeasurement,
-) -> None:
-    assert evaluate(sample) == ApproachState.STABILIZING
-
-
-def test_priority_checks_bearing_before_forward_and_lateral() -> None:
-    sample = measurement(
-        forward=0.80,
-        lateral=-0.50,
-        bearing=radians(8.0),
+    return BaseAlignmentMeasurement(
+        tag_x, tag_y, prealign_x, prealign_y, final_x, final_y, yaw, stamp
     )
-    assert evaluate(sample) == ApproachState.TURN_LEFT
 
 
-def test_stale_sample_reports_tag_lost() -> None:
-    machine = BaseAlignmentStateMachine(thresholds(sample_timeout=1.0))
-    assert machine.update(measurement(stamp=8.999), 10.0, 0) == ApproachState.TAG_LOST
+def enter_final(machine, *, yaw=0.0, final_x=0.08, final_y=0.0, stamp=10.0):
+    return machine.update(
+        measurement(
+            tag_x=0.35,
+            prealign_x=0.0,
+            final_x=final_x,
+            final_y=final_y,
+            yaw=yaw,
+            stamp=stamp,
+        ),
+        stamp,
+        0,
+    )
 
 
-@pytest.mark.parametrize(
-    "sample",
-    [
-        measurement(forward=nan),
-        measurement(lateral=inf),
-        measurement(bearing=-inf),
-        measurement(stamp=nan),
-        measurement(forward=0.0),
-        measurement(forward=-0.1),
-    ],
-)
-def test_invalid_measurements_report_tag_lost(
-    sample: BaseAlignmentMeasurement,
-) -> None:
-    assert evaluate(sample) == ApproachState.TAG_LOST
+def test_far_center_left_and_right_track_tag_center() -> None:
+    centered = BaseAlignmentStateMachine(thresholds()).update(measurement(), 10.0, 0)
+    left = BaseAlignmentStateMachine(thresholds()).update(
+        measurement(tag_y=0.12), 10.0, 0
+    )
+    right = BaseAlignmentStateMachine(thresholds()).update(
+        measurement(tag_y=-0.12), 10.0, 0
+    )
+    assert centered == AlignmentDecision(
+        ApproachState.APPROACH, ControlMode.COARSE_TRACK, 0.60, 0.0
+    )
+    assert left.state == ApproachState.TURN_LEFT
+    assert left.control_y > 0.0
+    assert right.state == ApproachState.TURN_RIGHT
+    assert right.control_y < 0.0
 
 
-def test_leaving_tolerance_resets_stable_timer() -> None:
+def test_far_ignores_misaligned_normal_target() -> None:
+    decision = BaseAlignmentStateMachine(thresholds()).update(
+        measurement(prealign_y=-2.0), 10.0, 0
+    )
+    assert decision.mode == ControlMode.COARSE_TRACK
+    assert decision.control_y == 0.0
+
+
+def test_orientation_engage_and_disengage_hysteresis() -> None:
     machine = BaseAlignmentStateMachine(thresholds())
-    assert machine.update(measurement(stamp=10.0), 10.0, 0) == ApproachState.STABILIZING
-    assert machine.update(measurement(stamp=10.6), 10.6, 0) == ApproachState.STABILIZING
+    near = machine.update(
+        measurement(tag_x=0.40, prealign_x=0.10, stamp=10.0), 10.0, 0
+    )
+    deadband = machine.update(
+        measurement(tag_x=0.42, prealign_x=0.12, stamp=10.1), 10.1, 0
+    )
+    far = machine.update(
+        measurement(tag_x=0.44, prealign_x=0.14, stamp=10.2), 10.2, 0
+    )
+    assert near.mode == deadband.mode == ControlMode.NEAR_ALIGN
+    assert far.mode == ControlMode.COARSE_TRACK
+
+
+def test_turn_enter_and_exit_hysteresis() -> None:
+    machine = BaseAlignmentStateMachine(thresholds())
+    assert machine.update(
+        measurement(tag_y=0.09), 10.0, 0
+    ).state == ApproachState.TURN_LEFT
+    assert machine.update(
+        measurement(tag_y=0.05, stamp=10.1), 10.1, 0
+    ).state == ApproachState.TURN_LEFT
+    assert machine.update(
+        measurement(tag_y=0.02, stamp=10.2), 10.2, 0
+    ).state == ApproachState.APPROACH
+
+
+def test_near_control_limits_normal_bias_and_fov_forward_scale() -> None:
+    limited = compute_near_control(0.0, radians(30.0), radians(6.0), 0.1, 0.3)
+    warning = compute_near_control(0.2, 0.3, radians(6.0), 0.1, 0.3)
+    assert limited.normal_correction == pytest.approx(radians(6.0))
+    assert 0.0 < warning.forward_scale < 1.0
+    assert abs(warning.normal_correction) < radians(6.0)
+
+
+def test_recenter_enter_exit_and_zero_forward_semantics() -> None:
+    machine = BaseAlignmentStateMachine(thresholds())
+    entered = machine.update(
+        measurement(tag_x=0.35, tag_y=0.12, prealign_x=0.1), 10.0, 0
+    )
+    held = machine.update(
+        measurement(tag_x=0.35, tag_y=0.08, prealign_x=0.1, stamp=10.1),
+        10.1,
+        0,
+    )
+    exited = machine.update(
+        measurement(tag_x=0.35, tag_y=0.05, prealign_x=0.1, stamp=10.2),
+        10.2,
+        0,
+    )
+    assert entered.mode == held.mode == ControlMode.RECENTER
+    assert entered.state == ApproachState.TURN_LEFT
+    assert exited.mode == ControlMode.NEAR_ALIGN
+
+
+def test_final_yaw_align_and_final_approach_realign() -> None:
+    machine = BaseAlignmentStateMachine(thresholds())
+    yaw_align = enter_final(machine, yaw=radians(6.0))
+    approach = enter_final(machine, yaw=radians(4.0), stamp=10.1)
+    deadband = enter_final(machine, yaw=radians(7.0), stamp=10.2)
+    realign = enter_final(machine, yaw=radians(9.0), stamp=10.3)
+    assert yaw_align.mode == ControlMode.FINAL_YAW_ALIGN
+    assert yaw_align.state == ApproachState.FINE_ALIGN_LEFT
+    assert approach.mode == deadband.mode == ControlMode.FINAL_APPROACH
+    assert realign.mode == ControlMode.FINAL_YAW_ALIGN
+
+
+def test_stabilizing_requires_position_and_yaw_then_aligns() -> None:
+    machine = BaseAlignmentStateMachine(thresholds())
+    first = enter_final(machine, final_x=0.01, final_y=0.01, stamp=10.0)
+    aligned = enter_final(machine, final_x=0.01, final_y=0.01, stamp=10.8)
+    assert first.state == ApproachState.STABILIZING
+    assert aligned.state == ApproachState.ALIGNED
+    wrong_position = BaseAlignmentStateMachine(thresholds())
+    assert enter_final(wrong_position, final_y=0.03).state == ApproachState.FINAL_APPROACH
+    wrong_yaw = BaseAlignmentStateMachine(thresholds())
     assert (
-        machine.update(measurement(forward=0.54, stamp=10.7), 10.7, 0)
-        == ApproachState.APPROACH
+        enter_final(wrong_yaw, final_x=0.01, yaw=radians(6.0)).mode
+        == ControlMode.FINAL_YAW_ALIGN
     )
-    assert machine.update(measurement(stamp=11.0), 11.0, 0) == ApproachState.STABILIZING
-    assert machine.update(measurement(stamp=11.79), 11.79, 0) == ApproachState.STABILIZING
-    assert machine.update(measurement(stamp=11.8), 11.8, 0) == ApproachState.ALIGNED
 
 
-def test_lost_then_recovery_restarts_stabilizing() -> None:
+def test_loss_stale_invalid_and_tag_change_reset_state() -> None:
     machine = BaseAlignmentStateMachine(thresholds())
-    assert machine.update(measurement(stamp=10.0), 10.0, 0) == ApproachState.STABILIZING
-    assert machine.update(measurement(stamp=10.8), 10.8, 0) == ApproachState.ALIGNED
-    assert machine.update(None, 10.9, None) == ApproachState.TAG_LOST
-    assert machine.update(measurement(stamp=11.0), 11.0, 0) == ApproachState.STABILIZING
+    assert machine.update(None, 10.0, None).mode == ControlMode.TAG_LOST
+    assert machine.update(measurement(stamp=9.0), 10.0, 0).mode == ControlMode.TAG_LOST
+    assert machine.update(measurement(tag_x=nan), 10.0, 0).mode == ControlMode.TAG_LOST
+    assert machine.update(measurement(), 10.0, 1).mode == ControlMode.COARSE_TRACK
 
 
-def test_tag_id_change_resets_stable_timer() -> None:
-    machine = BaseAlignmentStateMachine(thresholds())
-    assert machine.update(measurement(stamp=10.0), 10.0, 0) == ApproachState.STABILIZING
-    assert machine.update(measurement(stamp=10.8), 10.8, 0) == ApproachState.ALIGNED
-    assert machine.update(measurement(stamp=10.9), 10.9, 1) == ApproachState.STABILIZING
+def blind_kwargs(**overrides):
+    values = dict(
+        enabled=True,
+        phase=AlignmentDecision(ApproachState.FINAL_APPROACH, ControlMode.FINAL_APPROACH),
+        last_valid_tag_x=0.30,
+        last_valid_receipt=20.0,
+        receipt_now=20.1,
+        last_valid_yaw_error=radians(2.0),
+        last_valid_cross_track=0.01,
+        final_target_distance=0.25,
+        activation_max_tag_x=0.35,
+        max_distance=0.10,
+        handoff_max_age=0.40,
+        yaw_tolerance=radians(5.0),
+        cross_track_tolerance=0.02,
+        odometry_valid=True,
+    )
+    values.update(overrides)
+    return values
 
 
-def test_invalid_tag_id_resets_state() -> None:
-    machine = BaseAlignmentStateMachine(thresholds())
-    assert machine.update(measurement(), 10.0, -1) == ApproachState.TAG_LOST
+def test_blind_is_only_eligible_from_recent_final_approach() -> None:
+    assert is_blind_final_approach_eligible(**blind_kwargs())
+    for phase in (
+        AlignmentDecision(ApproachState.APPROACH, ControlMode.COARSE_TRACK),
+        AlignmentDecision(ApproachState.APPROACH, ControlMode.NEAR_ALIGN),
+        AlignmentDecision(ApproachState.TURN_LEFT, ControlMode.RECENTER),
+        AlignmentDecision(ApproachState.FINE_ALIGN_LEFT, ControlMode.FINAL_YAW_ALIGN),
+    ):
+        assert not is_blind_final_approach_eligible(
+            **blind_kwargs(phase=phase)
+        )
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"enabled": False},
+        {"odometry_valid": False},
+        {"receipt_now": 20.5},
+        {"last_valid_tag_x": 0.40},
+        {"last_valid_yaw_error": radians(6.0)},
+        {"last_valid_cross_track": 0.03},
+    ],
+)
+def test_blind_safety_gate_rejects_invalid_condition(override) -> None:
+    assert not is_blind_final_approach_eligible(**blind_kwargs(**override))
+
+
+def test_blind_distance_and_forward_progress_are_bounded() -> None:
+    assert compute_blind_remaining_distance(0.30, 0.25, 0.10) == pytest.approx(0.05)
+    assert compute_blind_remaining_distance(0.40, 0.25, 0.10) is None
+    assert compute_blind_remaining_distance(0.20, 0.25, 0.10) is None
+    assert compute_forward_progress(0.0, 0.0, 0.0, 0.05, 0.01) == pytest.approx(0.05)
+    assert compute_forward_progress(0.0, 0.0, nan, 0.05, 0.0) is None
 
 
 @pytest.mark.parametrize(
     "invalid",
     [
-        thresholds(target_forward=0.0),
-        thresholds(target_forward=0.03, forward_tolerance=0.03),
-        thresholds(forward_tolerance=-0.01),
-        thresholds(lateral_tolerance=-0.01),
-        thresholds(bearing_tolerance_deg=-1.0),
-        thresholds(stable_time=-0.1),
-        thresholds(sample_timeout=-0.1),
-        thresholds(target_forward=nan),
+        thresholds(orientation_engage_distance=0.0),
+        thresholds(orientation_disengage_distance=0.39),
+        thresholds(turn_exit_error_deg=9.0),
+        thresholds(tag_recenter_exit_deg=19.0),
+        thresholds(final_forward_tolerance=0.0),
+        thresholds(final_lateral_tolerance=0.0),
+        thresholds(final_realign_yaw_error_deg=5.0),
     ],
 )
-def test_invalid_thresholds_are_rejected(invalid: BaseAlignmentThresholds) -> None:
+def test_invalid_thresholds_are_rejected(invalid) -> None:
     with pytest.raises(ValueError):
         BaseAlignmentStateMachine(invalid)

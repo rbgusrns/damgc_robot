@@ -1,128 +1,135 @@
-"""ROS-message boundary tests for the Follower approach controller."""
+"""Node-boundary tests for atomic Follower alignment commands."""
 
-from math import atan2, nan
+from math import nan
 from types import SimpleNamespace
 
 import pytest
-from geometry_msgs.msg import PoseStamped
+from follower_alignment_msgs.msg import FollowerAlignmentCommand
+from geometry_msgs.msg import Pose, Twist
+from std_msgs.msg import Bool, Int32
 from std_srvs.srv import SetBool
 
-import follower_approach_control.approach_controller_node as node_module
-from follower_approach_control.approach_controller_logic import PlanarCommand
+from follower_approach_control.approach_controller_logic import (
+    COARSE_TRACK,
+    FINAL_APPROACH,
+    BaseControlMeasurement,
+    PlanarCommand,
+)
 from follower_approach_control.approach_controller_node import ApproachControllerNode
 
 
-def make_pose() -> PoseStamped:
-    """Create a finite forward base pose."""
-    pose = PoseStamped()
-    pose.header.frame_id = "base_link"
-    pose.header.stamp.sec = 10
-    pose.pose.position.x = 0.35
-    pose.pose.position.y = 0.04
-    pose.pose.orientation.w = 1.0
-    return pose
-
-
-class RecordingPublisher:
-    """Publisher double that records messages."""
-
-    def __init__(self) -> None:
+class Publisher:
+    def __init__(self):
         self.messages = []
 
-    def publish(self, message: object) -> None:
+    def publish(self, message):
         self.messages.append(message)
 
 
+def command(state=FINAL_APPROACH, mode=FINAL_APPROACH) -> FollowerAlignmentCommand:
+    message = FollowerAlignmentCommand()
+    message.header.frame_id = "base_link"
+    message.header.stamp.sec = 10
+    message.target_pose.position.x = 0.1
+    message.target_pose.orientation.w = 1.0
+    message.control_mode = mode
+    message.alignment_state = state
+    return message
+
+
+def harness():
+    node = SimpleNamespace(
+        _base_frame="base_link",
+        _target_tag_id=0,
+        _detected=True,
+        _selected_tag_id=0,
+        _measurement=None,
+        _command_stamp_seconds=None,
+        _command_received_seconds=None,
+        _command_state=None,
+        _command_mode=None,
+        _pose_timeout=1.2,
+        get_clock=lambda: SimpleNamespace(
+            now=lambda: SimpleNamespace(nanoseconds=10_100_000_000)
+        ),
+    )
+    node._pose_is_valid = ApproachControllerNode._pose_is_valid
+    node._invalidate_sample = lambda: ApproachControllerNode._invalidate_sample(node)
+    return node
+
+
 def test_twist_populates_only_differential_drive_axes() -> None:
-    twist = ApproachControllerNode._to_twist(PlanarCommand(0.04, -0.10))
-    assert twist.linear.x == 0.04
-    assert twist.angular.z == -0.10
-    assert twist.linear.y == 0.0
-    assert twist.linear.z == 0.0
-    assert twist.angular.x == 0.0
-    assert twist.angular.y == 0.0
+    message = ApproachControllerNode._to_twist(PlanarCommand(0.1, -0.2))
+    assert message.linear.x == pytest.approx(0.1)
+    assert message.angular.z == pytest.approx(-0.2)
+    assert message.linear.y == message.linear.z == 0.0
+    assert message.angular.x == message.angular.y == 0.0
 
 
-def test_pose_validation_accepts_finite_forward_pose() -> None:
-    assert ApproachControllerNode._pose_is_valid(make_pose())
-
-
-@pytest.mark.parametrize("invalid", ["nan", "nonforward", "quaternion"])
-def test_pose_validation_rejects_invalid_pose(invalid: str) -> None:
-    pose = make_pose()
-    if invalid == "nan":
-        pose.pose.position.y = nan
-    elif invalid == "nonforward":
-        pose.pose.position.x = 0.0
-    else:
-        pose.pose.orientation.w = 0.0
+def test_pose_validation_accepts_finite_and_rejects_invalid_pose() -> None:
+    pose = Pose()
+    pose.orientation.w = 1.0
+    assert ApproachControllerNode._pose_is_valid(pose)
+    pose.position.x = nan
+    assert not ApproachControllerNode._pose_is_valid(pose)
+    pose.position.x = 0.0
+    pose.orientation.w = 0.0
     assert not ApproachControllerNode._pose_is_valid(pose)
 
 
-def test_pose_callback_recomputes_all_metrics_from_one_pose(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(node_module.time, "monotonic", lambda: 20.0)
-    harness = SimpleNamespace(
-        _detected=True,
-        _selected_tag_id=0,
-        _target_tag_id=0,
-        _base_frame="base_link",
-        _pose_timeout=0.35,
-        _latest_pose_generation=4,
-        _coherent_generation=4,
-        _coherent_state="APPROACH",
-        _invalidate_sample=lambda: None,
-        _pose_is_valid=ApproachControllerNode._pose_is_valid,
-        get_clock=lambda: SimpleNamespace(
-            now=lambda: SimpleNamespace(nanoseconds=10_200_000_000)
-        ),
+def test_atomic_callback_caches_matching_pose_mode_and_state(monkeypatch) -> None:
+    node = harness()
+    monkeypatch.setattr(
+        "follower_approach_control.approach_controller_node.time.monotonic",
+        lambda: 20.0,
     )
+    ApproachControllerNode._on_command(node, command())
+    assert node._measurement == BaseControlMeasurement(0.1, 0.0, 0.0)
+    assert node._command_mode == FINAL_APPROACH
+    assert node._command_state == FINAL_APPROACH
 
-    ApproachControllerNode._on_pose(harness, make_pose())
 
-    assert harness._measurement.forward_distance == pytest.approx(0.35)
-    assert harness._measurement.lateral_error == pytest.approx(0.04)
-    assert harness._measurement.bearing == pytest.approx(atan2(0.04, 0.35))
-    assert harness._latest_pose_generation == 5
-    assert harness._coherent_generation is None
-    assert harness._coherent_state is None
+def test_invalid_atomic_command_clears_all_fields(monkeypatch) -> None:
+    node = harness()
+    node._measurement = BaseControlMeasurement(1.0, 1.0, 1.0)
+    monkeypatch.setattr(
+        "follower_approach_control.approach_controller_node.time.monotonic",
+        lambda: 20.0,
+    )
+    invalid = command(state=FINAL_APPROACH, mode=COARSE_TRACK)
+    ApproachControllerNode._on_command(node, invalid)
+    # Pair compatibility is checked in pure control logic, while all fields
+    # still come from this one atomic generation.
+    assert node._command_mode == COARSE_TRACK
+    assert node._command_state == FINAL_APPROACH
+    invalid.header.frame_id = "wrong"
+    ApproachControllerNode._on_command(node, invalid)
+    assert node._measurement is None
+    assert node._command_mode is None
+    assert node._command_state is None
+
+
+def test_detection_and_id_transitions_invalidate_cache() -> None:
+    node = harness()
+    node._measurement = BaseControlMeasurement(0.1, 0.0, 0.0)
+    node._invalidate_sample = lambda: ApproachControllerNode._invalidate_sample(node)
+    ApproachControllerNode._on_detected(node, Bool(data=False))
+    assert node._measurement is None
+    node._detected = True
+    node._measurement = BaseControlMeasurement(0.1, 0.0, 0.0)
+    ApproachControllerNode._on_tag_id(node, Int32(data=1))
+    assert node._measurement is None
 
 
 def test_enable_transition_discards_cache_and_publishes_zero() -> None:
-    publisher = RecordingPublisher()
-    invalidations = []
-    harness = SimpleNamespace(
-        _enabled=False,
-        _invalidate_sample=lambda: invalidations.append(True),
-        _raw_pub=publisher,
-        get_logger=lambda: SimpleNamespace(info=lambda _message: None),
-    )
-    request = SetBool.Request(data=True)
+    node = harness()
+    node._measurement = BaseControlMeasurement(0.1, 0.0, 0.0)
+    node._raw_pub = Publisher()
     response = SetBool.Response()
-
-    result = ApproachControllerNode._on_enable(harness, request, response)
-
-    assert harness._enabled is True
-    assert invalidations == [True]
-    assert result.success is True
-    assert "fresh coherent sample" in result.message
-    assert len(publisher.messages) == 1
-    assert publisher.messages[0].linear.x == 0.0
-    assert publisher.messages[0].angular.z == 0.0
-
-
-def test_detection_and_id_transitions_invalidate_cached_sample() -> None:
-    invalidations = []
-    harness = SimpleNamespace(
-        _detected=False,
-        _selected_tag_id=-1,
-        _invalidate_sample=lambda: invalidations.append(True),
+    result = ApproachControllerNode._on_enable(
+        node, SetBool.Request(data=True), response
     )
-    ApproachControllerNode._on_detected(
-        harness, SimpleNamespace(data=True)
-    )
-    ApproachControllerNode._on_tag_id(harness, SimpleNamespace(data=0))
-    assert harness._detected is True
-    assert harness._selected_tag_id == 0
-    assert invalidations == [True, True]
+    assert result.success
+    assert node._measurement is None
+    assert isinstance(node._raw_pub.messages[-1], Twist)
+    assert node._raw_pub.messages[-1].linear.x == 0.0

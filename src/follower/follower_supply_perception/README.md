@@ -41,6 +41,12 @@ launch 구성과 검증 결과는
 [`docs/FOLLOWER_BASE_LINK_VELOCITY_PIPELINE_VALIDATION_GUIDE.md`](docs/FOLLOWER_BASE_LINK_VELOCITY_PIPELINE_VALIDATION_GUIDE.md)를
 기준으로 합니다.
 
+최신 Leader hybrid alignment의 Follower 이식 구조, atomic command, USB timestamp
+처리, blind-final safety gate와 단계별 검증 절차는
+[`docs/FOLLOWER_HYBRID_ALIGNMENT_MIGRATION.md`](docs/FOLLOWER_HYBRID_ALIGNMENT_MIGRATION.md)를
+기준으로 합니다. Blind final은 코드와 자동시험만 포함하며 기본값은 반드시
+`false`입니다.
+
 노드 실행 진입점은 `apriltag_approach_node`입니다. 출력 토픽은 상대 이름을 사용하므로
 요구된 `/follower/...` 이름으로 사용하려면 노드를 `follower` namespace에서 실행해야
 합니다.
@@ -112,6 +118,8 @@ Pipeline 상태와 최종 bridge 연결은 다음 명령으로 확인합니다.
 
 ```bash
 ros2 topic echo /follower/base_alignment/state
+ros2 topic echo /follower/alignment/control_mode
+ros2 topic echo /follower/alignment/command
 ros2 topic echo /follower/approach/cmd_vel_raw
 ros2 topic echo /follower/selected_cmd_vel
 ros2 topic echo /follower/safe_cmd_vel

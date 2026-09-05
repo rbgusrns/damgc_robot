@@ -19,7 +19,7 @@ from follower_supply_perception.camera_extrinsic import (
 def test_measured_mounting_translation_is_in_base_to_body_transform() -> None:
     assert BASE_TO_CAMERA_BODY.parent_frame == BASE_FRAME == "base_link"
     assert BASE_TO_CAMERA_BODY.child_frame == CAMERA_BODY_FRAME
-    assert BASE_TO_CAMERA_BODY.xyz == pytest.approx((0.042, 0.0, 0.120))
+    assert BASE_TO_CAMERA_BODY.xyz == pytest.approx((0.042, 0.01, 0.120))
     assert BASE_TO_CAMERA_BODY.rpy == pytest.approx((0.0, 0.0, 0.0))
 
 

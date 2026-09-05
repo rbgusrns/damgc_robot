@@ -15,14 +15,45 @@
     lateral_tolerance: 0.02
     angle_tolerance_deg: 5.0
     tag_timeout: 2.0
+    # usb_cam source stamps can carry a fixed 0.31-0.79 s age offset. Keep
+    # tag_timeout as a source-stamp sanity bound, and use local monotonic
+    # receipt age below to detect an actual visual dropout.
+    tag_receipt_timeout: 0.35
     stable_time: 0.8
     publish_rate: 20.0
     filter_window: 5
 
-    # Configured base-frame approach stop target, matching the Leader at 0.25 m.
-    # Tolerances remain conservative software-validation values.
+    # Follower geometry baseline. Do not replace this 0.25 m target with the
+    # Leader robot's 0.20 m value during algorithm migration.
     base_target_forward: 0.25
     base_forward_tolerance: 0.03
     base_lateral_tolerance: 0.02
     base_bearing_tolerance_deg: 5.0
     base_stable_time: 0.8
+
+    # Hybrid center/normal alignment. The 0.35 m pre-align point preserves a
+    # 0.10 m staging interval ahead of the Follower's 0.25 m final target.
+    pre_align_distance: 0.35
+    orientation_engage_distance: 0.40
+    orientation_disengage_distance: 0.43
+    turn_enter_error_deg: 8.0
+    turn_exit_error_deg: 3.0
+    tag_recenter_enter_deg: 18.0
+    tag_recenter_exit_deg: 11.0
+    near_normal_correction_limit_deg: 6.0
+    final_realign_yaw_error_deg: 8.0
+
+    # Restricted close-range odometry fallback. It is implemented for testing
+    # but remains disabled until Follower wheel odometry is validated in situ.
+    blind_final_approach_enabled: false
+    blind_activation_max_tag_x: 0.35
+    blind_max_distance: 0.10
+    blind_last_tag_max_age: 0.25
+    blind_handoff_max_age: 0.40
+    blind_max_duration: 5.0
+    blind_odom_timeout: 0.25
+    blind_max_odom_step: 0.05
+    blind_max_lateral_deviation: 0.03
+    blind_max_yaw_deviation_deg: 12.0
+    blind_reverse_tolerance: 0.01
+    odom_topic: /follower/odom/raw

@@ -102,3 +102,45 @@ def test_individual_launch_defaults_remain_safe_and_compatible() -> None:
         '"guard_enabled_on_startup",\n                default_value="false"'
         in guard_launch
     )
+
+
+def test_atomic_command_and_blind_default_contracts() -> None:
+    perception = _source(
+        PACKAGE_ROOT / "follower_supply_perception/apriltag_approach_node.py"
+    )
+    controller = _source(
+        FOLLOWER_ROOT
+        / "follower_approach_control/follower_approach_control/approach_controller_node.py"
+    )
+    config = _source(PACKAGE_ROOT / "config/approach.yaml")
+    message = _source(
+        FOLLOWER_ROOT / "follower_alignment_msgs/msg/FollowerAlignmentCommand.msg"
+    )
+    assert 'FollowerAlignmentCommand, "alignment/command"' in perception
+    assert 'FollowerAlignmentCommand,\n            "alignment/command"' in controller
+    assert "blind_final_approach_enabled: false" in config
+    assert message.splitlines() == [
+        "std_msgs/Header header",
+        "geometry_msgs/Pose target_pose",
+        "string control_mode",
+        "string alignment_state",
+    ]
+
+
+def test_follower_runtime_code_and_config_have_no_leader_identifiers() -> None:
+    runtime_files = []
+    for package in FOLLOWER_ROOT.iterdir():
+        if not package.is_dir():
+            continue
+        for path in package.rglob("*"):
+            if not path.is_file() or any(
+                part in {"test", "docs", "__pycache__"} for part in path.parts
+            ):
+                continue
+            if path.suffix in {".py", ".yaml", ".xml", ".msg"}:
+                runtime_files.append(path)
+    forbidden = ("/leader/", "leader/tag", "leader_camera", "leader/odom")
+    for path in runtime_files:
+        lowered = _source(path).lower()
+        for value in forbidden:
+            assert value not in lowered, "%s leaked into %s" % (value, path)
