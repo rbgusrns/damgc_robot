@@ -48,6 +48,7 @@ typedef struct
 void UARTProtocol_Init(UART_HandleTypeDef *uart);
 HAL_StatusTypeDef UARTProtocol_StartReceive(void);
 void UARTProtocol_Process(void);
+void UARTProtocol_PushRxData(const uint8_t *data, uint16_t length);
 uint8_t UARTProtocol_TakeVelocityCommand(UARTVelocityCommand *command);
 uint32_t UARTProtocol_GetLastCommandAgeMs(void);
 uint64_t UARTProtocol_GetTimestampUs(void);
@@ -71,7 +72,8 @@ HAL_StatusTypeDef UARTProtocol_SendSystem(uint16_t battery_mv,
                                           uint32_t fault_bits,
                                           uint16_t last_cmd_age_ms);
 
-void UARTProtocol_RxCpltCallback(UART_HandleTypeDef *uart);
+void UARTProtocol_RxEventCallback(UART_HandleTypeDef *uart, uint16_t position);
+void UARTProtocol_TxCpltCallback(UART_HandleTypeDef *uart);
 void UARTProtocol_ErrorCallback(UART_HandleTypeDef *uart);
 
 #endif

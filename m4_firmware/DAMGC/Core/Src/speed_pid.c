@@ -2,7 +2,7 @@
 
 /* Best result saved before the comparison test:
  * target=275 mm/s, Kp=1.000, Ki=1.100, Kd=0.015,
- * acceleration=deceleration=3500 mm/s^2.
+ * acceleration=deceleration=1000 mm/s^2.
  */
 #define SAVED_TUNING_KP 1.000f
 #define SAVED_TUNING_KI 1.100f
@@ -15,8 +15,8 @@ static SpeedPIDStatus status =
   .kd = SAVED_TUNING_KD,
   .left_target_mm_s = 275.0f,
   .right_target_mm_s = 275.0f,
-  .acceleration_mm_s2 = 3500.0f,
-  .deceleration_mm_s2 = 3500.0f
+  .acceleration_mm_s2 = 1000.0f,
+  .deceleration_mm_s2 = 1000.0f
 };
 static float left_integral;
 static float right_integral;

@@ -56,7 +56,7 @@ def summarize(name, values, unit):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", default="COM5")
-    parser.add_argument("--baud", type=int, default=460800)
+    parser.add_argument("--baud", type=int, default=230400)
     parser.add_argument("--seconds", type=float, default=20.0)
     args = parser.parse_args()
 

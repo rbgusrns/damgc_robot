@@ -1,4 +1,5 @@
 #include "uart_protocol.h"
+#include "i2c_protocol.h"
 
 #include <string.h>
 
@@ -7,16 +8,29 @@
 #define UART_MAX_PAYLOAD 512U
 #define UART_MAX_FRAME_SIZE (12U + UART_MAX_PAYLOAD)
 #define UART_RX_RING_SIZE 256U
+#define UART_RX_DMA_SIZE 256U
+#define UART_TX_QUEUE_DEPTH 8U
 #define UART_CMD_VELOCITY_PAYLOAD_SIZE 8U
 #define UART_IMU_PAYLOAD_SIZE 52U
 #define UART_WHEEL_PAYLOAD_SIZE 34U
 #define UART_SYSTEM_PAYLOAD_SIZE 22U
 
 static UART_HandleTypeDef *protocol_uart;
-static uint8_t rx_interrupt_byte;
 static volatile uint8_t rx_ring[UART_RX_RING_SIZE];
 static volatile uint16_t rx_head;
 static volatile uint16_t rx_tail;
+static uint8_t rx_dma_buffer[UART_RX_DMA_SIZE];
+static volatile uint16_t rx_dma_position;
+static volatile uint8_t rx_restart_pending;
+typedef struct
+{
+  uint8_t data[64];
+  uint16_t length;
+} UARTTxFrame;
+static UARTTxFrame tx_queue[UART_TX_QUEUE_DEPTH];
+static volatile uint8_t tx_head;
+static volatile uint8_t tx_tail;
+static volatile uint8_t tx_dma_active;
 static uint8_t parser_frame[UART_MAX_FRAME_SIZE];
 static uint16_t parser_length;
 static uint16_t parser_expected_length;
@@ -90,6 +104,47 @@ uint64_t UARTProtocol_GetTimestampUs(void)
   return (timestamp_epoch_ms + now_ms) * 1000ULL;
 }
 
+static void RestoreInterruptState(uint32_t primask)
+{
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
+}
+
+static void StartNextTx(void)
+{
+  if ((protocol_uart == NULL) || (tx_dma_active != 0U) ||
+      (tx_tail == tx_head))
+  {
+    return;
+  }
+  if (HAL_UART_Transmit_DMA(protocol_uart, tx_queue[tx_tail].data,
+                            tx_queue[tx_tail].length) == HAL_OK)
+  {
+    tx_dma_active = 1U;
+  }
+  else
+  {
+    protocol_stats.tx_errors++;
+  }
+}
+
+static void PushRxByte(uint8_t byte)
+{
+  uint16_t next_head = (uint16_t)((rx_head + 1U) % UART_RX_RING_SIZE);
+
+  if (next_head == rx_tail)
+  {
+    protocol_stats.rx_overruns++;
+  }
+  else
+  {
+    rx_ring[rx_head] = byte;
+    rx_head = next_head;
+  }
+}
+
 static HAL_StatusTypeDef SendFrame(uint8_t message_type,
                                    const uint8_t *payload,
                                    uint16_t payload_length,
@@ -98,7 +153,8 @@ static HAL_StatusTypeDef SendFrame(uint8_t message_type,
   uint8_t frame[64];
   uint16_t offset = 0U;
   uint16_t crc;
-  HAL_StatusTypeDef result;
+  uint8_t next_head;
+  uint32_t primask;
 
   if ((protocol_uart == NULL) || (payload_length > (sizeof(frame) - 12U)))
   {
@@ -124,16 +180,23 @@ static HAL_StatusTypeDef SendFrame(uint8_t message_type,
   PutU16LE(&frame[offset], crc);
   offset += 2U;
 
-  result = HAL_UART_Transmit(protocol_uart, frame, offset, 10U);
-  if (result == HAL_OK)
-  {
-    protocol_stats.tx_frames++;
-  }
-  else
+  I2CProtocol_PublishFrame(frame, offset);
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  next_head = (uint8_t)((tx_head + 1U) % UART_TX_QUEUE_DEPTH);
+  if (next_head == tx_tail)
   {
     protocol_stats.tx_errors++;
+    RestoreInterruptState(primask);
+    return HAL_BUSY;
   }
-  return result;
+  memcpy(tx_queue[tx_head].data, frame, offset);
+  tx_queue[tx_head].length = offset;
+  tx_head = next_head;
+  StartNextTx();
+  RestoreInterruptState(primask);
+  return HAL_OK;
 }
 
 static void DispatchFrame(void)
@@ -240,6 +303,11 @@ void UARTProtocol_Init(UART_HandleTypeDef *uart)
   protocol_uart = uart;
   rx_head = 0U;
   rx_tail = 0U;
+  rx_dma_position = 0U;
+  rx_restart_pending = 0U;
+  tx_head = 0U;
+  tx_tail = 0U;
+  tx_dma_active = 0U;
   parser_length = 0U;
   parser_expected_length = 0U;
   tx_sequence = 0U;
@@ -259,16 +327,49 @@ HAL_StatusTypeDef UARTProtocol_StartReceive(void)
   }
   __HAL_UART_CLEAR_OREFLAG(protocol_uart);
   __HAL_UART_FLUSH_DRREGISTER(protocol_uart);
-  return HAL_UART_Receive_IT(protocol_uart, &rx_interrupt_byte, 1U);
+  rx_dma_position = 0U;
+  rx_restart_pending = 0U;
+  return HAL_UARTEx_ReceiveToIdle_DMA(protocol_uart, rx_dma_buffer,
+                                      UART_RX_DMA_SIZE);
 }
 
 void UARTProtocol_Process(void)
 {
+  uint32_t primask;
+
+  if (rx_restart_pending != 0U)
+  {
+    (void)HAL_UART_AbortReceive(protocol_uart);
+    if (UARTProtocol_StartReceive() != HAL_OK)
+    {
+      protocol_stats.uart_errors++;
+      rx_restart_pending = 1U;
+    }
+  }
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  StartNextTx();
+  RestoreInterruptState(primask);
+
   while (rx_tail != rx_head)
   {
     uint8_t byte = rx_ring[rx_tail];
     rx_tail = (uint16_t)((rx_tail + 1U) % UART_RX_RING_SIZE);
     ParserFeed(byte);
+  }
+}
+
+void UARTProtocol_PushRxData(const uint8_t *data, uint16_t length)
+{
+  if (data == NULL)
+  {
+    return;
+  }
+
+  for (uint16_t index = 0U; index < length; index++)
+  {
+    PushRxByte(data[index]);
   }
 }
 
@@ -375,25 +476,54 @@ HAL_StatusTypeDef UARTProtocol_SendSystem(uint16_t battery_mv,
   return SendFrame(UART_MSG_SYSTEM_STATE, payload, sizeof(payload), 0U);
 }
 
-void UARTProtocol_RxCpltCallback(UART_HandleTypeDef *uart)
+void UARTProtocol_RxEventCallback(UART_HandleTypeDef *uart, uint16_t position)
 {
-  uint16_t next_head;
+  uint16_t index;
 
   if ((protocol_uart == NULL) || (uart->Instance != protocol_uart->Instance))
   {
     return;
   }
-  next_head = (uint16_t)((rx_head + 1U) % UART_RX_RING_SIZE);
-  if (next_head == rx_tail)
+  if (position > UART_RX_DMA_SIZE)
   {
-    protocol_stats.rx_overruns++;
+    protocol_stats.malformed_frames++;
+    return;
   }
-  else
+
+  if (position > rx_dma_position)
   {
-    rx_ring[rx_head] = rx_interrupt_byte;
-    rx_head = next_head;
+    for (index = rx_dma_position; index < position; index++)
+    {
+      PushRxByte(rx_dma_buffer[index]);
+    }
   }
-  (void)HAL_UART_Receive_IT(protocol_uart, &rx_interrupt_byte, 1U);
+  else if (position < rx_dma_position)
+  {
+    for (index = rx_dma_position; index < UART_RX_DMA_SIZE; index++)
+    {
+      PushRxByte(rx_dma_buffer[index]);
+    }
+    for (index = 0U; index < position; index++)
+    {
+      PushRxByte(rx_dma_buffer[index]);
+    }
+  }
+  rx_dma_position = position;
+}
+
+void UARTProtocol_TxCpltCallback(UART_HandleTypeDef *uart)
+{
+  if ((protocol_uart == NULL) || (uart->Instance != protocol_uart->Instance))
+  {
+    return;
+  }
+  if (tx_dma_active != 0U)
+  {
+    tx_tail = (uint8_t)((tx_tail + 1U) % UART_TX_QUEUE_DEPTH);
+    tx_dma_active = 0U;
+    protocol_stats.tx_frames++;
+  }
+  StartNextTx();
 }
 
 void UARTProtocol_ErrorCallback(UART_HandleTypeDef *uart)
@@ -403,14 +533,17 @@ void UARTProtocol_ErrorCallback(UART_HandleTypeDef *uart)
     return;
   }
   protocol_stats.uart_errors++;
-  __HAL_UART_CLEAR_OREFLAG(protocol_uart);
-  __HAL_UART_FLUSH_DRREGISTER(protocol_uart);
-  (void)HAL_UART_Receive_IT(protocol_uart, &rx_interrupt_byte, 1U);
+  rx_restart_pending = 1U;
 }
 
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *uart)
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *uart, uint16_t position)
 {
-  UARTProtocol_RxCpltCallback(uart);
+  UARTProtocol_RxEventCallback(uart, position);
+}
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *uart)
+{
+  UARTProtocol_TxCpltCallback(uart);
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *uart)

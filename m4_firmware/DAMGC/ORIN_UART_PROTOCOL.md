@@ -3,7 +3,7 @@
 ## Link
 
 - STM32 USART2: PA2 TX, PA3 RX
-- 460800 baud, 8 data bits, no parity, 1 stop bit, no flow control
+- 230400 baud, 8 data bits, no parity, 1 stop bit, no flow control
 - 3.3 V UART; cross TX/RX and connect a common ground
 - All integer and IEEE-754 float fields are little-endian
 

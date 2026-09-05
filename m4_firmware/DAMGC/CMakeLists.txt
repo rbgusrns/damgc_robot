@@ -47,6 +47,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/drive.c
     Core/Src/speed_pid.c
     Core/Src/uart_protocol.c
+    Core/Src/i2c_protocol.c
     Core/Src/calibration_store.c
 )
 
