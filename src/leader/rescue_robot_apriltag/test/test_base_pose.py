@@ -45,10 +45,10 @@ def make_alignment_thresholds() -> BaseAlignmentThresholds:
         tag_recenter_exit_deg=11.0,
         near_normal_correction_limit_deg=6.0,
         pre_align_position_tolerance=0.02,
-        final_position_tolerance=0.015,
-        final_yaw_tolerance_deg=4.0,
+        final_position_tolerance=0.020,
+        final_yaw_tolerance_deg=5.0,
         final_realign_yaw_error_deg=8.0,
-        stable_time=0.8,
+        stable_time=0.30,
         sample_timeout=1.0,
     )
 

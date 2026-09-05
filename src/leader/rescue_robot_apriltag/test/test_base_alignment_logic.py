@@ -28,10 +28,10 @@ def make_thresholds(**overrides: float) -> BaseAlignmentThresholds:
         "tag_recenter_exit_deg": 11.0,
         "near_normal_correction_limit_deg": 6.0,
         "pre_align_position_tolerance": 0.02,
-        "final_position_tolerance": 0.015,
-        "final_yaw_tolerance_deg": 4.0,
+        "final_position_tolerance": 0.020,
+        "final_yaw_tolerance_deg": 5.0,
         "final_realign_yaw_error_deg": 8.0,
-        "stable_time": 0.8,
+        "stable_time": 0.30,
         "sample_timeout": 1.0,
     }
     values.update(overrides)
@@ -218,8 +218,8 @@ def enter_final(machine: BaseAlignmentStateMachine, yaw: float = 0.0):
 @pytest.mark.parametrize(
     ("yaw", "state"),
     [
-        (radians(5.0), ApproachState.FINE_ALIGN_LEFT),
-        (radians(-5.0), ApproachState.FINE_ALIGN_RIGHT),
+        (radians(6.0), ApproachState.FINE_ALIGN_LEFT),
+        (radians(-6.0), ApproachState.FINE_ALIGN_RIGHT),
     ],
 )
 def test_final_yaw_alignment_has_correct_state_sign(yaw, state) -> None:
@@ -460,7 +460,7 @@ def test_position_or_yaw_error_forbids_false_alignment() -> None:
             tag_range=0.20,
             prealign_x=0.0,
             final_x=0.0,
-            final_yaw_error=radians(5.0),
+            final_yaw_error=radians(6.0),
         ),
         10.0,
         0,
@@ -479,14 +479,118 @@ def test_both_errors_good_stabilize_then_align() -> None:
         final_y=0.0,
     )
     assert machine.update(good, 10.0, 0).state == ApproachState.STABILIZING
-    good_later = make_measurement(
+    for stamp in (10.3, 10.4):
+        good_later = make_measurement(
+            tag_range=0.20,
+            prealign_x=0.0,
+            final_x=0.0,
+            final_y=0.0,
+            stamp=stamp,
+        )
+        decision = machine.update(good_later, stamp, 0)
+    assert decision.state == ApproachState.STABILIZING
+    good_final = make_measurement(
         tag_range=0.20,
         prealign_x=0.0,
         final_x=0.0,
         final_y=0.0,
-        stamp=10.8,
+        stamp=10.5,
     )
-    assert machine.update(good_later, 10.8, 0).state == ApproachState.ALIGNED
+    assert machine.update(good_final, 10.5, 0).state == ApproachState.ALIGNED
+
+
+def test_confirmation_requires_three_fresh_samples_after_stability() -> None:
+    machine = BaseAlignmentStateMachine(make_thresholds())
+    for stamp in (10.0, 10.3, 10.4):
+        decision = machine.update(
+            make_measurement(
+                tag_range=0.20, prealign_x=0.0, final_x=0.0, final_y=0.0,
+                stamp=stamp,
+            ),
+            stamp,
+            0,
+        )
+        assert decision.state == ApproachState.STABILIZING
+    decision = machine.update(
+        make_measurement(
+            tag_range=0.20, prealign_x=0.0, final_x=0.0, final_y=0.0,
+            stamp=10.5,
+        ),
+        10.5,
+        0,
+    )
+    assert decision.state == ApproachState.ALIGNED
+
+
+def test_duplicate_timestamp_does_not_confirm_or_latch() -> None:
+    machine = BaseAlignmentStateMachine(make_thresholds())
+    sample = make_measurement(
+        tag_range=0.20, prealign_x=0.0, final_x=0.0, final_y=0.0,
+        stamp=10.0,
+    )
+    assert machine.update(sample, 10.0, 0).state == ApproachState.STABILIZING
+    assert machine.update(sample, 10.3, 0, is_new_observation=False).state == ApproachState.STABILIZING
+    for stamp in (10.1, 10.2):
+        assert machine.update(
+            make_measurement(
+                tag_range=0.20, prealign_x=0.0, final_x=0.0, final_y=0.0,
+                stamp=stamp,
+            ),
+            10.3,
+            0,
+        ).state == ApproachState.STABILIZING
+    assert machine.update(
+        make_measurement(
+            tag_range=0.20, prealign_x=0.0, final_x=0.0, final_y=0.0,
+            stamp=10.4,
+        ),
+        10.4,
+        0,
+    ).state == ApproachState.ALIGNED
+
+
+def test_stabilizing_loss_grace_pauses_time_and_recovers() -> None:
+    machine = BaseAlignmentStateMachine(make_thresholds())
+    good = make_measurement(
+        tag_range=0.20, prealign_x=0.0, final_x=0.0, final_y=0.0,
+        stamp=10.0,
+    )
+    assert machine.update(good, 10.0, 0).state == ApproachState.STABILIZING
+    assert machine.update(None, 10.19, None).state == ApproachState.STABILIZING
+    assert machine.update(None, 10.20, None).state == ApproachState.STABILIZING
+    assert machine.update(None, 10.38, None).state == ApproachState.STABILIZING
+    assert machine.update(None, 10.39, None).state == ApproachState.STABILIZING
+    assert machine.update(None, 10.40, None).state == ApproachState.TAG_LOST
+
+    restarted = make_measurement(
+        tag_range=0.20, prealign_x=0.0, final_x=0.0, final_y=0.0,
+        stamp=11.0,
+    )
+    assert machine.update(restarted, 11.0, 0).state == ApproachState.STABILIZING
+    recovered = make_measurement(
+        tag_range=0.20, prealign_x=0.0, final_x=0.0, final_y=0.0,
+        stamp=11.1,
+    )
+    assert machine.update(recovered, 11.1, 0).state == ApproachState.STABILIZING
+
+
+def test_aligned_latch_survives_loss_and_resets_explicitly() -> None:
+    machine = BaseAlignmentStateMachine(make_thresholds())
+    for stamp in (10.0, 10.3, 10.4, 10.5):
+        decision = machine.update(
+            make_measurement(
+                tag_range=0.20, prealign_x=0.0, final_x=0.0, final_y=0.0,
+                stamp=stamp,
+            ),
+            stamp,
+            0,
+        )
+    assert decision.state == ApproachState.ALIGNED
+    assert machine.update(None, 20.0, None).state == ApproachState.ALIGNED
+    machine.reset()
+    assert machine.update(
+        make_measurement(tag_range=0.50, stamp=20.1), 20.1, 0
+    ).state == ApproachState.APPROACH
 
 
 def test_stabilization_resets_when_position_leaves_tolerance() -> None:
@@ -498,7 +602,7 @@ def test_stabilization_resets_when_position_leaves_tolerance() -> None:
     moving = make_measurement(
         tag_range=0.21,
         prealign_x=0.0,
-        final_x=0.02,
+        final_x=0.021,
         stamp=10.5,
     )
     assert machine.update(moving, 10.5, 0).state == ApproachState.FINAL_APPROACH

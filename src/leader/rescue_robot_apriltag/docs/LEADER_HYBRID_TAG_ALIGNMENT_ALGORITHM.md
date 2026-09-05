@@ -64,14 +64,14 @@ Tag 위치만으로는 Tag가 어디에 있는지는 알 수 있지만 Tag 면�
 
 ## 4. First orientation-direct algorithm
 
-false alignment를 막기 위해 첫 orientation 기반 구현은 Tag normal에 0.30 m와 0.20 m
+false alignment를 막기 위해 첫 orientation 기반 구현은 Tag normal에 0.30 m와 0.23 m
 offset을 적용했다.
 
 ```text
              TAG
               ■
               │
-         0.20 X  final target
+         0.23 X  final target
               │
          0.30 O  pre-align target
 ```
@@ -303,7 +303,7 @@ External state는 `FINE_ALIGN_LEFT/RIGHT`다. 최대 angular speed는 `0.08 rad/
 
 ## 21. FINAL_APPROACH
 
-Yaw가 4° 이내이면 0.30 m에서 0.20 m target으로 저속 접근한다.
+Yaw가 5° 이내이면 0.30 m에서 0.23 m target으로 저속 접근한다.
 
 - 최대 linear: `0.02 m/s`
 - 최대 angular: `0.08 rad/s`
@@ -321,9 +321,21 @@ final_position_error <= 0.020 m
 abs(final_yaw_error) <= 5 deg
 ```
 
-첫 valid frame은 `STABILIZING`이다. 두 조건이 `base_stable_time=0.8 s` 동안 연속으로
-유지돼야 `ALIGNED`가 된다. 하나라도 벗어나면 timer가 reset된다. Tag 중심만 보는
-side-looking pose는 position 또는 yaw error가 남으므로 ALIGNED가 될 수 없다.
+첫 valid frame은 `STABILIZING`이다. 두 조건이 `base_stable_time=0.30 s` 동안 연속으로
+유지된 뒤 서로 다른 source timestamp의 valid observation 3개를 추가로 확인해야
+`ALIGNED`가 된다. 하나라도 벗어나면 stability와 confirmation을 reset한다. 동일 TF
+timestamp는 timer가 반복 처리해도 중복 count하지 않는다. Tag 중심만 보는 side-looking
+pose는 position 또는 yaw error가 남으므로 ALIGNED가 될 수 없다.
+
+`ALIGNED`는 내부 latch다. 확정 후 valid frame jitter나 짧은 Tag loss에도 public state와
+command는 `ALIGNED` 및 zero를 유지한다. `reset()`, selected Tag ID 변경, node 재시작만
+이 latch를 해제한다.
+
+`STABILIZING`에서 직전 valid pose가 두 tolerance를 만족한 경우에만 최대 `0.20 s`의
+Tag-loss grace를 허용한다. grace 동안 state는 `STABILIZING`, command는 zero이고
+confirmation은 증가하지 않으며, Tag 없는 시간은 stability elapsed에서 pause한다.
+timeout은 기존 `TAG_LOST`/safe stop으로 전환한다. 다른 phase의 loss에는 grace를
+적용하지 않는다.
 
 ## 23. Full state/mode transition
 
@@ -341,7 +353,7 @@ TAG_LOST ─ valid ▼                              │ tag lost/invalid
                  │ pre-align reached
                  ▼
           FINAL_YAW_ALIGN
-                 │ yaw <= 4
+                 │ yaw <= 5
                  ▼
            FINAL_APPROACH
                  │ yaw > 8
@@ -349,7 +361,7 @@ TAG_LOST ─ valid ▼                              │ tag lost/invalid
                  │ position <= 0.020 and yaw <= 5
                  ▼
             STABILIZING
-                 │ continuous 0.8 s
+                 │ continuous 0.30 s + 3 fresh valid samples
                  ▼
               ALIGNED
 
@@ -370,12 +382,14 @@ Eligible final close-range loss          → blind handoff evaluation
 | `tag_recenter_exit_deg` | 11.0 | deg | RECENTER 종료 | 줄이면 더 중앙까지 회전 |
 | `near_normal_correction_limit_deg` | 6.0 | deg | NEAR normal bias 최대값 | 늘리면 수렴 빠름/FOV 위험 증가 |
 | `pre_align_distance` | 0.30 | m | Tag 면부터 pre-align 거리 | grasp geometry 확인 전 유지 |
-| `final_target_distance` | 0.20 | m | 최종 base 거리 | 향후 gripper 실측 후 조정 |
+| `final_target_distance` | 0.23 | m | 최종 base 거리 | 향후 gripper 실측 후 조정 |
 | `pre_align_position_tolerance` | 0.02 | m | final phase 진입 반경 | 늘리면 final yaw를 일찍 시작 |
 | `final_position_tolerance` | 0.020 | m | ALIGNED 위치 오차; current visual-only test value | 늘리면 완료 판정 완화 |
 | `final_yaw_tolerance_deg` | 5.0 | deg | final yaw 및 진입 허용; current visual-only test value | 늘리면 정렬 정확도 완화 |
 | `final_realign_yaw_error_deg` | 8.0 | deg | final 접근 중 재정렬 | 줄이면 더 자주 정지/재정렬 |
-| `base_stable_time` | 0.8 | s | 안정 조건 유지 시간 | 늘리면 완료 확정 강화 |
+| `base_stable_time` | 0.30 | s | confirmation 전 안정 조건 유지 시간 | 늘리면 완료 확정 강화 |
+| `aligned_confirm_samples` | 3 | sample | stability 후 fresh valid confirmation 수 | 늘리면 완료 확정 강화 |
+| `stabilizing_tag_loss_grace_sec` | 0.20 | s | STABILIZING 전용 loss grace | 늘리면 loss 복귀 허용 증가 |
 | `filter_window` | 5 | sample | translation/normal median | 늘리면 안정적이나 지연 증가 |
 | `near_max_angular_speed` | 0.10 | rad/s | NEAR/RECENTER 회전 제한 | 줄이면 부드럽지만 느림 |
 | `max_final_linear_speed` | 0.02 | m/s | final 접근 최대 속도 | 낮추면 final 안정성 증가 |
@@ -385,7 +399,7 @@ Eligible final close-range loss          → blind handoff evaluation
 
 실차에서 hybrid alignment algorithm이 이전보다 안정적으로 동작하는 상태에서,
 close-range odometry blind fallback을 일시적으로 비활성화하고 순수 visual final
-alignment를 먼저 검증한다. Tag 높이를 조정해 약 `0.20 m`의 final target까지
+alignment를 먼저 검증한다. Tag 높이를 조정해 약 `0.23 m`의 final target까지
 AprilTag가 계속 camera frame에 보이도록 한 조건이다. Blind 구현을 삭제한 것이
 아니라 parameter로만 disabled했으므로, 이후 `blind_final_approach_enabled`를
 `true`로 되돌리면 기존 fallback을 재사용할 수 있다.
@@ -395,13 +409,16 @@ AprilTag가 계속 camera frame에 보이도록 한 조건이다. Blind 구현�
 | `blind_final_approach_enabled` | `true` | `false` | visual-only 검증; close-range loss는 기존 stop behavior |
 | `final_position_tolerance` | `0.015 m` | `0.020 m` | final target planar position error 허용 범위 |
 | `final_yaw_tolerance_deg` | `4.0 deg` | `5.0 deg` | final target yaw error 허용 범위 |
-| `base_stable_time` | `0.8 s` | `0.8 s` | 두 조건을 연속 유지해야 하는 stabilization 시간 |
+| `base_stable_time` | `0.8 s` | `0.30 s` | confirmation 전 두 조건 유지 시간 |
+| `aligned_confirm_samples` | - | `3` | fresh valid confirmation sample 수 |
+| `stabilizing_tag_loss_grace_sec` | - | `0.20 s` | STABILIZING short dropout grace |
 
 Position 2 cm와 yaw 5°는 AprilTag pose noise와 바닥 주행 오차를 고려할 때 기존
 1.5 cm/4°가 초기 실차 validation에서 다소 엄격할 가능성을 소폭 완화한 값이다.
 정확도를 과도하게 희생하지 않고 향후 gripper 파지 여유도 남기기 위해 이 정도로만
-조정한다. Position과 yaw 조건을 모두 만족한 상태가 `0.8 s` 연속 유지돼야
-visual `ALIGNED`가 된다. 이 설정은 실차 tuning 단계의 임시 검증 설정이다.
+조정한다. Position과 yaw 조건을 모두 만족한 상태가 `0.30 s` 연속 유지되고 fresh
+valid sample 3개가 확인돼야 visual `ALIGNED`가 된다. 이 설정은 실차 tuning 단계의
+검증 설정이다.
 
 ## 25. Safety behavior
 
@@ -472,7 +489,7 @@ ROBOT ── center tracking                         ROBOT
 ```
 
 FAR에서 Tag 중심을 보존하고, NEAR에서 robot-facing normal을 고른 뒤 그 line으로 수렴한다.
-마지막에는 `-normal` 방향으로 heading을 맞추고 0.20 m target까지 접근한다.
+마지막에는 `-normal` 방향으로 heading을 맞추고 0.23 m target까지 접근한다.
 
 ## 29. Known limitations
 
@@ -568,7 +585,7 @@ snapshot을 blind 주행에 사용하지 않도록 `0.40 s` 상한을 유지한�
 planned_blind_distance = last_valid_tag_x - final_target_distance
 ```
 
-예를 들어 `0.265 m - 0.200 m = 0.065 m`이다. 음수면 reverse하지 않으며, 작은 음수는
+예를 들어 `0.265 m - 0.230 m = 0.035 m`이다. 음수면 reverse하지 않으며, 작은 음수는
 zero로 취급하고, 큰 음수 또는 `blind_max_distance` 초과는 blind를 거부한다.
 
 Blind 시작 순간 `odom` frame의 `x`, `y`, `yaw`를 한 번 snapshot한다. 진행거리는 odom

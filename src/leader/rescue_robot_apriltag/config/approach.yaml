@@ -26,7 +26,7 @@
     # Tag-normal target-pose alignment. Distances are from the tag plane to the
     # desired base_link origin and remain initial values pending grasp tuning.
     pre_align_distance: 0.30
-    final_target_distance: 0.20
+    final_target_distance: 0.23
     orientation_engage_distance: 0.40
     orientation_disengage_distance: 0.43
     turn_enter_error_deg: 8.0
@@ -38,7 +38,9 @@
     final_position_tolerance: 0.020
     final_yaw_tolerance_deg: 5.0
     final_realign_yaw_error_deg: 8.0
-    base_stable_time: 0.8
+    base_stable_time: 0.30
+    aligned_confirm_samples: 3
+    stabilizing_tag_loss_grace_sec: 0.20
 
     # Restricted fallback for a tag that leaves the camera only after visual
     # final alignment. Distances are base_link forward metres.

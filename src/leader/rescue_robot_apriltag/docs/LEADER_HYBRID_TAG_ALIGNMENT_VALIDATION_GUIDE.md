@@ -122,7 +122,7 @@ ros2 topic echo /leader/alignment/tag_normal_heading --once
 
 ```text
 prealign_target = tag + 0.30 × robot_facing_normal
-final_target    = tag + 0.20 × robot_facing_normal
+final_target    = tag + 0.23 × robot_facing_normal
 ```
 
 Detector quaternion 부호 표현이 반대여도 target이 Tag 뒤쪽으로 생성되면 안 된다.
@@ -202,7 +202,7 @@ Tag를 정면 중앙에 둔다.
 - FAR `APPROACH`
 - 0.40 m 근처에서 `NEAR_ALIGN`
 - 정면 normal이면 불필요한 좌우 correction이 작아야 함
-- 0.30 m에서 final yaw 후 0.20 m 접근
+- 0.30 m에서 final yaw 후 0.23 m 접근 (최종 약 7 cm)
 
 ## 15. Tilted-left Tag
 
@@ -253,7 +253,7 @@ Pre-align 근처에서 Tag를 약간 기울인다.
 Tag plane과 `base_link` origin 간 normal 방향 거리를 측정한다.
 
 - pre-align 약 0.30 m
-- final target 약 0.20 m
+- final target 약 0.23 m
 - 마지막 이동량 약 0.10 m
 
 Camera optical z만 측정하지 말고 tilted Tag에서는 Tag normal 방향 거리를 확인한다.
@@ -263,7 +263,8 @@ Camera optical z만 측정하지 말고 tilted Tag에서는 Tag normal 방향 �
 ```text
 final_position_error <= 0.020 m
 abs(final_yaw_error) <= 5 deg
-continuous duration >= 0.8 s
+continuous duration >= 0.30 s
+fresh valid confirmation samples >= 3
 ```
 
 두 error 중 하나라도 벗어나면 `STABILIZING` timer가 reset되어야 한다. Tag center가
@@ -271,7 +272,8 @@ continuous duration >= 0.8 s
 
 ## 21. TAG_LOST safety
 
-접근 중 Tag를 가린다.
+접근 중 Tag를 가린다. `STABILIZING`에서는 최대 `0.20 s` grace 동안 state를 유지하고
+정지하며, 그 시간은 stability에 포함하지 않는다. 다른 phase에서는 즉시 `TAG_LOST`다.
 
 ```bash
 ros2 topic echo /leader/base_alignment/state
@@ -371,7 +373,7 @@ Final approach에서 다음을 확인한다.
 
 ```text
 last_valid_tag_x ≈ 0.26 m
-final_target_distance = 0.20 m
+final_target_distance = 0.23 m
 planned_blind_distance ≈ 0.06 m
 ```
 
@@ -460,7 +462,7 @@ disable은 blind completion보다 우선해야 한다.
 
 ## 24. Visual-Only Final Alignment Validation
 
-이번 실차 tuning은 Tag 높이를 올려 final target 약 `0.20 m`에서도 AprilTag 전체가
+이번 실차 tuning은 Tag 높이를 올려 final target 약 `0.23 m`에서도 AprilTag 전체가
 camera image에 유지되는 조건에서 수행한다. 목적은 odometry blind fallback이 아닌
 visual `FINAL_APPROACH`의 최종 정렬과 stabilization을 먼저 검증하는 것이다.
 
@@ -483,11 +485,13 @@ ros2 param get /leader/apriltag_approach blind_final_approach_enabled
 ros2 param get /leader/apriltag_approach final_position_tolerance
 ros2 param get /leader/apriltag_approach final_yaw_tolerance_deg
 ros2 param get /leader/apriltag_approach base_stable_time
+ros2 param get /leader/apriltag_approach final_target_distance
+ros2 param get /leader/apriltag_approach aligned_confirm_samples
+ros2 param get /leader/apriltag_approach stabilizing_tag_loss_grace_sec
 ```
 
-Expected output은 각각 `Boolean value is: False`, `Double value is: 0.02`,
-`Double value is: 5.0`, `Double value is: 0.8`이다. 실제 ROS 2 배포판의 출력
-표현이 다르더라도 값 자체가 `false`, `0.020 m`, `5.0 deg`, `0.8 s`인지 확인한다.
+Expected output은 `false`, `0.020 m`, `5.0 deg`, `0.30 s`, `0.23 m`, `3`,
+`0.20 s`다. 실제 ROS 2 배포판의 출력 표현이 다르더라도 값 자체를 확인한다.
 
 ### 24.2 Runtime validation
 
@@ -513,7 +517,10 @@ FAR / COARSE → NEAR ALIGN → FINE ALIGN → FINAL_APPROACH
 ```
 
 `ALIGNED` 판정은 final planar position error가 `0.020 m` 이내이고 final yaw
-error가 `±5°` 이내인 두 조건을 동시에 만족한 뒤 `0.8 s` 유지될 때 기대한다.
+error가 `±5°` 이내인 두 조건을 동시에 만족한 뒤 `0.30 s` 유지하고 새 source
+timestamp의 valid observation 3개를 확인할 때 최초로 기대한다. 이후 latch되어 short
+loss와 jitter에도 `ALIGNED`/zero를 유지한다. Perception timer는 20 Hz이고 source TF는
+약 30 Hz이므로 동일 timestamp 중복 count가 없어야 한다.
 
 ### 24.3 Loss, failure, and follow-up criteria
 
@@ -530,7 +537,8 @@ odometry fallback으로 계속 전진하지 않고 기존 `TAG_LOST` 및 stop be
 
 Position error가 2 cm 근처를 넘나들거나 yaw error가 5° 근처를 넘나드는지 먼저
 확인한다. 두 조건을 모두 만족하는데 `STABILIZING`만 반복될 때에만 후속 tuning에서
-`base_stable_time`을 `0.8 s`에서 낮출지 검토하며, 이번 작업에서는 변경하지 않는다.
+`base_stable_time`을 더 낮추기 전에 source timestamp 중복과 3회 confirmation을 먼저
+확인한다.
 
 ### Final command만 zero
 

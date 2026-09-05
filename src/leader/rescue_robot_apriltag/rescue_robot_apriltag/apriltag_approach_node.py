@@ -168,6 +168,8 @@ class AprilTagApproachNode(Node):
                 ),
                 stable_time=self._base_stable_time,
                 sample_timeout=self._tag_timeout,
+                aligned_confirm_samples=self._aligned_confirm_samples,
+                stabilizing_tag_loss_grace_sec=self._stabilizing_tag_loss_grace_sec,
             )
         )
         self._active_tag_id: Optional[int] = None
@@ -206,7 +208,7 @@ class AprilTagApproachNode(Node):
         self.declare_parameter("publish_rate", 20.0)
         self.declare_parameter("filter_window", 5)
         self.declare_parameter("pre_align_distance", 0.30)
-        self.declare_parameter("final_target_distance", 0.20)
+        self.declare_parameter("final_target_distance", 0.23)
         self.declare_parameter("orientation_engage_distance", 0.40)
         self.declare_parameter("orientation_disengage_distance", 0.43)
         self.declare_parameter("turn_enter_error_deg", 8.0)
@@ -215,11 +217,13 @@ class AprilTagApproachNode(Node):
         self.declare_parameter("tag_recenter_exit_deg", 11.0)
         self.declare_parameter("near_normal_correction_limit_deg", 6.0)
         self.declare_parameter("pre_align_position_tolerance", 0.02)
-        self.declare_parameter("final_position_tolerance", 0.015)
-        self.declare_parameter("final_yaw_tolerance_deg", 4.0)
+        self.declare_parameter("final_position_tolerance", 0.020)
+        self.declare_parameter("final_yaw_tolerance_deg", 5.0)
         self.declare_parameter("final_realign_yaw_error_deg", 8.0)
-        self.declare_parameter("base_stable_time", 0.8)
-        self.declare_parameter("blind_final_approach_enabled", True)
+        self.declare_parameter("base_stable_time", 0.30)
+        self.declare_parameter("aligned_confirm_samples", 3)
+        self.declare_parameter("stabilizing_tag_loss_grace_sec", 0.20)
+        self.declare_parameter("blind_final_approach_enabled", False)
         self.declare_parameter("blind_activation_max_tag_x", 0.30)
         self.declare_parameter("blind_max_distance", 0.12)
         self.declare_parameter("blind_last_tag_max_age", 0.25)
@@ -298,6 +302,12 @@ class AprilTagApproachNode(Node):
         self._base_stable_time = float(
             self.get_parameter("base_stable_time").value
         )
+        self._aligned_confirm_samples = int(
+            self.get_parameter("aligned_confirm_samples").value
+        )
+        self._stabilizing_tag_loss_grace_sec = float(
+            self.get_parameter("stabilizing_tag_loss_grace_sec").value
+        )
         self._blind_final_approach_enabled = bool(
             self.get_parameter("blind_final_approach_enabled").value
         )
@@ -353,6 +363,7 @@ class AprilTagApproachNode(Node):
             self._blind_last_tag_max_age,
             self._blind_handoff_max_age,
             self._blind_max_duration,
+            self._stabilizing_tag_loss_grace_sec,
         )
         if not all(isfinite(value) for value in numeric_values):
             raise ValueError("Numeric parameters must be finite")
@@ -379,6 +390,8 @@ class AprilTagApproachNode(Node):
             final_realign_yaw_error_deg=self._final_realign_yaw_error_deg,
             stable_time=self._base_stable_time,
             sample_timeout=self._tag_timeout,
+            aligned_confirm_samples=self._aligned_confirm_samples,
+            stabilizing_tag_loss_grace_sec=self._stabilizing_tag_loss_grace_sec,
         ).validate()
         if not self._pre_align_distance > self._final_target_distance > 0.0:
             raise ValueError(
@@ -458,12 +471,15 @@ class AprilTagApproachNode(Node):
             self._publish_lost(now_seconds)
             return
 
-        if selected.tag_id != self._active_tag_id:
+        if (
+            self._active_tag_id is not None
+            and selected.tag_id != self._active_tag_id
+        ):
             self._translation_filter.reset()
             self._normal_filter.reset()
             self._state_machine.reset()
             self._base_state_machine.reset()
-            self._active_tag_id = selected.tag_id
+        self._active_tag_id = selected.tag_id
 
         measurement = self._translation_filter.add(
             selected.x,
@@ -931,6 +947,7 @@ class AprilTagApproachNode(Node):
             ),
             now_seconds,
             self._active_tag_id,
+            is_new_observation,
         )
         remember = getattr(self, "_remember_last_valid_final_sample", None)
         if remember is not None:
