@@ -317,8 +317,8 @@ Yaw가 4° 이내이면 0.30 m에서 0.20 m target으로 저속 접근한다.
 다음 두 조건을 모두 만족해야 한다.
 
 ```text
-final_position_error <= 0.015 m
-abs(final_yaw_error) <= 4 deg
+final_position_error <= 0.020 m
+abs(final_yaw_error) <= 5 deg
 ```
 
 첫 valid frame은 `STABILIZING`이다. 두 조건이 `base_stable_time=0.8 s` 동안 연속으로
@@ -346,7 +346,7 @@ TAG_LOST ─ valid ▼                              │ tag lost/invalid
            FINAL_APPROACH
                  │ yaw > 8
                  └────────────► FINAL_YAW_ALIGN
-                 │ position <= 0.015 and yaw <= 4
+                 │ position <= 0.020 and yaw <= 5
                  ▼
             STABILIZING
                  │ continuous 0.8 s
@@ -372,14 +372,36 @@ Eligible final close-range loss          → blind handoff evaluation
 | `pre_align_distance` | 0.30 | m | Tag 면부터 pre-align 거리 | grasp geometry 확인 전 유지 |
 | `final_target_distance` | 0.20 | m | 최종 base 거리 | 향후 gripper 실측 후 조정 |
 | `pre_align_position_tolerance` | 0.02 | m | final phase 진입 반경 | 늘리면 final yaw를 일찍 시작 |
-| `final_position_tolerance` | 0.015 | m | ALIGNED 위치 오차 | 늘리면 완료 판정 완화 |
-| `final_yaw_tolerance_deg` | 4.0 | deg | final yaw 및 진입 허용 | 늘리면 정렬 정확도 완화 |
+| `final_position_tolerance` | 0.020 | m | ALIGNED 위치 오차; current visual-only test value | 늘리면 완료 판정 완화 |
+| `final_yaw_tolerance_deg` | 5.0 | deg | final yaw 및 진입 허용; current visual-only test value | 늘리면 정렬 정확도 완화 |
 | `final_realign_yaw_error_deg` | 8.0 | deg | final 접근 중 재정렬 | 줄이면 더 자주 정지/재정렬 |
 | `base_stable_time` | 0.8 | s | 안정 조건 유지 시간 | 늘리면 완료 확정 강화 |
 | `filter_window` | 5 | sample | translation/normal median | 늘리면 안정적이나 지연 증가 |
 | `near_max_angular_speed` | 0.10 | rad/s | NEAR/RECENTER 회전 제한 | 줄이면 부드럽지만 느림 |
 | `max_final_linear_speed` | 0.02 | m/s | final 접근 최대 속도 | 낮추면 final 안정성 증가 |
 | `max_final_angular_speed` | 0.08 | rad/s | final yaw/correction 제한 | 낮추면 overshoot 감소 |
+
+### 24.1 Current Visual-Only Validation Tuning
+
+실차에서 hybrid alignment algorithm이 이전보다 안정적으로 동작하는 상태에서,
+close-range odometry blind fallback을 일시적으로 비활성화하고 순수 visual final
+alignment를 먼저 검증한다. Tag 높이를 조정해 약 `0.20 m`의 final target까지
+AprilTag가 계속 camera frame에 보이도록 한 조건이다. Blind 구현을 삭제한 것이
+아니라 parameter로만 disabled했으므로, 이후 `blind_final_approach_enabled`를
+`true`로 되돌리면 기존 fallback을 재사용할 수 있다.
+
+| Parameter | Previous validation value | Current test value | Meaning |
+|---|---:|---:|---|
+| `blind_final_approach_enabled` | `true` | `false` | visual-only 검증; close-range loss는 기존 stop behavior |
+| `final_position_tolerance` | `0.015 m` | `0.020 m` | final target planar position error 허용 범위 |
+| `final_yaw_tolerance_deg` | `4.0 deg` | `5.0 deg` | final target yaw error 허용 범위 |
+| `base_stable_time` | `0.8 s` | `0.8 s` | 두 조건을 연속 유지해야 하는 stabilization 시간 |
+
+Position 2 cm와 yaw 5°는 AprilTag pose noise와 바닥 주행 오차를 고려할 때 기존
+1.5 cm/4°가 초기 실차 validation에서 다소 엄격할 가능성을 소폭 완화한 값이다.
+정확도를 과도하게 희생하지 않고 향후 gripper 파지 여유도 남기기 위해 이 정도로만
+조정한다. Position과 yaw 조건을 모두 만족한 상태가 `0.8 s` 연속 유지돼야
+visual `ALIGNED`가 된다. 이 설정은 실차 tuning 단계의 임시 검증 설정이다.
 
 ## 25. Safety behavior
 
@@ -589,7 +611,7 @@ Blind-final `ALIGNED`는 마지막 valid fine-aligned visual pose와 짧은 odom
 
 | Parameter | Default | Unit | Meaning |
 |---|---:|---|---|
-| `blind_final_approach_enabled` | `true` | bool | fallback enable |
+| `blind_final_approach_enabled` | `true` | bool | fallback enable; current visual-only test value is `false` |
 | `blind_activation_max_tag_x` | `0.30` | m | blind 허용 최대 base +X |
 | `blind_max_distance` | `0.12` | m | 계획 가능한 최대 remaining distance |
 | `blind_last_tag_max_age` | `0.25` | s | 새 sample loss detection timeout |

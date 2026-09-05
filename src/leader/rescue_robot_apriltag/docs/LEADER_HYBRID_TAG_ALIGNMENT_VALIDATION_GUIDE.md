@@ -245,7 +245,7 @@ Pre-align 근처에서 Tag를 약간 기울인다.
 - `FINE_ALIGN_LEFT/RIGHT`에서 raw linear zero
 - angular sign이 `/leader/alignment/final_yaw_error`와 일치
 - 최대 final angular `0.08 rad/s`
-- yaw 4° 이내에서 FINAL_APPROACH
+- yaw 5° 이내에서 FINAL_APPROACH
 - 접근 중 yaw 8° 초과 시 linear zero인 FINAL_YAW_ALIGN 복귀
 
 ## 19. Final distance validation
@@ -261,8 +261,8 @@ Camera optical z만 측정하지 말고 tilted Tag에서는 Tag normal 방향 �
 ## 20. ALIGNED criteria
 
 ```text
-final_position_error <= 0.015 m
-abs(final_yaw_error) <= 4 deg
+final_position_error <= 0.020 m
+abs(final_yaw_error) <= 5 deg
 continuous duration >= 0.8 s
 ```
 
@@ -457,6 +457,80 @@ disable은 blind completion보다 우선해야 한다.
 - angular command가 발생하면 blind mode가 아닌 visual mode가 남아 있는지 atomic command와
   raw command를 같은 시각에 확인한다.
 - visual path가 이전과 달라지면 blind 관련 변경 외의 hybrid diff를 먼저 조사한다.
+
+## 24. Visual-Only Final Alignment Validation
+
+이번 실차 tuning은 Tag 높이를 올려 final target 약 `0.20 m`에서도 AprilTag 전체가
+camera image에 유지되는 조건에서 수행한다. 목적은 odometry blind fallback이 아닌
+visual `FINAL_APPROACH`의 최종 정렬과 stabilization을 먼저 검증하는 것이다.
+
+### 24.1 Parameter and launch check
+
+Build 후 integrated launch를 실행한다. Launch만으로 motor가 구동되지 않으며,
+처음에는 velocity guard가 disabled 상태여야 한다.
+
+```bash
+cd ~/damgc_robot
+source /opt/ros/humble/setup.bash
+source install/local_setup.bash
+ros2 launch rescue_robot_bringup leader_apriltag_drive.launch.py
+```
+
+다른 terminal에서 실제 node의 startup parameter를 확인한다.
+
+```bash
+ros2 param get /leader/apriltag_approach blind_final_approach_enabled
+ros2 param get /leader/apriltag_approach final_position_tolerance
+ros2 param get /leader/apriltag_approach final_yaw_tolerance_deg
+ros2 param get /leader/apriltag_approach base_stable_time
+```
+
+Expected output은 각각 `Boolean value is: False`, `Double value is: 0.02`,
+`Double value is: 5.0`, `Double value is: 0.8`이다. 실제 ROS 2 배포판의 출력
+표현이 다르더라도 값 자체가 `false`, `0.020 m`, `5.0 deg`, `0.8 s`인지 확인한다.
+
+### 24.2 Runtime validation
+
+```bash
+ros2 topic echo /leader/base_alignment/state
+ros2 topic echo /leader/alignment/final_position_error
+ros2 topic echo /leader/alignment/final_yaw_error
+ros2 topic echo /leader/alignment/control_mode
+```
+
+안전 확인과 guard 상태 확인을 마친 뒤 실제 주행을 시작한다.
+
+```bash
+ros2 service call /leader/velocity_guard/enable \
+  std_srvs/srv/SetBool "{data: true}"
+```
+
+정상 흐름은 다음과 같다.
+
+```text
+FAR / COARSE → NEAR ALIGN → FINE ALIGN → FINAL_APPROACH
+→ STABILIZING → ALIGNED
+```
+
+`ALIGNED` 판정은 final planar position error가 `0.020 m` 이내이고 final yaw
+error가 `±5°` 이내인 두 조건을 동시에 만족한 뒤 `0.8 s` 유지될 때 기대한다.
+
+### 24.3 Loss, failure, and follow-up criteria
+
+`blind_final_approach_enabled`가 `false`이므로 close-range에서 Tag가 사라지면
+odometry fallback으로 계속 전진하지 않고 기존 `TAG_LOST` 및 stop behavior가
+나와야 한다. 이 설정은 safety logic을 우회하지 않는다.
+
+`ALIGNED`가 나오지 않으면 다음을 기록한다.
+
+- `final_position_error`의 범위와 2 cm 경계 통과 여부
+- `final_yaw_error`의 범위와 5° 경계 통과 여부
+- `STABILIZING` 진입 여부
+- `STABILIZING`에서 이탈하는 패턴과 state transition
+
+Position error가 2 cm 근처를 넘나들거나 yaw error가 5° 근처를 넘나드는지 먼저
+확인한다. 두 조건을 모두 만족하는데 `STABILIZING`만 반복될 때에만 후속 tuning에서
+`base_stable_time`을 `0.8 s`에서 낮출지 검토하며, 이번 작업에서는 변경하지 않는다.
 
 ### Final command만 zero
 

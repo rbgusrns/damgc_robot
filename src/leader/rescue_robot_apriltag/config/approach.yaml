@@ -35,14 +35,14 @@
     tag_recenter_exit_deg: 11.0
     near_normal_correction_limit_deg: 6.0
     pre_align_position_tolerance: 0.02
-    final_position_tolerance: 0.015
-    final_yaw_tolerance_deg: 4.0
+    final_position_tolerance: 0.020
+    final_yaw_tolerance_deg: 5.0
     final_realign_yaw_error_deg: 8.0
     base_stable_time: 0.8
 
     # Restricted fallback for a tag that leaves the camera only after visual
     # final alignment. Distances are base_link forward metres.
-    blind_final_approach_enabled: true
+    blind_final_approach_enabled: false
     blind_activation_max_tag_x: 0.30
     blind_max_distance: 0.12
     blind_last_tag_max_age: 0.25
