@@ -1,9 +1,11 @@
 """Connect the command selector output to the final Follower safety guard."""
 
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
-from launch.substitutions import PathJoinSubstitution
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -13,6 +15,12 @@ def generate_launch_description() -> LaunchDescription:
     )
     return LaunchDescription(
         [
+            DeclareLaunchArgument(
+                "guard_enabled_on_startup",
+                default_value="false",
+                choices=["true", "false"],
+                description="Enable final guarded velocity output on startup",
+            ),
             Node(
                 package="follower_control",
                 executable="velocity_guard_node",
@@ -20,7 +28,13 @@ def generate_launch_description() -> LaunchDescription:
                 name="velocity_guard",
                 parameters=[
                     config,
-                    {"command_topic": "/follower/selected_cmd_vel"},
+                    {
+                        "command_topic": "/follower/selected_cmd_vel",
+                        "guard_enabled_on_startup": ParameterValue(
+                            LaunchConfiguration("guard_enabled_on_startup"),
+                            value_type=bool,
+                        ),
+                    },
                 ],
                 output="screen",
             )
