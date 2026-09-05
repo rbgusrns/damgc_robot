@@ -1,6 +1,6 @@
-# Orin–STM32 UART 통신 규격 초안
+# Orin–STM32 UART 통신 규격
 
-상태: 1차 설계안
+상태: 현재 구현 기준
 
 이 문서는 각 로봇의 Jetson Orin과 STM32G474VET6 사이의 유선 UART 통신을
 정의한다. 리더와 팔로워는 같은 규격을 사용하고, ROS namespace는 UART
@@ -8,7 +8,7 @@
 
 ## 1. 전송 규칙
 
-- 물리 계층: 3.3 V UART, 921600 baud, 8-N-1
+- 물리 계층: 3.3 V UART, 460800 baud, 8-N-1
 - 바이트 순서: little-endian
 - 멀티바이트 정수: 고정 폭 정수 사용
 - 실수: IEEE-754 `float32`를 사용하되, 제어·상태 값은 가능한 한 정수 단위 사용
@@ -115,12 +115,11 @@ Orin은 누적 encoder tick으로 wheel odometry를 계산한다. 로봇 기하 
 | `fault_bits` | `uint32` | 모터·IMU·encoder·통신 fault |
 | `last_cmd_age_ms` | `uint16` | 마지막 명령 이후 경과 |
 
-## 5. 시간 동기화
+## 5. 시간 동기화 계획
 
-STM32의 `timestamp_us`는 부팅 후 증가하는 monotonic clock이다. Orin bridge는
-수신 시각과 timestamp를 이용해 offset을 추정하고 ROS header stamp로 변환한다.
-IMU와 encoder를 Orin 수신 시각으로 각각 timestamp하면 지연 차이가 생기므로
-사용하지 않는다.
+STM32의 `timestamp_us`는 부팅 후 증가하는 monotonic clock이다. 현재 bridge는
+아직 시간 동기화를 수행하지 않으며, ROS header stamp에는 Orin 수신 시각을
+사용한다. 따라서 timestamp offset 추정과 `TIME_SYNC_*` 처리는 남은 작업이다.
 
 `TIME_SYNC_REQUEST`에는 Orin monotonic 송신 시각 `t1`을 넣고, 응답에는 STM32
 수신 시각 `t2`, 송신 시각 `t3`를 넣는다. Orin은 왕복 지연을 이용해 offset을
@@ -136,7 +135,7 @@ IMU와 encoder를 Orin 수신 시각으로 각각 timestamp하면 지연 차이�
 | `WHEEL_STATE` | `/leader/wheel/state` 또는 `/leader/odom/raw` |
 | `SYSTEM_STATE` | `/leader/system_state` |
 
-bridge가 `WHEEL_STATE`에서 계산한 odometry와 IMU는 이후
+bridge가 `WHEEL_STATE`에서 계산한 odometry와 IMU는 향후
 `robot_localization` EKF 입력으로 사용한다. 센서 frame은 각각 `imu_link`와
 `base_link`이며, `base_link → imu_link`의 정적 TF는 실제 장착 측정값으로
 설정한다.
@@ -149,4 +148,3 @@ bridge가 `WHEEL_STATE`에서 계산한 odometry와 IMU는 이후
 4. Orin bridge에서 ROS `Imu`와 wheel state 발행
 5. timestamp/sequence/dropout 시험
 6. 모터 명령 연결은 마지막에 하고, timeout·E-stop을 먼저 검증
-

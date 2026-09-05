@@ -1,37 +1,77 @@
 # follower_control
 
-팔로워 Orin에서 리더의 협동 속도 명령과 실제 구동 명령 사이에 두는 안전
-경계입니다.
+Follower의 최종 software velocity safety boundary다. STM32/UART/motor output은
+이 패키지 범위에 포함하지 않는다.
 
-## 인터페이스
+## 보존된 public interface
 
-- 입력: `/follower/cmd_vel` (`geometry_msgs/msg/Twist`, reliable)
-- 안전 출력: `/follower/safe_cmd_vel` (`geometry_msgs/msg/Twist`, reliable, 50 Hz)
-- 상태: `/follower/command_connected` (`std_msgs/msg/Bool`)
-- 상태 설명: `/follower/status` (`std_msgs/msg/String`)
+- 최종 출력: `/follower/safe_cmd_vel` (`geometry_msgs/msg/Twist`)
+- command freshness: `/follower/command_connected` (`std_msgs/msg/Bool`)
+- heartbeat/status: `/follower/status` (`std_msgs/msg/String`)
+- enable service: `/follower/velocity_guard/enable` (`std_srvs/srv/SetBool`)
 
-입력의 `linear.x`, `angular.z`만 사용합니다. 기본 제한은 각각 `0.25 m/s`,
-`0.8 rad/s`이며, 명령이 0.3초 이상 끊기거나 NaN/Inf가 입력되면 0 속도를
-발행합니다. 이 watchdog은 팔로워 Orin에서 실행해야 하며 QoS 연결 여부와
-무관하게 로컬 타이머로 정지를 결정합니다.
+`command_connected=true`와 `status=ACTIVE`는 enable gate와 별개로 유효하고 신선한
+upstream command를 수신 중이라는 기존 의미를 유지한다. `status`는 command가 없거나
+timeout이면 `READY` heartbeat를 계속 발행한다.
 
-## 실행
+## 두 입력 모드
+
+기존 cooperation standalone 경로는 그대로 유지한다.
+
+```text
+/follower/cmd_vel -> velocity_guard -> /follower/safe_cmd_vel
+```
 
 ```bash
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-source scripts/ros2_dds_env.sh
 ros2 launch follower_control velocity_guard.launch.py
 ```
 
-실제 모터를 연결하기 전 다음처럼 제한과 timeout을 검증할 수 있습니다.
+AprilTag/selector 통합 모드에서는 guard의 parameterized input만 변경한다.
 
-```bash
-ros2 topic pub -r 10 /follower/cmd_vel geometry_msgs/msg/Twist \
-  "{linear: {x: 0.1}, angular: {z: 0.2}}"
-ros2 topic echo /follower/safe_cmd_vel
-ros2 topic echo /follower/status
+```text
+/follower/selected_cmd_vel -> velocity_guard -> /follower/safe_cmd_vel
 ```
 
-publisher를 중지하면 0.3초 이내에 `/follower/safe_cmd_vel`이 0으로 바뀌어야 합니다.
-현재 출력은 ROS 토픽까지만 구현되어 있으며 STM32 모터 bridge는 포함하지 않습니다.
+```bash
+ros2 launch follower_control selected_velocity_guard.launch.py
+```
+
+두 guard launch를 동시에 실행하면 안 된다. 어느 모드에서도
+`/follower/safe_cmd_vel` publisher는 guard 하나여야 한다.
+
+## Safety contract
+
+- startup disabled; enable 전에는 항상 final zero
+- enable/disable 전환 시 command cache 삭제 후 즉시 zero
+- enable 후 새로운 upstream sample이 도착해야 출력 재개
+- 모든 Twist 축 finite 검사
+- `linear.y/z`, `angular.x/y` 사용 시 즉시 reject/zero
+- reverse 기본 금지; 음의 `linear.x`는 reject/zero
+- linear/angular symmetric clamp
+- linear/angular acceleration/deceleration slew limit
+- monotonic watchdog 및 slew timing, 비정상 dt fail-closed
+- 기존 0.3초 local command watchdog 유지
+- invalid, timeout, publisher loss 시 즉시 zero
+- shutdown 시 configurable zero burst
+
+기본 speed clamp `0.25 m/s`, `0.8 rad/s`는 기존 cooperation compatibility를 위해
+유지했다. acceleration limit을 포함한 모든 값은 motor tuning 최종값이 아닌
+software topic-level validation용 임시값이다.
+
+Guard enable:
+
+```bash
+ros2 service call /follower/velocity_guard/enable \
+  std_srvs/srv/SetBool "{data: true}"
+```
+
+Disable:
+
+```bash
+ros2 service call /follower/velocity_guard/enable \
+  std_srvs/srv/SetBool "{data: false}"
+```
+
+전체 AprilTag·cooperation 통합 흐름과 재현 검증은
+[`Follower pipeline validation guide`](../follower_supply_perception/docs/FOLLOWER_BASE_LINK_VELOCITY_PIPELINE_VALIDATION_GUIDE.md)를
+참고합니다.

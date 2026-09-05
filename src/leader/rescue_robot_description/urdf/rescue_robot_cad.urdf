@@ -1,0 +1,62 @@
+<?xml version="1.0"?>
+<!--
+  CAD-first display model for the leader robot.
+
+  The complete robot STL is the only visual model in this file.  The old
+  simplified box visuals are intentionally not included, so they cannot
+  overlap the CAD model in RViz.
+
+  STL measured from the supplied STEP/STL:
+    X = 372.972 mm, Y = 225.995 mm, Z = 298.629 mm
+  STL unit: mm -> ROS unit: m (scale 0.001)
+-->
+<robot name="rescue_robot_cad">
+
+  <link name="base_footprint"/>
+
+  <!-- base_link remains at the wheel-axle reference height: 60 mm -->
+  <link name="base_link"/>
+  <joint name="base_footprint_to_base_link" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0.060" rpy="0 0 0"/>
+  </joint>
+
+  <!-- The supplied CAD is rotated 90 degrees so both side wheels sit on XY ground. -->
+  <link name="cad_model_link">
+    <visual>
+      <!-- After X-axis +90 deg, the wheel/contact candidate is the STL
+           minimum Z at -34.995 mm. base_link is 60 mm above
+           base_footprint, so z=-0.025005 m makes that lowest point touch
+           the XY ground plane: 0.060 - 0.034995 = 0.025005 m. -->
+      <origin xyz="0.084097 0.034995 -0.025005" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <mesh filename="package://rescue_robot_description/meshes/robot_cad.stl"
+              scale="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+  </link>
+  <joint name="base_link_to_cad_model" type="fixed">
+    <parent link="base_link"/>
+    <child link="cad_model_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Sensor frames are retained for existing camera/IMU nodes. -->
+  <link name="camera_link"/>
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_link"/>
+    <!-- Dome ceiling opening center: x=75 mm, y=0, z=120 mm above base_link. -->
+    <origin xyz="0.075 0 0.120" rpy="0 0 0"/>
+  </joint>
+
+  <link name="imu_link"/>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <!-- Center of the second-floor sensor plate: x=75 mm, y=0, z=31 mm. -->
+    <origin xyz="0.075 0 0.031" rpy="0 0 0"/>
+  </joint>
+
+</robot>

@@ -16,7 +16,10 @@ def _include(name):
 
 
 def generate_launch_description():
-    return LaunchDescription([
+    actions = [
+        _include("localization.launch.py"),
         _include("visual_slam_realsense.launch.py"),
-        _include("nvblox_realsense.launch.py"),
-    ])
+    ]
+    if os.environ.get("DAMGC_VSLAM_ONLY", "0") != "1":
+        actions.append(_include("nvblox_realsense.launch.py"))
+    return LaunchDescription(actions)

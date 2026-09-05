@@ -27,7 +27,7 @@ USB 카메라로 검출한 AprilTag의 카메라 기준 상대 TF를 읽어 거�
 - ROS: ROS 2 Humble
 - Python: 3.10.12
 - 패키지 형식: `ament_python`
-- 카메라: `/dev/video0`, 640x480, 30 fps, `mjpeg2rgb`
+- 카메라: `/dev/video0`, 640x480, 30 fps, mmap, native `yuyv`
 - 보정 파일: `/home/kde/.ros/camera_info/follower_usb_camera.yaml`
 - 태그 family/크기: `36h11`, `0.050 m`
 

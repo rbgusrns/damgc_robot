@@ -2,7 +2,7 @@
 <package format="3">
   <name>stm32_bridge</name>
   <version>0.1.0</version>
-  <description>UART bridge between Orin ROS 2 and the STM32 motor/IMU controller.</description>
+  <description>I2C/UART bridge between Orin ROS 2 and the STM32 motor/IMU controller.</description>
   <maintainer email="maze@todo.todo">maze</maintainer>
   <license>Apache-2.0</license>
   <buildtool_depend>ament_python</buildtool_depend>

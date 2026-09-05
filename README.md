@@ -12,21 +12,33 @@
 
 ## 현재 구현 상태
 
-2026년 7월 27일 기준으로 저장소에서 확인되는 구현은 다음과 같습니다.
+2026년 8월 29일 기준으로 저장소에서 확인되는 구현은 다음과 같습니다.
 
-- 리더: URDF/RViz 모델, D435 RGB·depth, RGB 보정, AprilTag 검출, 중앙 depth CSV 측정
-- 팔로워: USB 카메라, AprilTag 검출, TF 기반 거리·각도·정렬 상태 판정
-- 아직 없음: Visual SLAM·nvblox, 사람 탐지, Nav2, wheel odometry·IMU 융합,
-  STM32·그리퍼 연동, Mission Coordinator, 리더–팔로워 협동 운반
+- 리더: URDF/RViz 모델, D435 RGB·depth, RGB 보정, AprilTag 검출, 중앙 depth CSV 측정,
+  exact-stamp TF2 기반 `base_link` pose·metric·상태, raw approach controller와
+  velocity guard를 통한 최종 software topic `/leader/cmd_vel`
+- 팔로워: USB 카메라, AprilTag 검출, 기존 camera-frame 상태, exact-stamp TF2 기반
+  `base_link` pose·metric·상태, raw approach controller, STOP/APPROACH/COOPERATION
+  command selector, 최종 safety guard와 `/follower/safe_cmd_vel`
+- 추가 구현: STM32 I2C/UART binary protocol, IMU·wheel state 수신, `/cmd_vel`
+  전달, wheel odometry 원시 계산, 엔코더·IMU/VSLAM dual EKF 융합 설정, 모터
+  속도 PID와 watchdog
+- 확인됨: STM32 wheel/IMU 수신, dual EKF·Visual SLAM·nvblox 동시 실행,
+  정지 상태 dual EKF 안정화, Docker RViz의 카메라 및 3차원 mesh 표시
+- 진행 중: 저속 주행에서 EKF 안정성과 VSLAM tracking 장시간 검증
+- 아직 없음: 사람 탐지, Nav2, 그리퍼 연동, Mission Coordinator, 실물
+  리더–팔로워 협동 운반
 
-현재 AprilTag 상태 출력은 주행 명령이 아닙니다. 실제 이동 전에는 로봇 기준 TF,
-속도 제한, 통신 유실 정지와 비상정지 경로를 먼저 연결해야 합니다.
+Leader AprilTag pipeline은 guarded `/leader/cmd_vel`에서 I2C STM32 bridge와 motor까지
+통합되어 있습니다. Follower의 `/follower/safe_cmd_vel`은 아직 motor에 연결하지
+않았습니다. 실제 이동 전에는 hardware E-stop과 bridge watchdog을 별도로 확인해야
+합니다.
 
 ## 빌드
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /home/maze/damgc_robot
+cd ~/damgc_robot
 colcon build --symlink-install
 source install/local_setup.bash
 ```
@@ -69,8 +81,11 @@ ros2 launch rescue_robot_bringup camera_apriltag.launch.py enable_depth:=false
 
 ```bash
 ros2 topic echo --once /leader/apriltag/detections
-ros2 run tf2_ros tf2_echo camera_color_optical_frame tag36h11:0
+ros2 run tf2_ros tf2_echo camera_color_optical_frame 'leader/tag36h11:0'
 ```
+
+현재 `apriltag_leader.yaml`은 tag36h11 ID 0의 TF child frame을
+`leader/tag36h11:0`으로 명시합니다. 과거 비접두 `tag36h11:0` 이름을 사용하지 않습니다.
 
 ## Depth CSV 측정
 
@@ -96,11 +111,51 @@ ros2 node list
 ros2 topic list | grep leader
 ros2 topic echo --once /leader/apriltag/detections
 ros2 run rqt_image_view rqt_image_view /leader/camera/color/image_rect
-ros2 run tf2_ros tf2_echo camera_color_optical_frame tag36h11:0
+ros2 run tf2_ros tf2_echo camera_color_optical_frame 'leader/tag36h11:0'
 ```
 
 AprilTag 확인 시 실제 태그 ID 0과 5 cm 크기의 `tag36h11` 태그를 카메라 앞에
 두어야 검출 결과와 태그 TF가 출력됩니다.
+
+## 리더 AprilTag base-link velocity pipeline
+
+실제 Leader 주행은 다음 통합 launch를 사용합니다. Approach controller는 자동으로
+enabled되지만 velocity guard는 disabled로 시작하므로, 안전 확인 후 사용자가 guard를
+명시적으로 enable하기 전까지 motor command는 zero로 유지됩니다.
+
+```bash
+ros2 launch rescue_robot_bringup leader_apriltag_drive.launch.py
+```
+
+빌드, 상태 확인, 주행 시작·정지와 I2C troubleshooting은
+[Leader AprilTag Drive Run Guide](src/leader/rescue_robot_bringup/docs/LEADER_APRILTAG_DRIVE_RUN_GUIDE.md)를
+따릅니다.
+
+아래 명령은 STM32를 연결하지 않고 각 software component를 따로 시험할 때 사용합니다.
+
+기본 `camera_apriltag.launch.py`는 detection까지만 실행하며, 기존 camera-frame 상태와
+신규 base-link pose·metric·상태까지 함께 실행하려면 `enable_approach:=true`를 지정합니다.
+
+```bash
+ros2 launch rescue_robot_bringup camera_apriltag.launch.py \
+  enable_depth:=false enable_approach:=true
+ros2 launch leader_approach_control approach_controller.launch.py
+ros2 launch leader_approach_control velocity_guard.launch.py
+```
+
+Component 단독 launch에서는 controller와 guard가 모두 disabled로 시작하므로 enable
+전에는 raw/final command가 zero입니다. 현재 hybrid 정렬은 FAR에서 Tag center를
+추적하고 `0.40 m` 안에서 bounded tag-normal correction을 시작합니다. Pre-align
+`0.30 m`, final target `0.20 m`는 실제 grasp 자세를 확인한 뒤 조정할 초기값입니다.
+STM32/UART/motor에는 연결하지 않습니다.
+
+전체 topic, state priority, enable 순서, 파라미터와 실기·자동시험 결과는
+[Leader velocity pipeline 검증 가이드](src/leader/rescue_robot_apriltag/docs/LEADER_VELOCITY_PIPELINE_VALIDATION_GUIDE.md)를
+참고합니다.
+Hybrid 설계 원리와 side-looking/FOV regression의 현행 절차는
+[Leader Hybrid 알고리즘](src/leader/rescue_robot_apriltag/docs/LEADER_HYBRID_TAG_ALIGNMENT_ALGORITHM.md) 및
+[Leader Hybrid 정렬 검증 가이드](src/leader/rescue_robot_apriltag/docs/LEADER_HYBRID_TAG_ALIGNMENT_VALIDATION_GUIDE.md)를
+따릅니다.
 
 ## 리더 DDS 협력 통신
 
@@ -127,6 +182,25 @@ ros2 launch follower_supply_perception follower_apriltag.launch.py
 ```bash
 ros2 launch follower_supply_perception approach_only.launch.py
 ```
+
+전체 software velocity pipeline은 별도 터미널에서 controller, selector와 integrated guard를
+실행합니다. Controller와 guard는 기본적으로 disabled이고 selector는 `STOP`으로 시작합니다.
+
+```bash
+ros2 launch follower_approach_control approach_controller.launch.py
+ros2 launch follower_command_selector command_selector.launch.py
+ros2 launch follower_control selected_velocity_guard.launch.py
+```
+
+AprilTag 접근 source를 사용할 때는 selector를 명시적으로 `APPROACH`로 전환한 뒤 controller와
+guard를 각각 enable합니다. 기존 cooperation command는 `/follower/cmd_vel` 입력으로 유지되며
+AprilTag controller가 이 토픽을 직접 publish하지 않습니다. 현재 base/controller target
+`0.25 m`는 Leader와 맞춘 software-validation 값이지 실제 grasp 거리 확정값은 아닙니다.
+
+전체 topic ownership, enable 순서, 파라미터, 선택 빌드와 236개 자동시험 결과는
+[Follower base-link velocity pipeline 검증 가이드](src/follower/follower_supply_perception/docs/FOLLOWER_BASE_LINK_VELOCITY_PIPELINE_VALIDATION_GUIDE.md)를
+참고합니다. Follower 실카메라 RIGHT/TARGET/HIDDEN 시나리오는 아직 `NOT VERIFIED`이며
+사용자가 직접 확인해야 합니다.
 
 상세 토픽과 상태 정의는
 [리더·팔로워 구조](docs/LEADER_FOLLOWER_ARCHITECTURE.md)에서 확인할 수 있습니다.

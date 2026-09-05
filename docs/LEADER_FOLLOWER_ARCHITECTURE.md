@@ -18,7 +18,9 @@ AprilTag 상대 위치로 정렬한 뒤 중량 물품의 협동 운반을 지원
 두 로봇 모두 Jetson Orin과 ROS 2 Humble을 사용하고, 각 로봇의 STM32가
 모터·엔코더·BNO055·그리퍼의 실시간 제어를 담당하는 것이 목표입니다.
 
-현재 구현은 두 로봇의 인식 파이프라인과 리더 측 DDS 협력 명령 게이트를 제공합니다. 실제 팔로워 하드웨어 주행과 Orin 간 현장 시험은 아직 남아 있습니다.
+현재 구현은 두 로봇의 AprilTag camera/base 상태와 software velocity pipeline, 리더 측
+DDS 협력 명령 게이트를 제공합니다. 실제 hardware 주행과 Orin 간 현장 시험은 아직
+남아 있습니다.
 
 ```mermaid
 flowchart LR
@@ -36,8 +38,8 @@ flowchart LR
     Lmission <-->|"ROS 2 임무·상태·공통 속도"| Fcontrol
 ```
 
-실선 전체는 목표 구조입니다. 현재는 리더의 D435·AprilTag와 팔로워의
-AprilTag·정렬 상태 부분만 구현되어 있습니다.
+실선 전체는 목표 구조입니다. 현재 Leader/Follower AprilTag pipeline은 final software
+velocity topic까지 구현됐지만 STM32/UART/motor에는 연결되지 않았습니다.
 
 ## 목표 인터페이스
 
@@ -48,8 +50,8 @@ AprilTag·정렬 상태 부분만 구현되어 있습니다.
 
 | 목표 이름 | 용도 | 현재 상태 |
 | --- | --- | --- |
-| `/leader/cmd_vel` | 리더 속도 명령 | 미구현 |
-| `/follower/cmd_vel` | 팔로워 속도 명령 | 미구현 |
+| `/leader/cmd_vel` | Leader guard의 최종 software 속도 | 구현, hardware 미연결 |
+| `/follower/cmd_vel` | 기존 cooperation/upstream 명령 입력 | 구현, selector 입력이며 hardware 미연결 |
 | `/leader/odom`, `/follower/odom` | 로봇별 wheel odometry | 미구현 |
 | `/leader/imu`, `/follower/imu` | 로봇별 BNO055 IMU | 미구현 |
 | `/follower/status` | 팔로워 heartbeat (현재 `std_msgs/String`) | 리더 구독 구현 |
@@ -88,6 +90,8 @@ timeout, 재연결, watchdog과 비상정지 우선순위입니다.
 3. `camera_info_qos_bridge.py`: CameraInfo QoS 연결 보조
 4. `image_proc/rectify_node`: RGB 영상 보정
 5. `apriltag_ros/apriltag_node`: `/leader/apriltag` 네임스페이스에서 태그 검출
+6. `apriltag_approach_node`: `enable_approach:=true`일 때 기존 camera state와 exact-stamp
+   `base_link` pose·metric·state 발행
 
 기본 카메라 설정은 RGB/depth 모두 `640x480 @ 30Hz`이며, launch 인자
 `enable_depth:=false`로 Depth를 끌 수 있습니다. AprilTag 설정은 `tag36h11`, ID `0`,
@@ -95,8 +99,14 @@ timeout, 재연결, watchdog과 비상정지 우선순위입니다.
 
 ```bash
 ros2 topic echo --once /leader/apriltag/detections
-ros2 run tf2_ros tf2_echo camera_color_optical_frame tag36h11:0
+ros2 run tf2_ros tf2_echo camera_color_optical_frame 'leader/tag36h11:0'
 ```
+
+Raw controller와 final guard는 별도 `leader_approach_control` launch로 실행하며, 둘 다
+disabled로 시작합니다. 현재 base/controller target은 `0.25 m`의 provisional
+software-validation 값입니다. 상세 계약은
+[Leader velocity pipeline 검증 가이드](../src/leader/rescue_robot_apriltag/docs/LEADER_VELOCITY_PIPELINE_VALIDATION_GUIDE.md)를
+참고합니다.
 
 RGB 보정 영상은 `/leader/camera/color/image_rect`, Depth 원본 보정 영상은
 `/leader/camera/depth/image_rect_raw`에서 확인합니다. 리더의 Depth 중앙 영역 측정은
@@ -107,10 +117,9 @@ ros2 run rescue_robot_tools depth_to_csv.py --ros-args \
   -p output_path:=/home/maze/damgc_robot/data/depth_distance.csv
 ```
 
-URDF의 `camera_link`와 RealSense가 발행하는 `camera_color_optical_frame`은 현재
-별도 프레임입니다. 따라서 리더 URDF 모델의 카메라 형상과 RealSense 센서 TF가
-자동으로 하나의 TF 체인으로 연결된다고 보장하지 않으며, 실물 장착 기준의 정적 TF가
-필요하면 별도로 추가해야 합니다.
+현재 launch의 URDF와 RealSense TF를 통해 `base_link → camera_color_optical_frame` chain을
+구성하며, AprilTag base pose는 source observation timestamp의 exact-time TF2 변환을
+사용합니다. 실물 장착 extrinsic은 최종 calibration 전 provisional 값입니다.
 
 ## 현재 팔로워 파이프라인
 

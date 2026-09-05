@@ -1,0 +1,20 @@
+/leader/approach_controller:
+  ros__parameters:
+    base_frame: base_link
+    target_tag_id: 0
+    controller_enabled_on_startup: false
+    controller_publish_rate: 20.0
+    controller_pose_timeout: 0.35
+    # Pose, mode, and state arrive together on leader_alignment_msgs.
+
+    # The perception node owns target distances and publishes the active target
+    # pose. Gains and raw limits remain conservative initial hardware values.
+    linear_gain: 0.20
+    angular_gain: 0.80
+    lateral_gain: 0.50
+    max_raw_linear_speed: 0.05
+    max_raw_angular_speed: 0.20
+    near_max_angular_speed: 0.10
+    max_final_linear_speed: 0.02
+    max_final_angular_speed: 0.08
+    blind_final_speed: 0.015

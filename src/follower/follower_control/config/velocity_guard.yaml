@@ -1,8 +1,20 @@
 /follower/velocity_guard:
   ros__parameters:
+    guard_enabled_on_startup: false
     command_timeout: 0.3
     publish_rate: 50.0
+
+    # Software-validation values. These are not final motor tuning values.
+    # Existing Follower speed clamps are retained for cooperation compatibility.
     max_linear_speed: 0.25
     max_angular_speed: 0.8
+    max_linear_acceleration: 0.25
+    max_angular_acceleration: 0.8
+    max_slew_dt: 0.10
+    axis_epsilon: 1.0e-9
+    allow_reverse: false
+    shutdown_stop_count: 3
+
+    # Standalone/backwards-compatible cooperation input.
     command_topic: /follower/cmd_vel
     safe_command_topic: /follower/safe_cmd_vel

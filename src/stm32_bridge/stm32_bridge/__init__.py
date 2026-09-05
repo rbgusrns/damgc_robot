@@ -1,1 +1,1 @@
-"""Orin–STM32 UART bridge."""
+"""Orin–STM32 I2C/UART bridge."""
