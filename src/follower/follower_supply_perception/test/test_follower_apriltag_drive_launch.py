@@ -10,6 +10,9 @@ from launch import LaunchDescription
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 FOLLOWER_ROOT = PACKAGE_ROOT.parent
 DRIVE_LAUNCH = PACKAGE_ROOT / "launch/follower_apriltag_drive.launch.py"
+WHEEL_TEST_GUIDE = (
+    PACKAGE_ROOT / "docs/FOLLOWER_WHEEL_DRIVE_TERMINAL_TEST.md"
+)
 
 
 def _source(path: Path) -> str:
@@ -144,3 +147,24 @@ def test_follower_runtime_code_and_config_have_no_leader_identifiers() -> None:
         lowered = _source(path).lower()
         for value in forbidden:
             assert value not in lowered, "%s leaked into %s" % (value, path)
+
+
+def test_wheel_test_guide_preserves_the_guarded_runtime_path() -> None:
+    guide = _source(WHEEL_TEST_GUIDE)
+    required = (
+        "use_stm32_bridge:=true",
+        "i2c_write_enabled:=false",
+        "i2c_write_enabled:=true",
+        "/follower/cmd_vel",
+        "/follower/selected_cmd_vel",
+        "/follower/safe_cmd_vel",
+        "/follower/velocity_guard/enable",
+        "source_mode COOPERATION",
+        "source_mode APPROACH",
+        "source_mode STOP",
+        "/follower/odom/raw",
+        "blind_final_approach_enabled",
+    )
+    for value in required:
+        assert value in guide
+    assert "ros2 topic pub --rate 10 /follower/safe_cmd_vel" not in guide

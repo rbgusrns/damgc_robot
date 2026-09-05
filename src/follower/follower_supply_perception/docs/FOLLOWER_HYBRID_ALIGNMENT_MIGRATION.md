@@ -190,6 +190,9 @@ selector/guard 기존 동작을 포함한다.
 
 Blind는 계속 disabled로 둔 채 다음을 한 항목씩 확인한다.
 
+복사 가능한 전체 터미널 명령과 pass/fail 기록표는
+[`FOLLOWER_WHEEL_DRIVE_TERMINAL_TEST.md`](FOLLOWER_WHEEL_DRIVE_TERMINAL_TEST.md)를 따른다.
+
 1. 바퀴를 띄우거나 충분한 안전 공간에서 좌/우 motor polarity와 emergency stop 확인
 2. guard를 짧게 열어 positive linear `cmd_vel`이 실제 직진 전진인지 확인
 3. positive/negative angular command의 회전 방향 확인

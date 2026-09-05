@@ -47,6 +47,11 @@ launch 구성과 검증 결과는
 기준으로 합니다. Blind final은 코드와 자동시험만 포함하며 기본값은 반드시
 `false`입니다.
 
+실제 바퀴를 사용하는 시험은
+[`docs/FOLLOWER_WHEEL_DRIVE_TERMINAL_TEST.md`](docs/FOLLOWER_WHEEL_DRIVE_TERMINAL_TEST.md)의
+터미널별 절차를 따릅니다. Receive-only I2C, stand 위 저속 pulse, 지상 odometry,
+AprilTag 자동 접근 순서로 진행하며 `/follower/safe_cmd_vel` 직접 publish는 금지합니다.
+
 노드 실행 진입점은 `apriltag_approach_node`입니다. 출력 토픽은 상대 이름을 사용하므로
 요구된 `/follower/...` 이름으로 사용하려면 노드를 `follower` namespace에서 실행해야
 합니다.
