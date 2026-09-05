@@ -762,3 +762,235 @@ def test_timer_prioritizes_completed_latch_over_tag_reacquisition() -> None:
 
     assert completed_cycles == [pytest.approx(10.1)]
     assert not lookups
+
+
+def make_final_grace_harness() -> SimpleNamespace:
+    """Create the node surface used by the visual stop-and-wait grace."""
+    atomic_commands = []
+    lost_cycles = []
+    logs = []
+    harness = SimpleNamespace(
+        _last_fresh_final_observation_time=10.0,
+        _final_approach_grace_eligible=True,
+        _final_approach_grace_active=False,
+        _final_approach_tag_loss_grace_sec=0.20,
+        _detected_pub=RecordingPublisher(),
+        _tag_id_pub=RecordingPublisher(),
+        _control_mode_pub=RecordingPublisher(),
+        _base_state_pub=RecordingPublisher(),
+        _publish_atomic_command=lambda pose, decision: atomic_commands.append(
+            (pose, decision)
+        ),
+        _log_base_state_change=lambda _state: None,
+        _publish_lost=lambda now, *, allow_blind=True: lost_cycles.append(
+            (now, allow_blind)
+        ),
+        get_logger=lambda: SimpleNamespace(info=logs.append),
+    )
+    harness.atomic_commands = atomic_commands
+    harness.lost_cycles = lost_cycles
+    harness.logs = logs
+    harness._expire_final_approach_grace = lambda now: (
+        AprilTagApproachNode._expire_final_approach_grace(harness, now)
+    )
+    return harness
+
+
+def test_final_approach_loss_grace_holds_zero_without_a_stale_target() -> None:
+    harness = make_final_grace_harness()
+
+    held = AprilTagApproachNode._publish_final_approach_grace(harness, 10.19)
+
+    assert held
+    assert harness._detected_pub.messages[-1].data is False
+    assert harness._tag_id_pub.messages[-1].data == -1
+    pose, decision = harness.atomic_commands[-1]
+    assert pose is None
+    assert decision == AlignmentDecision(
+        ApproachState.FINAL_APPROACH, ControlMode.FINAL_APPROACH
+    )
+    assert decision.control_x == pytest.approx(0.0)
+    assert decision.control_y == pytest.approx(0.0)
+    assert harness._base_state_pub.messages[-1].data == "FINAL_APPROACH"
+    assert harness._control_mode_pub.messages[-1].data == "FINAL_APPROACH"
+    assert not harness.lost_cycles
+
+    assert AprilTagApproachNode._publish_final_approach_grace(harness, 10.20)
+    assert not harness.lost_cycles
+
+
+def test_final_approach_grace_expires_from_last_fresh_receipt_without_blind() -> None:
+    harness = make_final_grace_harness()
+    AprilTagApproachNode._publish_final_approach_grace(harness, 10.10)
+
+    handled = AprilTagApproachNode._publish_final_approach_grace(harness, 10.200001)
+
+    assert handled
+    assert harness.lost_cycles == [(pytest.approx(10.200001), False)]
+    assert harness._last_fresh_final_observation_time is None
+    assert not harness._final_approach_grace_eligible
+
+
+def test_duplicate_observation_does_not_refresh_final_approach_grace() -> None:
+    harness = make_final_grace_harness()
+    final = AlignmentDecision(
+        ApproachState.FINAL_APPROACH, ControlMode.FINAL_APPROACH
+    )
+
+    AprilTagApproachNode._record_final_approach_observation(
+        harness, final, 10.10, False
+    )
+    assert harness._last_fresh_final_observation_time == pytest.approx(10.0)
+
+    harness._final_approach_grace_active = True
+    AprilTagApproachNode._record_final_approach_observation(
+        harness, final, 10.12, True
+    )
+    assert harness._last_fresh_final_observation_time == pytest.approx(10.12)
+    assert not harness._final_approach_grace_active
+    assert any("reacquired" in message for message in harness.logs)
+
+
+def test_fresh_reacquisition_returns_to_existing_visual_publish_path() -> None:
+    selected = make_tag_observation(10_120_000_000)
+    published = []
+    lost_cycles = []
+    harness = SimpleNamespace(
+        _blind_completed=False,
+        _blind_active=False,
+        _last_fresh_final_observation_time=10.0,
+        _final_approach_grace_eligible=True,
+        _final_approach_grace_active=True,
+        _final_approach_tag_loss_grace_sec=0.20,
+        _last_processed_observation_stamps={0: 10_000_000_000},
+        _selection_mode="priority",
+        _active_tag_id=0,
+        _candidate_ids=lambda: (0,),
+        _lookup_observation=lambda _tag_id, _now: selected,
+        _accept_observation_stamp=lambda observation: (
+            AprilTagApproachNode._accept_observation_stamp(harness, observation)
+        ),
+        _translation_filter=SimpleNamespace(
+            add=lambda x, y, z, stamp: (x, y, z, stamp)
+        ),
+        _state_machine=SimpleNamespace(
+            update=lambda _measurement, _now, _tag_id: ApproachState.FINAL_APPROACH
+        ),
+        _publish_valid=lambda observation, measurement, state, is_new: (
+            published.append((observation, measurement, state, is_new))
+        ),
+        _publish_lost=lambda now: lost_cycles.append(now),
+        get_clock=lambda: SimpleNamespace(
+            now=lambda: Time(nanoseconds=10_120_000_000)
+        ),
+    )
+    harness._expire_final_approach_grace = lambda now: (
+        AprilTagApproachNode._expire_final_approach_grace(harness, now)
+    )
+
+    AprilTagApproachNode._on_timer(harness)
+
+    assert len(published) == 1
+    assert published[0][0] is selected
+    assert published[0][2] == ApproachState.FINAL_APPROACH
+    assert published[0][3] is True
+    assert not lost_cycles
+
+
+@pytest.mark.parametrize(
+    ("state", "mode"),
+    [
+        (ApproachState.TURN_LEFT, ControlMode.COARSE_TRACK),
+        (ApproachState.APPROACH, ControlMode.NEAR_ALIGN),
+        (ApproachState.FINE_ALIGN_LEFT, ControlMode.FINAL_YAW_ALIGN),
+        (ApproachState.STABILIZING, ControlMode.STABILIZING),
+        (ApproachState.ALIGNED, ControlMode.ALIGNED),
+    ],
+)
+def test_only_final_approach_fresh_samples_arm_visual_grace(state, mode) -> None:
+    harness = make_final_grace_harness()
+
+    AprilTagApproachNode._record_final_approach_observation(
+        harness, AlignmentDecision(state, mode), 10.1, True
+    )
+
+    assert harness._last_fresh_final_observation_time is None
+    assert not harness._final_approach_grace_eligible
+
+
+def test_timer_does_not_add_blind_age_before_final_grace_timeout() -> None:
+    selected = make_tag_observation(10_000_000_000)
+    harness = make_final_grace_harness()
+    harness._blind_completed = False
+    harness._blind_active = False
+    harness._blind_last_tag_max_age = 0.25
+    harness._last_valid_timestamp = 10.0
+    harness._last_processed_observation_stamps = {
+        0: selected.stamp_nanoseconds
+    }
+    harness._selection_mode = "priority"
+    harness._candidate_ids = lambda: (0,)
+    harness._lookup_observation = lambda _tag_id, _now: selected
+    harness._accept_observation_stamp = lambda observation: (
+        AprilTagApproachNode._accept_observation_stamp(harness, observation)
+    )
+    harness._publish_final_approach_grace = lambda now: (
+        AprilTagApproachNode._publish_final_approach_grace(harness, now)
+    )
+    harness._expire_final_approach_grace = lambda now: (
+        AprilTagApproachNode._expire_final_approach_grace(harness, now)
+    )
+    harness.get_clock = lambda: SimpleNamespace(
+        now=lambda: Time(nanoseconds=10_210_000_000)
+    )
+
+    AprilTagApproachNode._on_timer(harness)
+
+    assert harness.lost_cycles == [(pytest.approx(10.21), False)]
+    assert not harness.atomic_commands
+
+
+def test_reacquisition_after_active_grace_timeout_enters_lost_first() -> None:
+    selected = make_tag_observation(10_210_000_000)
+    harness = make_final_grace_harness()
+    harness._blind_completed = False
+    harness._blind_active = False
+    harness._final_approach_grace_active = True
+    harness._last_processed_observation_stamps = {0: 10_000_000_000}
+    harness._selection_mode = "priority"
+    harness._candidate_ids = lambda: (0,)
+    harness._lookup_observation = lambda _tag_id, _now: selected
+    harness._accept_observation_stamp = lambda observation: (
+        AprilTagApproachNode._accept_observation_stamp(harness, observation)
+    )
+    harness._expire_final_approach_grace = lambda now: (
+        AprilTagApproachNode._expire_final_approach_grace(harness, now)
+    )
+    harness.get_clock = lambda: SimpleNamespace(
+        now=lambda: Time(nanoseconds=10_210_000_000)
+    )
+
+    AprilTagApproachNode._on_timer(harness)
+
+    assert harness.lost_cycles == [(pytest.approx(10.21), False)]
+
+
+def test_non_final_loss_keeps_existing_immediate_lost_policy() -> None:
+    lost_cycles = []
+    harness = SimpleNamespace(
+        _blind_completed=False,
+        _final_approach_grace_eligible=False,
+        _last_fresh_final_observation_time=None,
+        _selection_mode="priority",
+        _candidate_ids=lambda: (0,),
+        _lookup_observation=lambda _tag_id, _now: None,
+        _publish_final_approach_grace=lambda now: False,
+        _publish_lost=lambda now: lost_cycles.append(now),
+        get_clock=lambda: SimpleNamespace(
+            now=lambda: Time(nanoseconds=10_100_000_000)
+        ),
+    )
+
+    AprilTagApproachNode._on_timer(harness)
+
+    assert lost_cycles == [pytest.approx(10.1)]

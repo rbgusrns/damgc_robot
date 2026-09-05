@@ -26,7 +26,7 @@ class GripperSequenceNode(Node):
     def __init__(self) -> None:
         super().__init__("gripper_sequence")
         self.declare_parameter("detection_topic", "/leader/supply/detected")
-        self.declare_parameter("alignment_topic", "/leader/alignment/state")
+        self.declare_parameter("alignment_topic", "/leader/base_alignment/state")
         self.declare_parameter("raw_command_topic", "/leader/dynamixel/command")
         self.declare_parameter("gripper_topic", "/leader/gripper/command")
         self.declare_parameter("open_raw", 1021)
@@ -121,7 +121,11 @@ class GripperSequenceNode(Node):
                 self._publish_status("DONE")
             return
 
-        if self._state == SequenceState.DONE and not self._tag_detected:
+        if (
+            self._state == SequenceState.DONE
+            and not self._tag_detected
+            and self._alignment_state != "ALIGNED"
+        ):
             self._state = SequenceState.WAITING_FOR_TAG
             self._publish_status("WAITING_FOR_TAG next cycle armed")
 

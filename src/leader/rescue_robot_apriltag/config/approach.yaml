@@ -41,6 +41,7 @@
     base_stable_time: 0.30
     aligned_confirm_samples: 3
     stabilizing_tag_loss_grace_sec: 0.20
+    final_approach_tag_loss_grace_sec: 0.20
 
     # Restricted fallback for a tag that leaves the camera only after visual
     # final alignment. Distances are base_link forward metres.

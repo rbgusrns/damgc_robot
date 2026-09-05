@@ -8,7 +8,9 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("enabled", default_value="false"),
         DeclareLaunchArgument("detection_topic", default_value="/leader/supply/detected"),
-        DeclareLaunchArgument("alignment_topic", default_value="/leader/alignment/state"),
+        DeclareLaunchArgument(
+            "alignment_topic", default_value="/leader/base_alignment/state"
+        ),
         DeclareLaunchArgument("raw_command_topic", default_value="/leader/dynamixel/command"),
         DeclareLaunchArgument("gripper_topic", default_value="/leader/gripper/command"),
         DeclareLaunchArgument("open_raw", default_value="1021"),
