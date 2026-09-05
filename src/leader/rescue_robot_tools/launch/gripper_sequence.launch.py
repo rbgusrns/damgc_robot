@@ -7,13 +7,13 @@ from launch_ros.actions import Node
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("enabled", default_value="false"),
-        DeclareLaunchArgument(
-            "alignment_topic",
-            default_value="/leader/apriltag_approach/alignment/state",
-        ),
-        DeclareLaunchArgument(
-            "gripper_topic", default_value="/leader/gripper/command"
-        ),
+        DeclareLaunchArgument("detection_topic", default_value="/leader/supply/detected"),
+        DeclareLaunchArgument("alignment_topic", default_value="/leader/alignment/state"),
+        DeclareLaunchArgument("raw_command_topic", default_value="/leader/dynamixel/command"),
+        DeclareLaunchArgument("gripper_topic", default_value="/leader/gripper/command"),
+        DeclareLaunchArgument("open_raw", default_value="1021"),
+        DeclareLaunchArgument("close_raw", default_value="450"),
+        DeclareLaunchArgument("close_wait", default_value="2.0"),
         Node(
             package="rescue_robot_tools",
             executable="gripper_sequence_node.py",
@@ -21,8 +21,13 @@ def generate_launch_description():
             output="screen",
             parameters=[{
                 "enabled": LaunchConfiguration("enabled"),
+                "detection_topic": LaunchConfiguration("detection_topic"),
                 "alignment_topic": LaunchConfiguration("alignment_topic"),
+                "raw_command_topic": LaunchConfiguration("raw_command_topic"),
                 "gripper_topic": LaunchConfiguration("gripper_topic"),
+                "open_raw": LaunchConfiguration("open_raw"),
+                "close_raw": LaunchConfiguration("close_raw"),
+                "close_wait": LaunchConfiguration("close_wait"),
             }],
         ),
     ])

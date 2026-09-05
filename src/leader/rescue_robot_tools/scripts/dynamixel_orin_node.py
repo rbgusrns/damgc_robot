@@ -8,12 +8,13 @@ Semantic command topic: /<namespace>/gripper/command
 Message: std_msgs/msg/String, data=open|close|middle|rx64_high|rx64_low|rx64_middle|stop
 
 Use -1 for a position or torque field that must remain unchanged.
-Example: [420.0, 1.0, 1.0] enables torque and sends both positions.
+Example: [450.0, 1.0, 1.0] enables torque and sends both positions.
 """
 
 import math
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray, String
 
@@ -162,14 +163,17 @@ class DynamixelOrinNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = DynamixelOrinNode()
+    node = None
     try:
+        node = DynamixelOrinNode()
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        if node is not None:
+            node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":
