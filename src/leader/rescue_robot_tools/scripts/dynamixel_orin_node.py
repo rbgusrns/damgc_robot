@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """ROS2 open-loop gripper controller for RX-64/RX-28 through U2D2.
 
-Command topic: /<namespace>/dynamixel/command
+Raw command topic: /<namespace>/dynamixel/command
 Message: std_msgs/msg/Float64MultiArray, data=[rx64_raw, rx28_raw, torque]
+
+Semantic command topic: /<namespace>/gripper/command
+Message: std_msgs/msg/String, data=open|close|middle|rx64_high|rx64_low|rx64_middle|stop
 
 Use -1 for a position or torque field that must remain unchanged.
 Example: [420.0, 1.0, 1.0] enables torque and sends both positions.
@@ -43,7 +46,62 @@ class DynamixelOrinNode(Node):
             self.command_callback,
             10,
         )
+        self.gripper_subscription = self.create_subscription(
+            String,
+            "gripper/command",
+            self.gripper_command_callback,
+            10,
+        )
         self.status_publisher = self.create_publisher(String, "dynamixel/status", 10)
+
+    def gripper_command_callback(self, message: String):
+        """Handle simple semantic commands without exposing raw positions."""
+        if self.controller is None:
+            self.publish_status("ERROR controller is not connected")
+            return
+
+        command = message.data.strip().lower()
+        rx28_positions = {
+            "open": self.profile["rx28_max"],
+            "close": self.profile["rx28_min"],
+            "middle": round((self.profile["rx28_min"] + self.profile["rx28_max"]) / 2),
+        }
+        rx64_positions = {
+            "rx64_high": self.profile["rx64_min"],
+            "rx64_low": self.profile["rx64_max"],
+            "rx64_middle": round((self.profile["rx64_min"] + self.profile["rx64_max"]) / 2),
+        }
+
+        try:
+            if command in rx28_positions:
+                self.controller.set_torque(self.profile["rx28_id"], True)
+                self.controller.set_position(
+                    self.profile["rx28_id"],
+                    rx28_positions[command],
+                    self.profile["rx28_min"],
+                    self.profile["rx28_max"],
+                )
+                self.publish_status(f"OK command={command} rx28={rx28_positions[command]}")
+            elif command in rx64_positions:
+                self.controller.set_torque(self.profile["rx64_id"], True)
+                self.controller.set_position(
+                    self.profile["rx64_id"],
+                    rx64_positions[command],
+                    self.profile["rx64_min"],
+                    self.profile["rx64_max"],
+                )
+                self.publish_status(f"OK command={command} rx64={rx64_positions[command]}")
+            elif command == "stop":
+                self.controller.set_torque(self.profile["rx64_id"], False)
+                self.controller.set_torque(self.profile["rx28_id"], False)
+                self.publish_status("OK command=stop torque=0")
+            else:
+                self.publish_status(
+                    "ERROR command must be open, close, middle, "
+                    "rx64_high, rx64_low, rx64_middle, or stop"
+                )
+        except Exception as exc:
+            self.publish_status(f"ERROR command failed: {exc}")
 
     def publish_status(self, message: str):
         self.get_logger().info(message)

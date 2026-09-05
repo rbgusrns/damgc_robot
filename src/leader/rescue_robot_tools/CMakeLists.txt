@@ -7,6 +7,7 @@ install(PROGRAMS
   scripts/depth_to_csv.py
   scripts/dynamixel_orin.py
   scripts/dynamixel_orin_node.py
+  scripts/gripper_sequence_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
