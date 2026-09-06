@@ -167,7 +167,8 @@ ros2 topic hz /nvblox_node/mesh
 
 다음 실행기는 STM32 bridge와 RealSense를 호스트에서 시작하고, Isaac ROS 개발
 컨테이너를 준비한 뒤 dual EKF, VSLAM, nvblox, RViz를 실행한다. 필요한 토픽이 준비되면
-현재 터미널이 방향키 조종기로 바뀐다. 동시에 정확도 분석용 rosbag을 자동으로
+현재 터미널이 방향키 조종기로 바뀐다. `E`는 주행 속도를 한 단계 높이고 `D`는 한
+단계 낮춘다. 동시에 정확도 분석용 rosbag을 자동으로
 기록한다. Ctrl-C로 조종을 종료하면 bag을 정상 마감하고 분석 리포트를 만든 뒤,
 실행기가 시작한 프로세스도 함께 정리한다.
 
@@ -232,7 +233,8 @@ python3 scripts/analyze_vslam_bag.py data/vslam_mapping_날짜_시간 \
 
 호스트에서 STM32 bridge를 실행한 다음, 별도 터미널에서 방향키 teleop을 실행한다.
 방향키를 누르고 있는 동안에만 `/leader/cmd_vel`을 발행하며, 키 반복 입력이 0.25초
-끊기면 자동으로 0속도를 발행한다. Space는 즉시 정지하고 Ctrl-C는 종료한다.
+끊기면 자동으로 0속도를 발행한다. `E`는 속도 증가, `D`는 속도 감소, Space는 즉시
+정지이고 Ctrl-C는 종료이다.
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -240,7 +242,9 @@ source /home/maze/damgc_robot/install/setup.bash
 ros2 run rescue_robot_bringup arrow_key_teleop.py
 ```
 
-기본 속도는 직진 0.12 m/s, 회전 0.35 rad/s이다. 첫 바닥 주행 전에 바퀴를 띄운
+기본 속도는 직진 0.12 m/s, 회전 0.35 rad/s이다. `E`/`D`를 한 번 누를 때마다 각각
+0.02 m/s와 0.05 rad/s씩 변하며, 기본 상한은 0.25 m/s와 0.80 rad/s이다. `D`로는
+실행 시 지정한 초기 속도 아래까지 낮아지지 않는다. 첫 바닥 주행 전에 바퀴를 띄운
 상태에서 전후진과 좌우 회전 방향을 확인한다. 필요한 경우 더 낮은 속도로 실행한다.
 
 ```bash
@@ -276,6 +280,7 @@ rviz2 -d /workspaces/isaac_ros-dev/rviz/vslam_nvblox.rviz
 주요 표시 항목:
 
 - Fixed Frame: `map`
+- Current View Target Frame: `base_link` (화면 중심이 로봇을 추종)
 - TF
 - RobotModel
 - `/nvblox_node/static_esdf_pointcloud` (PointCloud2)
@@ -294,6 +299,10 @@ mesh 진단 명령도 Docker에서 실행한다. `NvbloxMesh`가 Add 목록에 �
 끈다.
 
 RViz 설정은 저장되지만, 실제 nvblox 지도 데이터는 자동 저장되지 않는다.
+
+지도는 `map` 좌표계에 고정한 채 화면 중심만 로봇을 따라가도록 설정되어 있다. 화면을
+지도 중심에 다시 고정하려면 Views 패널의 Current View에서 Target Frame을 `map`으로
+바꾼다.
 
 ## 다음 작업
 

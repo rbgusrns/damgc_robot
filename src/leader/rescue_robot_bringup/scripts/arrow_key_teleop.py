@@ -39,6 +39,12 @@ GRIPPER_KEYS = {
 }
 
 
+SPEED_KEYS = {
+    "e": 1,
+    "d": -1,
+}
+
+
 class ArrowKeyTeleop(Node):
 
     def __init__(self):
@@ -54,6 +60,10 @@ class ArrowKeyTeleop(Node):
         )
         self.declare_parameter("linear_speed", 0.12)
         self.declare_parameter("angular_speed", 0.35)
+        self.declare_parameter("linear_speed_step", 0.02)
+        self.declare_parameter("angular_speed_step", 0.05)
+        self.declare_parameter("max_linear_speed", 0.25)
+        self.declare_parameter("max_angular_speed", 0.80)
         self.declare_parameter("key_timeout", 0.25)
         self.declare_parameter("publish_rate", 20.0)
 
@@ -71,11 +81,42 @@ class ArrowKeyTeleop(Node):
         publish_rate = float(
             self.get_parameter("publish_rate").value
         )
+        self._linear_speed = float(
+            self.get_parameter("linear_speed").value
+        )
+        self._angular_speed = float(
+            self.get_parameter("angular_speed").value
+        )
+        self._minimum_linear_speed = self._linear_speed
+        self._minimum_angular_speed = self._angular_speed
+        self._linear_speed_step = float(
+            self.get_parameter("linear_speed_step").value
+        )
+        self._angular_speed_step = float(
+            self.get_parameter("angular_speed_step").value
+        )
+        self._max_linear_speed = float(
+            self.get_parameter("max_linear_speed").value
+        )
+        self._max_angular_speed = float(
+            self.get_parameter("max_angular_speed").value
+        )
 
         if publish_rate <= 0.0:
             raise ValueError(
                 "publish_rate must be greater than zero"
             )
+        if min(
+            self._linear_speed,
+            self._angular_speed,
+            self._linear_speed_step,
+            self._angular_speed_step,
+        ) <= 0.0:
+            raise ValueError("speed values and steps must be greater than zero")
+        if self._max_linear_speed < self._linear_speed:
+            raise ValueError("max_linear_speed must be at least linear_speed")
+        if self._max_angular_speed < self._angular_speed:
+            raise ValueError("max_angular_speed must be at least angular_speed")
 
         self._velocity_publisher = self.create_publisher(
             Twist,
@@ -131,6 +172,9 @@ class ArrowKeyTeleop(Node):
             " A               : reverse + left\n"
             " S               : reverse + right\n"
             "\n"
+            " E               : increase driving speed\n"
+            " D               : decrease driving speed\n"
+            "\n"
             " Z               : open gripper\n"
             " X               : close gripper\n"
             " C               : lift up\n"
@@ -157,6 +201,30 @@ class ArrowKeyTeleop(Node):
     def _set_motion(self, motion):
         self._motion = motion
         self._last_motion_key_time = time.monotonic()
+
+    def _change_speed(self, direction):
+        self._linear_speed = min(
+            self._max_linear_speed,
+            max(
+                self._minimum_linear_speed,
+                self._linear_speed
+                + direction * self._linear_speed_step,
+            ),
+        )
+        self._angular_speed = min(
+            self._max_angular_speed,
+            max(
+                self._minimum_angular_speed,
+                self._angular_speed
+                + direction * self._angular_speed_step,
+            ),
+        )
+        print(
+            "Driving speed: "
+            f"linear {self._linear_speed:.2f} m/s, "
+            f"angular {self._angular_speed:.2f} rad/s",
+            flush=True,
+        )
 
     def _read_available_input(self):
         while select.select(
@@ -195,6 +263,12 @@ class ArrowKeyTeleop(Node):
                 self._last_motion_key_time = 0.0
                 continue
 
+            speed_direction = SPEED_KEYS.get(key)
+
+            if speed_direction is not None:
+                self._change_speed(speed_direction)
+                continue
+
             motion = COMBINATION_KEYS.get(key)
 
             if motion is None:
@@ -222,12 +296,8 @@ class ArrowKeyTeleop(Node):
             self._motion = None
             return velocity, gripper_command
 
-        linear_speed = float(
-            self.get_parameter("linear_speed").value
-        )
-        angular_speed = float(
-            self.get_parameter("angular_speed").value
-        )
+        linear_speed = self._linear_speed
+        angular_speed = self._angular_speed
 
         if self._motion == "forward":
             velocity.linear.x = linear_speed

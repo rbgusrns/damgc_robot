@@ -355,7 +355,8 @@ rviz2 -d /workspaces/isaac_ros-dev/rviz/vslam_nvblox.rviz
 
 빨강·초록·파랑 축이 뭉쳐 보이는 것은 여러 camera optical frame을 포함한 TF 표시다.
 3D 지도만 볼 때는 TF display를 끄거나 `map`, `odom`, `base_link`만 선택한다. 화면
-시점이 로봇을 따라가면 Views 패널의 Target Frame을 `map`으로 설정한다.
+기본 설정은 시점이 로봇을 따라가도록 Views 패널의 Target Frame을 `base_link`로
+설정한다. 지도 중심에 시점을 고정하려면 Target Frame을 `map`으로 바꾼다.
 
 RViz display를 추가하거나 삭제한 뒤에는 `File → Save Config`로 설정을 저장해야 한다.
 현재 저장소의 RViz 파일에는 NvbloxMesh, PointCloud2, Path, Odometry와 infra1 Image가

@@ -450,7 +450,7 @@ printf '  recording: %s\n' "${BAG_DIR}"
 printf '  capturing a 5-second stationary baseline...\n'
 sleep 5
 
-printf '[6/6] Starting arrow-key control. Space stops; Ctrl-C shuts everything down.\n'
+printf '[6/6] Starting arrow-key control. E/D changes speed; Space stops; Ctrl-C shuts everything down.\n'
 source_with_nounset_disabled "${REPO_ROOT}/install/setup.bash"
 ros2 run rescue_robot_bringup arrow_key_teleop.py --ros-args \
   -p linear_speed:=0.08 \

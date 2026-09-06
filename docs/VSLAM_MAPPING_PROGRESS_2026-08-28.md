@@ -22,11 +22,15 @@ Space는 즉시 정지하고 Ctrl-C는 실행기가 시작한 전체 stack을 �
 - 출력: `/leader/cmd_vel`
 - 위/아래 방향키: 전진/후진
 - 왼쪽/오른쪽 방향키: 제자리 좌/우 회전
+- E/D: 선속도와 각속도를 단계적으로 증가/감소
 - Space: 즉시 0속도
 - 키 반복이 0.25초 끊기면 자동 0속도
 - 노드 기본값: 직진 0.12 m/s, 회전 0.35 rad/s
 - 통합 실행기 기본값: 직진 0.08 m/s, 회전 0.25 rad/s
+- 속도 단계: 직진 0.02 m/s, 회전 0.05 rad/s (상한 0.25 m/s, 0.80 rad/s)
 - STM32 bridge에도 200 ms command watchdog이 적용됨
+- RViz Fixed Frame은 `map`, Current View Target Frame은 `base_link`로 설정해 지도는
+  고정하고 화면 중심은 로봇을 따라가도록 함
 
 ### 원클릭 실행기
 
