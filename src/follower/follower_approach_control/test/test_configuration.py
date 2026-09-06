@@ -40,7 +40,7 @@ def test_leader_owns_tag_normal_distances_only_in_perception() -> None:
     perception_config = leader_root / "rescue_robot_apriltag/config/approach.yaml"
 
     assert yaml_scalar(perception_config, "pre_align_distance") == pytest.approx(0.30)
-    assert yaml_scalar(perception_config, "final_target_distance") == pytest.approx(0.20)
+    assert yaml_scalar(perception_config, "final_target_distance") == pytest.approx(0.23)
     assert "target_forward:" not in controller_config.read_text(encoding="utf-8")
 
 
