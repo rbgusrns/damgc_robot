@@ -61,3 +61,18 @@
 - target ID 변경 및 priority/nearest 전환
 
 수동 절차는 `docs/MANUAL_STATE_TEST.md`를 따른다.
+
+## 현재 구현에 대한 추가 runtime 확인 항목
+
+위 결과는 2026-07-20 최초 camera-state 통합 기록이다. 이후 추가된 hybrid grace는 자동
+시험으로 검증했지만 실제 카메라/로봇 runtime 결과로 아직 판정하지 않았다. 다음을 함께
+관찰해야 한다.
+
+- `/follower/base_alignment/state`, `/follower/alignment/control_mode`
+- `/follower/alignment/command`, `/follower/approach/cmd_vel_raw`
+- `/follower/approach/enabled`
+- `base_stable_time=0.30`, `aligned_confirm_samples=3`
+- 두 tag-loss grace parameter가 모두 `0.30`
+- FINAL_APPROACH/STABILIZING tag dropout 동안 state/mode만 유지되고 raw velocity는 zero
+- grace 안 fresh source stamp 재검출 시 visual 복구, duplicate stamp에서는 timer 미reset
+- controller disable/enable 후 이전 ALIGNED latch 미잔류

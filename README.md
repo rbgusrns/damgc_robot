@@ -12,7 +12,7 @@
 
 ## 현재 구현 상태
 
-2026년 8월 29일 기준으로 저장소에서 확인되는 구현은 다음과 같습니다.
+2026년 9월 6일 기준으로 저장소에서 확인되는 구현은 다음과 같습니다.
 
 - 리더: URDF/RViz 모델, D435 RGB·depth, RGB 보정, AprilTag 검출, 중앙 depth CSV 측정,
   exact-stamp TF2 기반 `base_link` pose·metric·상태, raw approach controller와
@@ -20,6 +20,9 @@
 - 팔로워: USB 카메라, AprilTag 검출, 기존 camera-frame 상태, exact-stamp TF2 기반
   `base_link` pose·metric·상태, raw approach controller, STOP/APPROACH/COOPERATION
   command selector, 최종 safety guard와 `/follower/safe_cmd_vel`
+  - hybrid base 안정화는 `base_stable_time=0.30 s`와 fresh sample 3회 confirmation 사용
+  - FINAL_APPROACH/STABILIZING tag loss는 0.30 s 동안 state/mode만 유지하고 velocity는 zero
+  - blind final 기본값은 false이며 새 approach session마다 이전 ALIGNED latch reset
 - 추가 구현: STM32 I2C/UART binary protocol, IMU·wheel state 수신, `/cmd_vel`
   전달, wheel odometry 원시 계산, 엔코더·IMU/VSLAM dual EKF 융합 설정, 모터
   속도 PID와 watchdog

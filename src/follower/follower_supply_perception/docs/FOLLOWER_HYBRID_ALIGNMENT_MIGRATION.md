@@ -1,7 +1,7 @@
 # Follower hybrid AprilTag alignment migration
 
 - 기준 저장소: `/home/kde/damgc_robot`
-- 분석 기준 HEAD: `47843bb10423399adfd81a86641fc1c3798ed389`
+- 분석 기준 HEAD: `1f4d2edfcdfe15b5ac83979f2f7f8e345b7fc009`
 - 작성일: 2026-09-06
 - 상태: software implementation and automated tests complete; robot validation pending
 
@@ -40,6 +40,9 @@ camera driver/calibration/AprilTag detector 설정은 이 migration에서 수정
 | atomic API | Leader-specific typed msg | pose/state 독립 callbacks | Follower-specific typed msg | generation coherence tests |
 | command output | Leader controller path | Follower selector/guard path | 기존 Follower path 유지 | launch and package tests |
 | visual freshness | Leader timing contract | source stamp 중심 | source stamp=sample identity, monotonic receipt=dropout | duplicate/receipt tests |
+| final tag-loss grace | 0.20 s state/mode hold, zero command | 없음 | 동일 원칙, Follower 기본값 `0.30 s` | loss/reacquisition/expiry tests |
+| stabilizing tag-loss grace | 0.20 s stable-clock pause, zero command | 없음 | 동일 원칙, Follower 기본값 `0.30 s` | pause/recovery/expiry tests |
+| alignment confirmation | stable time + fresh samples + latch | stable time만 사용 | 0.30 s + fresh 3 samples + latch | duplicate/reset/session tests |
 | blind final | final-only odom fallback | 없음 | exact final-only gate, default disabled | abort/completion tests |
 
 Repository에는 generic alignment message package가 없고
@@ -62,15 +65,28 @@ authoritative input은 오직 `/follower/alignment/command`이며, 독립 pose/s
 3. `RECENTER`: tag bearing이 18 deg 이상이면 진입, 11 deg 이하면 이탈
 4. `FINAL_YAW_ALIGN`: pre-align 위치에서 final normal yaw 정렬
 5. `FINAL_APPROACH`: yaw가 4 deg 이내일 때 Follower의 0.25 m target으로 저속 접근
-6. `STABILIZING`: forward/lateral/yaw가 모두 tolerance 안인 상태를 0.8 s 확인
-7. `ALIGNED`: 안정 조건 완료
+6. `STABILIZING`: forward/lateral/yaw가 모두 tolerance 안인 상태를 0.30 s 유지하고,
+   이후 strictly newer source stamp를 가진 fresh observation 3개를 확인
+7. `ALIGNED`: 안정 조건과 fresh confirmation 완료; 같은 approach session과 선택 tag에서 latch
 8. `TAG_LOST`: invalid, stale, TF/normal 실패의 기본 fail-safe zero
 9. `BLIND_FINAL_APPROACH`: strict gate가 모두 참일 때만 가능한 예외적 저속 전진
 
 Near에서 range가 0.43 m를 넘으면 coarse로 복귀한다. Final approach 중 yaw error가
-8 deg를 넘으면 final yaw align으로 돌아간다. 새 visual sample이 invalid하면
-`TAG_LOST`; blind가 활성화된 동안 새 visual generation이 들어오면 blind 계획을
+8 deg를 넘으면 final yaw align으로 돌아간다. `FINAL_APPROACH` 또는 `STABILIZING`에서
+visual sample이 잠시 없어지면 0.30 s grace를 적용하고, 그 밖의 상태는 기존 일반 loss
+정책을 유지한다. Blind가 활성화된 동안 새 visual generation이 들어오면 blind 계획을
 취소하고 visual state machine으로 안전하게 복귀한다.
+
+Grace는 state/control mode 표시만 유지한다. `detected=false`, `tag_id=-1`, stale
+`target_pose` 미발행이므로 controller raw command는 zero다. `BLIND_FINAL_APPROACH`로
+바꾸거나 전진 권한을 주지 않는다. Grace 안에 strictly newer observation이 들어오면
+visual control로 복구한다. FINAL grace를 초과하면 blind가 disabled일 때 안전하게
+`TAG_LOST`로 전환한다. STABILIZING grace 중에는 안정화 elapsed clock을 멈추고 복구 후
+dropout 시간을 제외해 계산한다.
+
+`ALIGNED` latch는 선택 tag 변경, state-machine explicit reset, controller enable/disable로
+시작되는 새 approach session에서 reset된다. Session 전환 시 기존 processed stamp 이력은
+보존하므로 TF buffer의 과거 sample만으로 다음 접근이 즉시 `ALIGNED`가 되지 않는다.
 
 ## 4. USB timestamp 계약
 
@@ -87,10 +103,16 @@ Near에서 range가 0.43 m를 넘으면 coarse로 복귀한다. Final approach �
 visual data는 lost 처리된다. Blind handoff 관련 0.25/0.40 s 값은 활성화 전 실제 camera
 측정으로 다시 검증해야 한다.
 
+`blind_last_tag_max_age=0.25 s`는 `blind_final_approach_enabled=true`일 때만 blind handoff
+eligibility에 관여한다. 기본값 `false`에서는 이 값이 일반 visual tracking을 조기에
+`TAG_LOST`로 만들지 않는다. FINAL/STABILIZING grace timer도 새 source stamp에서만
+reset되며 duplicate/stale TF는 재검출로 인정하지 않는다.
+
 ## 5. Blind-final 안전 계약
 
-기본값은 `blind_final_approach_enabled: false`다. 비활성 상태에서 모든 tag loss는 zero
-command다. 활성화해도 직전의 새 visual generation이 정확히
+기본값은 `blind_final_approach_enabled: false`다. 비활성 상태에서 모든 tag loss와
+두 grace 구간의 command는 zero다. 활성화해도 grace 자체는 blind 전진을 의미하지 않고,
+grace 만료 후에만 기존 eligibility를 평가한다. 직전의 새 visual generation이 정확히
 `state=FINAL_APPROACH`, `mode=FINAL_APPROACH`였고 다음 조건을 모두 만족해야 한다.
 
 - last tag x가 0.35 m 이하이며 0.25 m target까지 잔여 거리가 0--0.10 m
@@ -151,10 +173,11 @@ colcon test --packages-select \
 colcon test-result --verbose
 ```
 
-2026-09-06 결과는 3개 수정 패키지 build 성공, 5개 패키지 235 tests,
-0 errors/failures/skips다. 자동시험은 geometry sign/normal/filter, 모든 hybrid transition,
-stability, stale/loss zero, atomic coherence, blind eligibility와 abort/completion,
-selector/guard 기존 동작을 포함한다.
+2026-09-06 최신 변경 결과는 `follower_supply_perception` 135 tests 통과, grace 관련
+targeted perception/controller tests 81개 통과, 두 변경 패키지 build 성공이다.
+자동시험은 geometry sign/normal/filter, 모든 hybrid transition, 0.30 s grace 경계,
+reacquisition/expiry, stale/loss zero, duplicate rejection, fresh reset, ALIGNED session reset,
+atomic coherence, blind eligibility와 abort/completion을 포함한다.
 
 ## 8. Software-only 검증
 
@@ -180,7 +203,9 @@ selector/guard 기존 동작을 포함한다.
 
 4. Static tag를 중앙/좌/우, far/near/final 위치와 기울기로 이동한다. Atomic message의
    pose/mode/state 한 generation과 raw command 방향이 일치하는지 확인한다.
-5. Tag를 가리면 다음 publish cycle부터 `TAG_LOST`와 raw zero가 나와야 한다.
+5. Tag를 가리면 raw command는 다음 publish cycle부터 zero여야 한다. 직전 phase가
+   `FINAL_APPROACH` 또는 `STABILIZING`이면 state/mode는 최대 0.30 s 유지된 뒤
+   `TAG_LOST`가 되고, 다른 phase는 기존 loss 정책을 따른다.
 6. `/follower/safe_cmd_vel` publisher는 velocity guard 하나, hardware subscriber는 0이어야
    한다. 이 단계에서 guard를 enable하지 않는다.
 7. runtime topic/frame/parameter dump에 `/leader/`, `leader/tag`, Leader camera/odom 이름이
@@ -197,7 +222,8 @@ Blind는 계속 disabled로 둔 채 다음을 한 항목씩 확인한다.
 2. guard를 짧게 열어 positive linear `cmd_vel`이 실제 직진 전진인지 확인
 3. positive/negative angular command의 회전 방향 확인
 4. visual-only coarse/near/recenter/final-yaw/final-approach/stabilizing/aligned 확인
-5. tag loss, TF failure, node stop, selector timeout, guard disable에서 즉시 정지 확인
+5. tag loss, TF failure, node stop, selector timeout, guard disable에서 즉시 zero 확인.
+   FINAL_APPROACH/STABILIZING에서는 state/mode만 0.30 s 유지되는지도 별도로 확인
 6. `/follower/odom/raw` source와 frequency, 직진 distance 증가 방향, yaw sign 확인
 7. 반복 직진에서 lateral drift와 reset/jump 분포 측정
 8. final target 0.25 m가 Follower 기구/TCP에서 안전한지 측정 후 별도 tuning change로 처리
@@ -234,6 +260,10 @@ distance tuning을 함께 변경하지 않는다.
 9. guard 우회 publisher 생성: raw output만 controller가 소유, launch path tests
 10. 기존 config 이름 무시: `target_forward`, `sample_sync_tolerance`, `allow_reverse`를
     compatibility parameter로 유지하고 atomic/forward-only 제어에서는 no-op 처리
+11. Grace를 blind 전진으로 오해: grace command는 pose 없이 발행하고 detected/tag를
+    invalid로 표시하며 controller zero tests로 고정
+12. 이전 ALIGNED latch가 다음 접근에 잔류: `/follower/approach/enabled` session event에서
+    perception state machines와 latch를 reset하고 새 source stamp를 요구
 
 Hardware 동작은 이 문서 작성 시점에 검증하지 않았으며 software 성공으로 대신 기록하지
 않는다.

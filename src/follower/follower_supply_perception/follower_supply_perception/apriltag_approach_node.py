@@ -149,6 +149,9 @@ class AprilTagApproachNode(Node):
         self._last_valid_receipt: Optional[float] = None
         self._last_valid_yaw_error: Optional[float] = None
         self._last_valid_cross_track: Optional[float] = None
+        self._last_fresh_final_observation_receipt: Optional[float] = None
+        self._final_approach_grace_eligible = False
+        self._final_approach_grace_active = False
         self._last_odom: Optional[Tuple[float, float, float, float, float]] = None
         self._blind_active = False
         self._blind_completed = False
@@ -157,6 +160,9 @@ class AprilTagApproachNode(Node):
         self._blind_previous_odom: Optional[Tuple[float, float, float]] = None
         self._blind_start_receipt: Optional[float] = None
         self._last_odom_progress = 0.0
+        self._approach_enabled_sub = self.create_subscription(
+            Bool, "approach/enabled", self._on_approach_enabled, 10
+        )
         self._timer = self.create_timer(1.0 / self._publish_rate, self._on_timer)
 
     def _declare_parameters(self) -> None:
@@ -182,7 +188,10 @@ class AprilTagApproachNode(Node):
         self.declare_parameter("base_forward_tolerance", 0.03)
         self.declare_parameter("base_lateral_tolerance", 0.02)
         self.declare_parameter("base_bearing_tolerance_deg", 5.0)
-        self.declare_parameter("base_stable_time", 0.8)
+        self.declare_parameter("base_stable_time", 0.30)
+        self.declare_parameter("aligned_confirm_samples", 3)
+        self.declare_parameter("stabilizing_tag_loss_grace_sec", 0.30)
+        self.declare_parameter("final_approach_tag_loss_grace_sec", 0.30)
         self.declare_parameter("pre_align_distance", 0.35)
         self.declare_parameter("orientation_engage_distance", 0.40)
         self.declare_parameter("orientation_disengage_distance", 0.43)
@@ -232,6 +241,13 @@ class AprilTagApproachNode(Node):
             value("base_bearing_tolerance_deg")
         )
         self._base_stable_time = float(value("base_stable_time"))
+        self._aligned_confirm_samples = int(value("aligned_confirm_samples"))
+        self._stabilizing_tag_loss_grace_sec = float(
+            value("stabilizing_tag_loss_grace_sec")
+        )
+        self._final_approach_tag_loss_grace_sec = float(
+            value("final_approach_tag_loss_grace_sec")
+        )
         self._pre_align_distance = float(value("pre_align_distance"))
         self._orientation_engage_distance = float(value("orientation_engage_distance"))
         self._orientation_disengage_distance = float(
@@ -283,6 +299,8 @@ class AprilTagApproachNode(Node):
             final_realign_yaw_error_deg=self._final_realign_yaw_error_deg,
             stable_time=self._base_stable_time,
             sample_timeout=self._tag_receipt_timeout,
+            aligned_confirm_samples=self._aligned_confirm_samples,
+            stabilizing_tag_loss_grace_sec=self._stabilizing_tag_loss_grace_sec,
         )
 
     def _validate_parameters(self) -> None:
@@ -323,6 +341,8 @@ class AprilTagApproachNode(Node):
             self._blind_max_lateral_deviation,
             self._blind_max_yaw_deviation_deg,
             self._blind_reverse_tolerance,
+            self._stabilizing_tag_loss_grace_sec,
+            self._final_approach_tag_loss_grace_sec,
         )
         if not all(isfinite(item) for item in numeric):
             raise ValueError("Numeric parameters must be finite")
@@ -340,6 +360,10 @@ class AprilTagApproachNode(Node):
             raise ValueError("publish_rate and filter_window must be positive")
         if self._tf_lookup_timeout < 0.0:
             raise ValueError("tf_lookup_timeout must not be negative")
+        if self._final_approach_tag_loss_grace_sec < 0.0:
+            raise ValueError(
+                "final_approach_tag_loss_grace_sec must not be negative"
+            )
         if not self._pre_align_distance > self._base_target_forward > 0.0:
             raise ValueError("pre-align distance must exceed Follower final distance")
         if self._blind_activation_max_tag_x <= 0.0:
@@ -382,15 +406,26 @@ class AprilTagApproachNode(Node):
             observations, list(candidate_ids), self._selection_mode
         )
         if selected is None:
+            if self._publish_final_approach_grace(receipt_now):
+                return
             self._publish_lost(ros_now, receipt_now)
             return
         is_new = self._accept_observation_stamp(selected, receipt_now)
+        if is_new and getattr(self, "_final_approach_grace_active", False):
+            if self._expire_final_approach_grace(ros_now, receipt_now):
+                return
         sample_receipt = self._last_observation_receipts.get(selected.tag_id)
         if self._blind_active:
             if is_new:
                 self._clear_blind_plan()
             else:
                 self._publish_blind_cycle(ros_now, receipt_now)
+                return
+        if not is_new:
+            if self._publish_final_approach_grace(receipt_now):
+                return
+            if self._last_logged_base_state == ApproachState.STABILIZING:
+                self._publish_lost(ros_now, receipt_now)
                 return
         if sample_receipt is None:
             self._publish_lost(ros_now, receipt_now)
@@ -400,7 +435,8 @@ class AprilTagApproachNode(Node):
             self._publish_lost(ros_now, receipt_now)
             return
         if (
-            not is_new
+            getattr(self, "_blind_final_approach_enabled", False)
+            and not is_new
             and self._last_valid_receipt is not None
             and receipt_age >= self._blind_last_tag_max_age
         ):
@@ -463,6 +499,22 @@ class AprilTagApproachNode(Node):
         ] = observation.stamp_nanoseconds
         self._last_observation_receipts[observation.tag_id] = receipt_now
         return True
+
+    def _on_approach_enabled(self, message: Bool) -> None:
+        """Reset all mission-temporal state at an approach session boundary."""
+        self._translation_filter.reset()
+        self._normal_filter.reset()
+        self._state_machine.reset()
+        self._base_state_machine.reset()
+        self._active_tag_id = None
+        self._clear_final_sample()
+        self._clear_final_approach_grace()
+        self._clear_blind_plan()
+        self._blind_completed = False
+        self.get_logger().info(
+            "Approach session state reset on controller %s"
+            % ("enable" if message.data else "disable")
+        )
 
     def _on_odom(self, message: Odometry) -> None:
         receipt = time.monotonic()
@@ -543,6 +595,85 @@ class AprilTagApproachNode(Node):
         self._last_valid_receipt = None
         self._last_valid_yaw_error = None
         self._last_valid_cross_track = None
+
+    def _record_final_approach_observation(
+        self,
+        decision: AlignmentDecision,
+        receipt_now: float,
+        is_new: bool,
+    ) -> None:
+        """Arm visual grace only from a fresh FINAL_APPROACH observation."""
+        if not is_new:
+            return
+        is_final_approach = (
+            decision.state == ApproachState.FINAL_APPROACH
+            and decision.mode == ControlMode.FINAL_APPROACH
+        )
+        if not is_final_approach:
+            self._clear_final_approach_grace()
+            return
+        if self._final_approach_grace_active:
+            self.get_logger().info(
+                "FINAL_APPROACH: fresh tag reacquired; resuming visual control"
+            )
+        self._last_fresh_final_observation_receipt = receipt_now
+        self._final_approach_grace_eligible = True
+        self._final_approach_grace_active = False
+
+    def _clear_final_approach_grace(self) -> None:
+        self._last_fresh_final_observation_receipt = None
+        self._final_approach_grace_eligible = False
+        self._final_approach_grace_active = False
+
+    def _publish_final_approach_grace(self, receipt_now: float) -> bool:
+        """Hold the final phase with no stale target during a short dropout."""
+        ros_now = self.get_clock().now().nanoseconds / 1.0e9
+        if self._expire_final_approach_grace(ros_now, receipt_now):
+            return True
+        if not self._final_approach_grace_eligible:
+            return False
+        if not self._final_approach_grace_active:
+            self.get_logger().info(
+                "FINAL_APPROACH: tag temporarily lost; holding zero velocity"
+            )
+        self._final_approach_grace_active = True
+        self._detected_pub.publish(Bool(data=False))
+        self._tag_id_pub.publish(Int32(data=-1))
+        decision = AlignmentDecision(
+            ApproachState.FINAL_APPROACH, ControlMode.FINAL_APPROACH
+        )
+        self._publish_atomic_command(None, decision)
+        self._control_mode_pub.publish(String(data=decision.mode.value))
+        self._base_state_pub.publish(String(data=decision.state.value))
+        self._publish_blind_diagnostics(False)
+        self._log_base_state_change(decision.state)
+        return True
+
+    def _expire_final_approach_grace(
+        self, ros_now: float, receipt_now: float
+    ) -> bool:
+        """Run normal loss handling after the monotonic grace deadline."""
+        last_fresh = self._last_fresh_final_observation_receipt
+        if not self._final_approach_grace_eligible or last_fresh is None:
+            return False
+        age = receipt_now - last_fresh
+        if (
+            not isfinite(age)
+            or age < 0.0
+            or age > self._final_approach_tag_loss_grace_sec + 1.0e-9
+        ):
+            if self._final_approach_grace_active:
+                self.get_logger().info(
+                    "FINAL_APPROACH: tag loss grace expired; entering TAG_LOST"
+                )
+            self._clear_final_approach_grace()
+            self._publish_lost(
+                ros_now,
+                receipt_now,
+                allow_blind=self._blind_final_approach_enabled,
+            )
+            return True
+        return False
 
     def _blind_plan(
         self, ros_now: float, receipt_now: float
@@ -658,7 +789,9 @@ class AprilTagApproachNode(Node):
             ApproachState.FINAL_APPROACH, ControlMode.BLIND_FINAL_APPROACH
         )
 
-    def _publish_lost(self, ros_now: float, receipt_now: float) -> None:
+    def _publish_lost(
+        self, ros_now: float, receipt_now: float, *, allow_blind: bool = True
+    ) -> None:
         if self._blind_completed:
             self._publish_completed_cycle(ros_now)
             return
@@ -668,7 +801,7 @@ class AprilTagApproachNode(Node):
             self._state_pub.publish(String(data=ApproachState.TAG_LOST.value))
             self._publish_blind_cycle(ros_now, receipt_now)
             return
-        planned = self._blind_plan(ros_now, receipt_now)
+        planned = self._blind_plan(ros_now, receipt_now) if allow_blind else None
         self._translation_filter.reset()
         self._normal_filter.reset()
         self._active_tag_id = None
@@ -696,6 +829,9 @@ class AprilTagApproachNode(Node):
 
     def _publish_base_lost(self, ros_now: float, receipt_now: float) -> None:
         del ros_now
+        clear_grace = getattr(self, "_clear_final_approach_grace", None)
+        if clear_grace is not None:
+            clear_grace()
         self._normal_filter.reset()
         decision = self._base_state_machine.update(None, receipt_now, None)
         self._publish_atomic_command(None, decision)
@@ -785,7 +921,11 @@ class AprilTagApproachNode(Node):
             ),
             receipt_now,
             self._active_tag_id,
+            is_new,
         )
+        record_final = getattr(self, "_record_final_approach_observation", None)
+        if record_final is not None:
+            record_final(decision, receipt_now, is_new)
         self._remember_last_valid_final_sample(
             metrics, geometry, decision, sample_receipt, is_new
         )

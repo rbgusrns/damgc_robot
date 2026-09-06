@@ -417,7 +417,8 @@ Guard가 disabled인 동안 다음을 확인한다.
 - final 구간에서 `FINAL_YAW_ALIGN`, `FINAL_APPROACH`
 - target에서 `STABILIZING` 후 `ALIGNED`
 - atomic message의 pose, mode, state가 같은 cycle에서 일치
-- tag를 가리면 `TAG_LOST`와 raw zero
+- tag를 가리면 raw zero. FINAL_APPROACH/STABILIZING이면 state/mode는 최대 0.30 s 유지된
+  뒤 `TAG_LOST`, 다른 phase는 기존 loss 정책 적용
 
 이 단계에서 상태/sign이 하나라도 틀리면 guard를 열지 않는다.
 
@@ -447,8 +448,13 @@ emergency stop을 사용한다.
 4. RECENTER 진입 시 전진 억제와 center 회복
 5. FINAL_YAW_ALIGN에서 회전만 수행
 6. FINAL_APPROACH에서 제한된 저속 전진
-7. position과 yaw가 안정된 뒤에만 `ALIGNED`
-8. tag loss 시 즉시 zero
+7. position과 yaw를 0.30 s 유지하고 fresh sample 3회 확인 뒤에만 `ALIGNED`
+8. tag loss 시 즉시 zero. FINAL_APPROACH/STABILIZING의 state/control mode만 0.30 s grace
+   동안 유지되고, pose나 blind-forward command가 나오지 않아야 함
+9. grace 안에 strictly newer tag sample이 들어오면 visual control로 복구하고, duplicate
+   TF만 반복될 때는 grace timer가 reset되지 않는지 확인
+10. controller를 disable 후 enable해 새 approach session을 시작하면 이전 `ALIGNED` latch가
+    남지 않고 fresh tag sample부터 다시 판정하는지 확인
 
 각 run 사이에는 guard를 닫고 robot/tag 위치와 log를 확인한다. 한 번에 distance, gain,
 camera extrinsic을 함께 tuning하지 않는다.
@@ -459,6 +465,9 @@ Blind-final은 계속 `false`로 둔다.
 
 ```bash
 ros2 param get /follower/apriltag_approach blind_final_approach_enabled
+ros2 param get /follower/apriltag_approach stabilizing_tag_loss_grace_sec
+ros2 param get /follower/apriltag_approach final_approach_tag_loss_grace_sec
+ros2 topic echo /follower/approach/enabled
 ros2 topic hz /follower/odom/raw
 ros2 topic echo /follower/odom/raw
 ros2 topic echo /follower/alignment/last_valid_tag_x

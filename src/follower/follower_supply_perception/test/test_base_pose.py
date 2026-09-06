@@ -276,7 +276,7 @@ def base_harness(tf_buffer: object, now_ns: int = 12_500_000_000) -> SimpleNames
         final_lateral_tolerance=0.02,
         final_yaw_tolerance_deg=4.0,
         final_realign_yaw_error_deg=8.0,
-        stable_time=0.8,
+        stable_time=0.30,
         sample_timeout=1.0,
     )
     harness = SimpleNamespace(
@@ -419,7 +419,7 @@ def test_tf_failure_or_stale_pose_skips_base_pose_and_metrics(failure: str) -> N
 def test_camera_lost_publishes_only_loss_outputs_and_base_lost() -> None:
     thresholds = BaseAlignmentThresholds(
         0.40, 0.43, 8.0, 3.0, 18.0, 11.0, 6.0,
-        0.03, 0.03, 0.02, 4.0, 8.0, 0.8, 1.0
+        0.03, 0.03, 0.02, 4.0, 8.0, 0.30, 1.0
     )
     harness = SimpleNamespace(
         _translation_filter=SimpleNamespace(reset=lambda: None),

@@ -3,7 +3,8 @@
 ## 문서 목적
 
 이 문서는 [개발 계획서](Plan.md)를 실행 상태로 변환한 관리 문서다. 기준일은
-**2026년 7월 27일**이며, 일정상 3주차(7월 27일~8월 2일)의 첫날이다.
+**2026년 7월 27일**이며, 일정상 3주차(7월 27일~8월 2일)의 첫날이다. 2026년 9월 6일
+AprilTag software pipeline 후속 구현 상태는 아래 관련 행과 팔로워 절에 추가 반영했다.
 
 상태 표시는 다음 기준을 사용한다.
 
@@ -22,7 +23,7 @@
 | 카메라 기반 생존자 탐지 | 미구현 | 사람 탐지 노드 없음 |
 | depth 기반 생존자 3차원 위치 | 미구현 | 중앙 depth CSV 도구는 있으나 사람 검출 결과와 결합되지 않음 |
 | Nav2 자율주행 | 미구현 | Nav2 구성·지도·주행 시험 없음 |
-| AprilTag 물품 인식·정밀 접근 | 부분 완료 | 양 로봇 검출과 팔로워 상태 판정 완료, `base_link` 변환·저속 제어 없음 |
+| AprilTag 물품 인식·정밀 접근 | 부분 완료 | 양 로봇 camera/base alignment와 guarded software velocity 구현; 실제 접근·파지 검증 필요 |
 | 그리퍼 물품 파지 | 확인 필요 | URDF 형상만 있고 제어 코드·실물 시험 근거 없음 |
 | 경량 물품 단독 운반 | 미구현 | 접근·파지·주행 연결 없음 |
 | 중량 물품 협동 운반 | 부분 완료 | 리더 DDS 상태·속도 게이트 구현, 팔로워 heartbeat/하드웨어 주행 시험 필요 |
@@ -45,9 +46,14 @@
 - 거리·좌우 오차·수평각 계산
 - TF timeout, 중앙값 필터와 9개 접근 상태
 - ROS 비의존 단위 시험과 전체/상태 전용 launch
+- exact-stamp `base_link` hybrid alignment와 atomic alignment command
+- approach controller, command selector, final velocity guard와 `/follower/safe_cmd_vel`
+- `base_stable_time=0.30 s`, fresh confirmation 3회와 ALIGNED session latch/reset
+- FINAL_APPROACH/STABILIZING 0.30 s tag-loss grace; tag 미검출 중 velocity zero
+- source stamp/monotonic receipt freshness 분리와 blind-final 기본 OFF
 
-이 범위는 인지와 상태 판단까지다. 모터, STM32, 그리퍼 또는 협동 운반이 동작한다는
-의미가 아니다.
+이 범위는 software command pipeline까지다. 실제 모터 주행, 그리퍼 또는 협동 운반이
+검증됐다는 의미가 아니다.
 
 ## 주차 게이트 점검
 
@@ -105,8 +111,8 @@
 
 ### P2 — 이미 앞서 구현된 기능의 현장 검증
 
-1. 태그를 좌우·전후로 이동해 팔로워 상태와 부호 확인
-2. AprilTag pose를 카메라 frame에서 차체 또는 그리퍼 TCP 기준으로 변환
+1. 태그를 좌우·전후로 이동해 팔로워 hybrid 상태와 부호 확인
+2. FINAL_APPROACH/STABILIZING 0.30 s grace, zero velocity와 재검출 복구 실측
 3. 실제 물품과 그리퍼 형상으로 목표 거리·허용 오차 재측정
 4. 4주차 저속 정렬 제어에 사용할 안전 제한과 watchdog 확정
 

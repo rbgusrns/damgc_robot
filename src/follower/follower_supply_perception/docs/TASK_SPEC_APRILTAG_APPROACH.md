@@ -1,5 +1,9 @@
 # AprilTag 상대 위치 기반 상태 판단 노드 작업 명세
 
+> 이 문서의 1--10절은 최초 camera-frame 상태 노드 명세다. 현재 hybrid base alignment,
+> atomic command, tag-loss grace와 command safety 확장은 11절 및
+> `FOLLOWER_HYBRID_ALIGNMENT_MIGRATION.md`를 함께 적용한다.
+
 ## 1. 목적과 범위
 
 USB 카메라와 `apriltag_ros`가 제공하는 TF를 읽어 카메라 기준 AprilTag 상대 위치를
@@ -118,7 +122,8 @@ STABILIZING/ALIGNED`이다. 경계값은 허용 범위에 포함한다. 유실, 
 | `distance_tolerance` | `0.02` | m, 음수 불가 |
 | `lateral_tolerance` | `0.02` | m, 음수 불가 |
 | `angle_tolerance_deg` | `5.0` | degree, 음수 불가 |
-| `tag_timeout` | `0.3` | s, 음수 불가 |
+| `tag_timeout` | `2.0` | s, source-stamp sanity bound |
+| `tag_receipt_timeout` | `0.35` | s, local monotonic dropout bound |
 | `stable_time` | `0.8` | s, 음수 불가 |
 | `publish_rate` | `20.0` | Hz, 양수 |
 | `filter_window` | `5` | 1 이상의 표본 수 |
@@ -191,3 +196,26 @@ clock과 TF timestamp 차이를 반드시 검사해야 한다. nearest 모드는
 
 추가 시스템 패키지 설치가 필요하면 `sudo`를 실행하지 않는다. 필요한 Ubuntu/ROS
 패키지 이름과 필요 이유를 먼저 사용자에게 보고한다.
+
+## 11. 현재 hybrid base alignment 확장 명세
+
+1. Camera-state `stable_time=0.8 s`와 별도로 base alignment는
+   `base_stable_time=0.30 s`를 사용한다.
+2. Base 안정 시간이 지난 뒤 strictly newer source stamp의 valid observation 3개를
+   확인해야 `ALIGNED`로 latch한다. Duplicate TF는 confirmation으로 세지 않는다.
+3. `FINAL_APPROACH`와 `STABILIZING`에서 tag가 끊기면 각각 0.30 s grace를 적용한다.
+   Grace 동안 state/control mode는 유지하지만 detected false, tag ID -1, stale target
+   pose 미사용을 보장하며 raw `cmd_vel`은 zero여야 한다.
+4. Grace는 blind forward를 허가하지 않는다. `blind_final_approach_enabled=false`가
+   기본값이며 `blind_last_tag_max_age`는 blind가 enabled일 때만 eligibility에 관여한다.
+5. FINAL grace 안에 fresh observation이 들어오면 visual control로 복구한다.
+   STABILIZING grace 복구 시 dropout 시간은 안정화 elapsed에서 제외한다. Grace를
+   초과하면 blind OFF 상태에서는 `TAG_LOST`와 zero다.
+6. Source header stamp는 sample identity/exact TF 및 `tag_timeout=2.0 s` sanity bound에,
+   local monotonic receipt는 `tag_receipt_timeout=0.35 s` dropout 판정에 사용한다.
+   Duplicate/stale sample은 receipt/grace timer를 reset하지 않는다.
+7. `ALIGNED` latch는 선택 tag 변경, explicit reset 및 controller enable/disable로 시작되는
+   새 approach session에서 반드시 reset한다. 과거 TF sample만으로 새 session이 즉시
+   `ALIGNED`가 되어서는 안 된다.
+8. Atomic `/follower/alignment/command`가 controller의 authoritative 입력이다. 기존
+   pose/state 토픽은 diagnostics이며 독립 generation을 섞어 제어하지 않는다.

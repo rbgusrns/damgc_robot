@@ -44,6 +44,7 @@ class ApproachControllerNode(Node):
         self._declare_parameters()
         self._load_and_validate_parameters()
         self._raw_pub = self.create_publisher(Twist, "approach/cmd_vel_raw", 10)
+        self._enabled_pub = self.create_publisher(Bool, "approach/enabled", 10)
         self._command_sub = self.create_subscription(
             FollowerAlignmentCommand,
             "alignment/command",
@@ -66,6 +67,7 @@ class ApproachControllerNode(Node):
         self._command_received_seconds: Optional[float] = None
         self._command_state: Optional[str] = None
         self._command_mode: Optional[str] = None
+        self._enabled_pub.publish(Bool(data=self._enabled))
         self._timer = self.create_timer(1.0 / self._publish_rate, self._on_timer)
 
     def _declare_parameters(self) -> None:
@@ -206,6 +208,7 @@ class ApproachControllerNode(Node):
     ) -> SetBool.Response:
         self._enabled = bool(request.data)
         self._invalidate_sample()
+        self._enabled_pub.publish(Bool(data=self._enabled))
         response.success = True
         response.message = (
             "approach controller enabled; waiting for a fresh coherent sample"

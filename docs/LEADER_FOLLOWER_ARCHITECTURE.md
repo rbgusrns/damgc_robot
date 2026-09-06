@@ -133,7 +133,13 @@ image_proc/rectify_node → /follower/camera/image_rect
 /follower/apriltag/apriltag → tag TF (예: tag36h11:0)
         │
         ▼
-/follower/apriltag_approach → /follower/supply/*, /follower/alignment/state
+/follower/apriltag_approach
+        ├→ /follower/supply/*, camera/base alignment diagnostics
+        └→ /follower/alignment/command (atomic pose/mode/state)
+                ▼
+        approach_controller → command_selector → velocity_guard
+                ▼
+        /follower/safe_cmd_vel
 ```
 
 접근 노드는 `follower_camera_optical_frame`에서 태그 TF를 조회하고, 유효한 관측을 중앙값 필터로 안정화한 뒤 다음 값을 발행합니다.
@@ -148,6 +154,9 @@ image_proc/rectify_node → /follower/camera/image_rect
 | `/follower/supply/straight_distance` | `Float64` | 전방 거리 |
 | `/follower/supply/angle` | `Float64` | 접근 각도 |
 | `/follower/alignment/state` | `String` | 접근 상태 |
+| `/follower/alignment/command` | `FollowerAlignmentCommand` | 한 generation의 pose/mode/state |
+| `/follower/base_alignment/state` | `String` | hybrid base alignment 상태 |
+| `/follower/approach/enabled` | `Bool` | approach session 및 latch reset event |
 
 ## 상태 판단
 
@@ -157,11 +166,18 @@ image_proc/rectify_node → /follower/camera/image_rect
 거리가 멂             → APPROACH
 거리가 가까움         → TOO_CLOSE
 좌우 오차가 큼         → FINE_ALIGN_LEFT / FINE_ALIGN_RIGHT
-조건을 stable_time 동안 확인 중 → STABILIZING
-거리·좌우·각도 조건을 stable_time 동안 만족 → ALIGNED
+base 조건을 0.30 s 동안 확인 중 → STABILIZING
+0.30 s 안정 + fresh observation 3회 → ALIGNED latch
 ```
 
 상태 이름과 임계값의 정확한 정의는 `src/follower/follower_supply_perception/docs/`를 기준으로 관리합니다.
+
+FINAL_APPROACH와 STABILIZING의 짧은 tag loss는 각각 0.30 s 동안 state/control mode만
+유지한다. 이때 detected/tag는 invalid이고 stale pose를 사용하지 않아 velocity는 zero다.
+Grace는 blind forward가 아니며 blind final 기본값은 false다. Source stamp는 sample
+identity, local monotonic receipt는 dropout 판정에 사용하고 duplicate TF는 grace를
+reset하지 않는다. Controller enable/disable로 새 approach session이 시작되면 이전
+ALIGNED latch도 reset한다.
 
 ## 향후 연결 지점
 
@@ -171,16 +187,16 @@ image_proc/rectify_node → /follower/camera/image_rect
 `/cooperation/target_velocity`로 전달합니다. heartbeat 또는 명령이 timeout되면
 0 속도를 발행하며, fault 상태는 재-enable 전에 정지 상태를 유지합니다.
 
-상위 행동 노드는 `/follower/alignment/state`와 상대 위치 토픽을 구독해 정밀 접근
-후보 명령을 만들 수 있습니다. 다만 상태 문자열을 바로 모터 명령으로 변환하지 않고,
-다음 안전 경계를 거쳐야 합니다.
+Follower 정밀 접근 controller는 atomic `/follower/alignment/command`만 authoritative
+입력으로 사용하며 진단용 pose/state topic의 서로 다른 generation을 조합하지 않습니다.
+명령은 다음 안전 경계를 거칩니다.
 
 ```text
-AprilTag pose·상태
-  → 차체/TCP 기준 변환
-  → 저속 접근 제어와 속도 제한
-  → 장애물·TF stale·통신 watchdog·E-stop 검사
-  → /follower/cmd_vel
+AprilTag atomic pose·mode·state
+  → follower_approach_control
+  → follower_command_selector
+  → follower_control/velocity_guard
+  → /follower/safe_cmd_vel
   → Orin–STM32 bridge
 ```
 

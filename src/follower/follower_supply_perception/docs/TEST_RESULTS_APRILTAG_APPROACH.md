@@ -86,3 +86,22 @@ Summary: 37 tests, 0 errors, 0 failures, 0 skipped
 이 결과는 순수 상태·수학 로직의 결정적 동작을 입증한다. 실시간 파이프라인 시작과
 필수 토픽은 별도 통합 검사에서 확인했지만, 물리 상태 전이와 최종 RViz Pose 확인은
 여전히 사용자가 직접 수행해야 한다.
+
+## 2026-09-06 hybrid grace 회귀 시험
+
+현재 저장소 `/home/kde/damgc_robot`에서 다음 항목을 추가 검증했다.
+
+- FINAL_APPROACH 0.30 s 이내 dropout은 state/mode를 유지하면서 pose 없이 zero command
+- FINAL_APPROACH grace 안 fresh 재검출은 visual control 복구 및 timer reset
+- FINAL_APPROACH grace 초과는 blind OFF에서 `TAG_LOST`
+- STABILIZING 0.30 s grace, zero control과 stable elapsed pause/recovery
+- FAR/COARSE 일반 loss의 기존 safe behavior
+- blind OFF에서 `blind_last_tag_max_age`만으로 일반 visual state가 조기 loss되지 않음
+- blind ON의 기존 eligibility 유지
+- duplicate/stale sample은 observation/confirmation/grace reset으로 인정하지 않음
+- selected tag 변경, explicit reset, 새 approach session에서 ALIGNED latch reset
+- grace state/mode가 유지돼도 controller의 detected/tag safety gate로 raw velocity zero
+
+실행 결과는 grace 관련 targeted perception/controller tests `81 passed`,
+`follower_supply_perception` 전체 `135 passed`, 두 변경 패키지 build 성공이다. 이 수치는
+2026-07-20 최초 camera-state 37개 시험 기록을 대체하는 것이 아니라 후속 회귀 시험이다.

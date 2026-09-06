@@ -21,6 +21,10 @@
 
 팔로워의 AprilTag 접근 상태 노드 상세 명세와 시험 기록은
 `src/follower/follower_supply_perception/docs/`에서 관리합니다.
+현재 hybrid 알고리즘, 0.30 s tag-loss grace, freshness 분리와 ALIGNED session reset은
+[`FOLLOWER_HYBRID_ALIGNMENT_MIGRATION.md`](../src/follower/follower_supply_perception/docs/FOLLOWER_HYBRID_ALIGNMENT_MIGRATION.md)를,
+전체 runtime 파라미터는
+[`FOLLOWER_BASE_LINK_VELOCITY_PIPELINE_VALIDATION_GUIDE.md`](../src/follower/follower_supply_perception/docs/FOLLOWER_BASE_LINK_VELOCITY_PIPELINE_VALIDATION_GUIDE.md)를 기준으로 합니다.
 
 ## 문서 기준
 

@@ -2,8 +2,9 @@
 
 - 문서 경로: `docs/APRILTAG_APPROACH_NODE_GUIDE.md`
 - 패키지: `follower_supply_perception`
-- 작업공간: `/home/kde/ros2_ws`
+- 현재 저장소: `/home/kde/damgc_robot`
 - 작성일: 2026-07-20
+- 현재 구현 갱신: 2026-09-06
 
 ## 1. 목적과 완료 범위
 
@@ -17,7 +18,28 @@ USB 카메라로 검출한 AprilTag의 카메라 기준 상대 TF를 읽어 거�
 - 안정 조건 연속 유지 후 `ALIGNED` 판정
 - 카메라 없는 단위 테스트 37개와 실제 ROS 그래프 통합 검사
 
-이 버전은 인식과 상태 판정만 수행한다. 로봇 이동이나 물체 조작은 수행하지 않는다.
+위 목록은 최초 camera-state 구현 범위다. 현재 perception 노드는 exact-stamp
+`base_link` 변환, hybrid base alignment와 atomic alignment command까지 제공한다.
+속도 계산·소유권 선택·최종 safety는 각각 `follower_approach_control`,
+`follower_command_selector`, `follower_control`에 분리되어 있으며 perception 노드 자체는
+`cmd_vel`을 발행하지 않는다.
+
+### 1.1 현재 hybrid 안정화 및 tag-loss 계약
+
+- `base_stable_time=0.30 s` 후 strictly newer source stamp의 observation 3개가 확인되어야
+  `ALIGNED`로 latch한다.
+- `FINAL_APPROACH`와 `STABILIZING` tag loss에는 각각 `0.30 s` grace를 적용한다. Grace는
+  state/control mode만 유지하며 detected/tag를 invalid로 발행하고 stale pose를 보내지
+  않으므로 raw `cmd_vel`은 zero다.
+- Grace는 blind forward가 아니다. `blind_final_approach_enabled` 기본값은 `false`이며,
+  `blind_last_tag_max_age`는 blind가 enabled일 때만 eligibility에 사용한다.
+- Source header stamp는 sample identity와 `tag_timeout=2.0 s` sanity 검사에 사용하고,
+  local monotonic receipt는 `tag_receipt_timeout=0.35 s` dropout 판정에 사용한다.
+  Duplicate/stale sample은 새 observation 또는 grace reset으로 인정하지 않는다.
+- Grace 안에 fresh observation이 들어오면 visual control로 복구한다. STABILIZING에서는
+  dropout 시간을 stable elapsed에서 제외한다.
+- 선택 tag 변경, explicit reset, controller enable/disable로 시작되는 새 approach session은
+  `ALIGNED` latch와 안정화/grace 상태를 reset한다.
 
 ## 2. 개발 환경
 
@@ -110,14 +132,18 @@ USB 카메라로 검출한 AprilTag의 카메라 기준 상대 TF를 읽어 거�
 ## 7. TF 유실, stale 데이터와 필터
 
 - `lookup_transform(source_frame, tag_frame, latest)`로 버퍼의 최신 TF를 조회한다.
-- `now - transform.header.stamp > tag_timeout`이면 버퍼에 남은 오래된 TF를 거부한다.
+- source header stamp가 `tag_timeout=2.0 s` sanity bound를 벗어나면 버퍼의 TF를 거부한다.
+- strictly newer source stamp만 local monotonic receipt를 갱신한다. 같은 stamp가 반복되면
+  `tag_receipt_timeout=0.35 s`가 계속 진행된다.
 - NaN, 무한대, `z<=0`, 영 quaternion 후보도 거부한다.
-- 유효 후보가 없으면 `detected=false`, `tag_id=-1`, `TAG_LOST`만 발행하고 오래된 pose와
-  수치 metric은 재발행하지 않는다.
+- 유효 후보가 없으면 `detected=false`, `tag_id=-1`이며 오래된 pose와 수치 metric을
+  재발행하지 않는다. FINAL_APPROACH/STABILIZING이면 0.30 s 동안 해당 state/mode를
+  zero-command로 유지한 뒤 loss 처리하고, 그 밖의 상태는 기존 loss 정책을 따른다.
 - `filter_window` 크기의 x/y/z 성분별 중앙값으로 순간 outlier를 줄인다.
 - 같은 timestamp를 timer마다 중복 샘플로 넣지 않는다.
 - quaternion에는 성분 중앙값을 적용하지 않고 최신 유효 값을 정규화한다.
-- 유실 또는 선택 ID 변경 시 필터와 안정화 이력을 초기화한다.
+- 선택 ID 변경과 새 approach session에서는 필터, 안정화 이력과 ALIGNED latch를
+  초기화한다. STABILIZING 단기 유실은 grace 동안 stability clock만 일시정지한다.
 
 ## 8. 계산식
 
@@ -145,7 +171,8 @@ USB 카메라로 검출한 AprilTag의 카메라 기준 상대 TF를 읽어 거�
 8. `STABILIZING`: 모든 오차 정상, 연속 유지 시간이 `stable_time` 미만.
 9. `ALIGNED`: 모든 오차가 `stable_time` 이상 연속 정상.
 
-조건 이탈, 유실 또는 선택 ID 변경은 안정화 시작 시각을 초기화한다.
+이 절의 camera-state 머신은 조건 이탈, 유실 또는 선택 ID 변경 시 안정화 시작 시각을
+초기화한다. Hybrid base-state의 STABILIZING 유실은 1.1절의 0.30 s grace를 우선 적용한다.
 
 ## 10. ROS 인터페이스
 
@@ -175,8 +202,14 @@ USB 카메라로 검출한 AprilTag의 카메라 기준 상대 TF를 읽어 거�
 | `distance_tolerance` | `0.02` | 거리 허용 오차 [m] |
 | `lateral_tolerance` | `0.02` | 좌우 허용 오차 [m] |
 | `angle_tolerance_deg` | `5.0` | 수평각 허용 오차 [deg] |
-| `tag_timeout` | `0.3` | TF stale 판정 시간 [s] |
+| `tag_timeout` | `2.0` | source stamp sanity bound [s] |
+| `tag_receipt_timeout` | `0.35` | local monotonic visual dropout bound [s] |
 | `stable_time` | `0.8` | ALIGNED 전 연속 유지 시간 [s] |
+| `base_stable_time` | `0.30` | hybrid base 안정 조건 유지 시간 [s] |
+| `aligned_confirm_samples` | `3` | stable time 이후 필요한 fresh sample 수 |
+| `stabilizing_tag_loss_grace_sec` | `0.30` | STABILIZING zero-command hold [s] |
+| `final_approach_tag_loss_grace_sec` | `0.30` | FINAL_APPROACH zero-command hold [s] |
+| `blind_final_approach_enabled` | `false` | 제한적 odometry fallback 기본 비활성 |
 | `publish_rate` | `20.0` | timer 주기 [Hz] |
 | `filter_window` | `5` | 중앙값 표본 수 |
 
@@ -291,8 +324,10 @@ ID 전환을 사용자가 직접 수행한다.
 
 ## 17. 안전 제한과 다음 단계
 
-현재 코드와 launch에는 `cmd_vel`, 그리퍼 또는 STM32 명령이 없다. 상태 문자열은 제어
-명령이 아니며, `ALIGNED`만으로 즉시 구동기를 작동시키면 안 된다.
+Perception-only launch에는 `cmd_vel`, 그리퍼 또는 STM32 명령이 없다. 통합
+`follower_apriltag_drive.launch.py`는 별도 controller/selector/guard/bridge 노드를
+연결하지만 guard는 disabled로 시작한다. 상태 문자열은 제어 명령이 아니며,
+`ALIGNED`만으로 즉시 구동기를 작동시키면 안 된다.
 
 다음 개발 단계 후보:
 

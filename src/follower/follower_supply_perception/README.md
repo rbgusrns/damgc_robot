@@ -47,6 +47,21 @@ launch 구성과 검증 결과는
 기준으로 합니다. Blind final은 코드와 자동시험만 포함하며 기본값은 반드시
 `false`입니다.
 
+현재 hybrid base 정렬의 안정화 계약은 다음과 같습니다.
+
+- `base_stable_time=0.30 s` 이후에도 서로 다른 source stamp를 가진 fresh observation
+  3개가 확인되어야 `ALIGNED`로 latch됩니다.
+- `FINAL_APPROACH`와 `STABILIZING`에서 태그가 잠시 사라지면 각각 `0.30 s` 동안 기존
+  state/control mode만 유지합니다. 이때 stale target pose를 재사용하지 않으며 raw
+  `cmd_vel`은 반드시 zero입니다.
+- grace 안에 strictly newer observation이 들어오면 visual control로 복구하고, grace가
+  끝날 때까지 들어오지 않으면 blind가 기본값처럼 disabled인 경우 `TAG_LOST`로 갑니다.
+- `tag_timeout=2.0 s`는 source stamp sanity bound, `tag_receipt_timeout=0.35 s`는 local
+  monotonic dropout 기준입니다. Duplicate TF는 새 observation이나 grace reset으로
+  인정하지 않습니다.
+- Controller enable/disable이 `/follower/approach/enabled`로 perception에 전달되며, 새
+  approach session 시작 시 이전 `ALIGNED` latch와 안정화/grace 이력을 초기화합니다.
+
 실제 바퀴를 사용하는 시험은
 [`docs/FOLLOWER_WHEEL_DRIVE_TERMINAL_TEST.md`](docs/FOLLOWER_WHEEL_DRIVE_TERMINAL_TEST.md)의
 터미널별 절차를 따릅니다. Receive-only I2C, stand 위 저속 pulse, 지상 odometry,

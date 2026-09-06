@@ -41,6 +41,8 @@ class BaseAlignmentThresholds:
     final_realign_yaw_error_deg: float
     stable_time: float
     sample_timeout: float
+    aligned_confirm_samples: int = 3
+    stabilizing_tag_loss_grace_sec: float = 0.30
 
     def validate(self) -> None:
         if not all(isfinite(value) for value in self.__dict__.values()):
@@ -71,6 +73,10 @@ class BaseAlignmentThresholds:
             raise ValueError("final re-align error must exceed final yaw tolerance")
         if self.stable_time < 0.0 or self.sample_timeout < 0.0:
             raise ValueError("stable_time and sample_timeout must not be negative")
+        if self.aligned_confirm_samples < 1:
+            raise ValueError("aligned_confirm_samples must be at least 1")
+        if self.stabilizing_tag_loss_grace_sec < 0.0:
+            raise ValueError("stabilizing_tag_loss_grace_sec must not be negative")
 
     @property
     def turn_enter_error_rad(self) -> float:
@@ -282,6 +288,10 @@ class BaseAlignmentStateMachine:
 
     def reset(self) -> None:
         self._stable_since: Optional[float] = None
+        self._confirmation_count = 0
+        self._stabilizing_loss_since: Optional[float] = None
+        self._last_valid_aligned = False
+        self._aligned_latched = False
         self._active_tag_id: Optional[int] = None
         self._orientation_engaged = False
         self._recenter_active = False
@@ -294,10 +304,35 @@ class BaseAlignmentStateMachine:
         measurement: Optional[BaseAlignmentMeasurement],
         now_seconds: float,
         tag_id: Optional[int],
+        is_new_observation: bool = True,
     ) -> AlignmentDecision:
         if not isfinite(now_seconds):
             raise ValueError("now_seconds must be finite")
+
+        if (
+            tag_id is not None
+            and self._active_tag_id is not None
+            and tag_id != self._active_tag_id
+        ):
+            self.reset()
+        if self._aligned_latched and tag_id in (None, self._active_tag_id):
+            return AlignmentDecision(ApproachState.ALIGNED, ControlMode.ALIGNED)
+
         if not self._is_valid_sample(measurement, now_seconds, tag_id):
+            if (
+                measurement is None
+                and self._stable_since is not None
+                and self._last_valid_aligned
+            ):
+                if self._stabilizing_loss_since is None:
+                    self._stabilizing_loss_since = now_seconds
+                if (
+                    now_seconds - self._stabilizing_loss_since
+                    <= self._thresholds.stabilizing_tag_loss_grace_sec + 1.0e-9
+                ):
+                    return AlignmentDecision(
+                        ApproachState.STABILIZING, ControlMode.STABILIZING
+                    )
             self.reset()
             return AlignmentDecision(ApproachState.TAG_LOST, ControlMode.TAG_LOST)
         assert measurement is not None
@@ -305,6 +340,16 @@ class BaseAlignmentStateMachine:
         if tag_id != self._active_tag_id:
             self.reset()
             self._active_tag_id = tag_id
+
+        if self._stabilizing_loss_since is not None:
+            self._stable_since = (
+                self._stable_since
+                + now_seconds
+                - self._stabilizing_loss_since
+                if self._stable_since is not None
+                else now_seconds
+            )
+            self._stabilizing_loss_since = None
 
         tag_range = hypot(measurement.tag_x, measurement.tag_y)
         tag_bearing = atan2(measurement.tag_y, measurement.tag_x)
@@ -356,7 +401,7 @@ class BaseAlignmentStateMachine:
                         control_range * sin(near.steering_error),
                     )
                 )
-        return self._final_decision(measurement, now_seconds)
+        return self._final_decision(measurement, now_seconds, is_new_observation)
 
     def _coarse_decision(
         self, measurement: BaseAlignmentMeasurement, tag_bearing: float
@@ -396,7 +441,10 @@ class BaseAlignmentStateMachine:
         )
 
     def _final_decision(
-        self, measurement: BaseAlignmentMeasurement, now_seconds: float
+        self,
+        measurement: BaseAlignmentMeasurement,
+        now_seconds: float,
+        is_new_observation: bool,
     ) -> AlignmentDecision:
         yaw_error = measurement.final_yaw_error
         tag_bearing = atan2(measurement.tag_y, measurement.tag_x)
@@ -456,12 +504,12 @@ class BaseAlignmentStateMachine:
         if self._stable_since is None or now_seconds < self._stable_since:
             self._stable_since = now_seconds
         if now_seconds - self._stable_since >= self._thresholds.stable_time:
-            return AlignmentDecision(
-                ApproachState.ALIGNED,
-                ControlMode.ALIGNED,
-                measurement.final_x,
-                measurement.final_y,
-            )
+            if is_new_observation:
+                self._confirmation_count += 1
+            if self._confirmation_count >= self._thresholds.aligned_confirm_samples:
+                self._aligned_latched = True
+                return AlignmentDecision(ApproachState.ALIGNED, ControlMode.ALIGNED)
+        self._last_valid_aligned = True
         return AlignmentDecision(
             ApproachState.STABILIZING,
             ControlMode.STABILIZING,
@@ -488,4 +536,7 @@ class BaseAlignmentStateMachine:
 
     def _leave_stable(self, decision: AlignmentDecision) -> AlignmentDecision:
         self._stable_since = None
+        self._confirmation_count = 0
+        self._stabilizing_loss_since = None
+        self._last_valid_aligned = False
         return decision

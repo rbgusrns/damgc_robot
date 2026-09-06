@@ -108,3 +108,22 @@ ros2 launch follower_supply_perception approach_only.launch.py
 ```bash
 ros2 run rqt_image_view rqt_image_view /follower/camera/image_rect
 ```
+
+## 현재 drive launch와 grace parameter 확인
+
+Hybrid command pipeline은 별도 `follower_apriltag_drive.launch.py`가 구성한다. 이 launch의
+`--show-args`에서 `use_stm32_bridge`와 `i2c_write_enabled`가 실제 true/false argument로
+지원됨을 확인했다. 테스트 명령에 이 인자를 사용할 때는 항상 먼저 현재 launch의
+`--show-args` 결과를 확인하며, 이를 위해 bridge 또는 launch safety semantics를 바꾸지
+않는다.
+
+```bash
+ros2 launch follower_supply_perception follower_apriltag_drive.launch.py --show-args
+ros2 param get /follower/apriltag_approach stabilizing_tag_loss_grace_sec
+ros2 param get /follower/apriltag_approach final_approach_tag_loss_grace_sec
+ros2 param get /follower/apriltag_approach blind_final_approach_enabled
+```
+
+현재 기대값은 grace 두 개 모두 `0.30`, blind final은 `False`다. Controller
+enable/disable은 `/follower/approach/enabled`를 통해 perception의 approach-session reset을
+발생시키며, launch 시작 또는 session 전환 후 과거 ALIGNED latch를 재사용하지 않는다.

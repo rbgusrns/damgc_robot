@@ -122,6 +122,10 @@ def test_atomic_command_and_blind_default_contracts() -> None:
     assert 'FollowerAlignmentCommand, "alignment/command"' in perception
     assert 'FollowerAlignmentCommand,\n            "alignment/command"' in controller
     assert "blind_final_approach_enabled: false" in config
+    assert "aligned_confirm_samples: 3" in config
+    assert "base_stable_time: 0.30" in config
+    assert "stabilizing_tag_loss_grace_sec: 0.30" in config
+    assert "final_approach_tag_loss_grace_sec: 0.30" in config
     assert message.splitlines() == [
         "std_msgs/Header header",
         "geometry_msgs/Pose target_pose",

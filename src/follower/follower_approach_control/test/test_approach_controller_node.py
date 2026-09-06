@@ -125,6 +125,7 @@ def test_enable_transition_discards_cache_and_publishes_zero() -> None:
     node = harness()
     node._measurement = BaseControlMeasurement(0.1, 0.0, 0.0)
     node._raw_pub = Publisher()
+    node._enabled_pub = Publisher()
     response = SetBool.Response()
     result = ApproachControllerNode._on_enable(
         node, SetBool.Request(data=True), response
@@ -133,3 +134,4 @@ def test_enable_transition_discards_cache_and_publishes_zero() -> None:
     assert node._measurement is None
     assert isinstance(node._raw_pub.messages[-1], Twist)
     assert node._raw_pub.messages[-1].linear.x == 0.0
+    assert node._enabled_pub.messages[-1].data is True

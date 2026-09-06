@@ -224,6 +224,7 @@ base_bearing          = atan2(base_pose.y, base_pose.x)
 | `/follower/supply/base_lateral_error` | `std_msgs/msg/Float64` | `/follower/apriltag_approach` | base `y`, 왼쪽 양수 `[m]` |
 | `/follower/supply/base_bearing` | `std_msgs/msg/Float64` | `/follower/apriltag_approach` | base `atan2(y,x)` `[rad]` |
 | `/follower/base_alignment/state` | `std_msgs/msg/String` | `/follower/apriltag_approach` | controller high-level state |
+| `/follower/approach/enabled` | `std_msgs/msg/Bool` | `/follower/approach_controller` | perception session/latch reset event |
 | `/follower/approach/cmd_vel_raw` | `geometry_msgs/msg/Twist` | `/follower/approach_controller` | selector APPROACH input |
 | `/follower/cmd_vel` | `geometry_msgs/msg/Twist` | `/leader_cooperation` 활성 시 | selector COOPERATION input; standalone guard input도 가능 |
 | `/follower/selected_cmd_vel` | `geometry_msgs/msg/Twist` | `/follower/command_selector` | integrated guard input |
@@ -238,7 +239,7 @@ Header 없는 metric 세 개는 관찰용이다. Controller는 metric topic을 �
 
 | Interface | Type | 의미 |
 |---|---|---|
-| `/follower/approach/enable` | `std_srvs/srv/SetBool` | controller enable/disable; cache 삭제와 즉시 raw zero |
+| `/follower/approach/enable` | `std_srvs/srv/SetBool` | controller enable/disable; cache 삭제, session event와 즉시 raw zero |
 | `/follower/velocity_guard/enable` | `std_srvs/srv/SetBool` | final gate enable/disable; cache 삭제와 즉시 safe zero |
 | `/follower/command_selector/set_parameters` | `rcl_interfaces/srv/SetParameters` | `source_mode`의 STOP/APPROACH/COOPERATION 전환 |
 
@@ -255,7 +256,8 @@ ros2 param set /follower/command_selector source_mode COOPERATION
 
 State priority는 표의 위에서 아래 순서다. Exact tolerance boundary는 tolerance 안으로
 처리한다. 기본 base target 구간은 `0.25 ± 0.03 m`, lateral tolerance는 `±0.02 m`,
-bearing tolerance는 `±5 deg`, stable time은 `0.8 s`다.
+bearing tolerance는 `±5 deg`, base stable time은 `0.30 s`다. Stable time을 만족한 뒤에도
+서로 다른 source stamp를 가진 fresh observation 3개가 필요하다.
 
 | 우선순위/상태 | Base 조건 | 의미 | Controller output policy |
 |---|---|---|---|
@@ -266,10 +268,31 @@ bearing tolerance는 `±5 deg`, stable time은 `0.8 s`다.
 | 5 `TOO_CLOSE` | bearing 허용, `forward < 0.22 m` | 목표 구간보다 가까움 | 현재 reverse policy에서 raw zero |
 | 6 `FINE_ALIGN_LEFT` | forward/bearing 허용, `lateral > +0.02 m` | 목표 거리에서 왼쪽 오차 | `linear.x=0`, sign-valid positive angular |
 | 7 `FINE_ALIGN_RIGHT` | forward/bearing 허용, `lateral < -0.02 m` | 목표 거리에서 오른쪽 오차 | `linear.x=0`, sign-valid negative angular |
-| 8 `STABILIZING` | 모든 tolerance 안, 연속 0.8 s 미만 | 안정 조건 확인 중 | raw zero |
-| 9 `ALIGNED` | 모든 tolerance를 0.8 s 연속 유지 | software alignment 완료 | raw zero |
+| 8 `STABILIZING` | 모든 tolerance 안, 0.30 s 유지 및 fresh confirmation 3회 미완료 | 안정 조건 확인 중 | raw zero |
+| 9 `ALIGNED` | 0.30 s 안정 조건과 fresh confirmation 3회 완료 | software alignment 완료/latch | raw zero |
 
-Tag ID 변경, lost, tolerance 이탈 또는 clock rollback은 stability history를 reset한다.
+Tag ID 변경, tolerance 이탈 또는 clock rollback은 stability history를 reset한다. `ALIGNED`
+latch는 선택 tag 변경, explicit state-machine reset, controller enable/disable로 시작되는 새
+approach session에서 reset한다. 새 session은 strictly newer tag sample을 요구하므로 TF
+buffer에 남은 duplicate sample로 즉시 `ALIGNED`가 될 수 없다.
+
+### 7.1 Tag-loss grace와 zero-command 계약
+
+- `FINAL_APPROACH` 및 `STABILIZING`에서 fresh tag sample이 끊기면 각각 `0.30 s` grace를
+  적용한다.
+- Grace 동안 state/control mode는 직전 phase를 유지하지만 `detected=false`, `tag_id=-1`로
+  발행하고 stale pose를 atomic command에 넣지 않는다. 따라서 controller raw `cmd_vel`은
+  linear/angular 모두 zero다.
+- Grace는 blind forward가 아니다. `BLIND_FINAL_APPROACH` mode는 grace 만료 뒤 blind가
+  명시적으로 enabled이고 기존 eligibility를 모두 만족할 때만 별도로 가능하다.
+- Strictly newer source stamp가 grace 안에 들어오면 visual control로 복구하고 timer를
+  reset한다. Duplicate/stale TF는 새 observation이나 timer reset으로 인정하지 않는다.
+- STABILIZING 복구 시 dropout 시간은 `base_stable_time`에서 제외한다. Grace 초과 시
+  blind가 disabled이면 `TAG_LOST`와 zero다.
+- FAR/COARSE/NEAR/RECENTER/FINAL_YAW 상태는 이 phase-specific grace 대상이 아니며 기존
+  safe loss 동작을 유지한다.
+- `blind_last_tag_max_age`는 `blind_final_approach_enabled=true`일 때만 blind eligibility에
+  사용하며, 기본값 `false`에서는 일반 visual TAG_LOST 판단을 앞당기지 않는다.
 
 ## 8. Approach controller
 
@@ -460,7 +483,8 @@ Source: `config/approach.yaml`
 | `distance_tolerance` | `0.02` | m | camera z tolerance | provisional |
 | `lateral_tolerance` | `0.02` | m | camera x tolerance | provisional |
 | `angle_tolerance_deg` | `5.0` | deg | camera angle tolerance | provisional |
-| `tag_timeout` | `2.0` | s | camera/base source freshness | 실기 timestamp 대응 trial |
+| `tag_timeout` | `2.0` | s | source-stamp sanity bound | 실기 timestamp 대응 trial |
+| `tag_receipt_timeout` | `0.35` | s | local monotonic visual dropout | measured timing safety |
 | `stable_time` | `0.8` | s | camera stable duration | provisional |
 | `publish_rate` | `20.0` | Hz | state/output timer | software setting |
 | `filter_window` | `5` | samples | distinct-stamp translation median | software setting |
@@ -468,7 +492,31 @@ Source: `config/approach.yaml`
 | `base_forward_tolerance` | `0.03` | m | base forward tolerance | provisional |
 | `base_lateral_tolerance` | `0.02` | m | base lateral tolerance | provisional |
 | `base_bearing_tolerance_deg` | `5.0` | deg | base bearing tolerance | provisional |
-| `base_stable_time` | `0.8` | s | base stable duration | provisional |
+| `base_stable_time` | `0.30` | s | base stable duration | Leader parity |
+| `aligned_confirm_samples` | `3` | samples | stable time 이후 fresh confirmation | Leader parity |
+| `stabilizing_tag_loss_grace_sec` | `0.30` | s | STABILIZING state/mode hold with zero command | safety timing |
+| `final_approach_tag_loss_grace_sec` | `0.30` | s | FINAL_APPROACH state/mode hold with zero command | safety timing |
+| `pre_align_distance` | `0.35` | m | Follower final target 앞 staging 거리 | Follower geometry |
+| `orientation_engage_distance` | `0.40` | m | tag-normal phase 진입 | hybrid threshold |
+| `orientation_disengage_distance` | `0.43` | m | tag-normal phase 이탈 | hybrid hysteresis |
+| `turn_enter_error_deg` | `8.0` | deg | coarse turn 진입 | hybrid hysteresis |
+| `turn_exit_error_deg` | `3.0` | deg | coarse turn 이탈 | hybrid hysteresis |
+| `tag_recenter_enter_deg` | `18.0` | deg | RECENTER 진입 | FOV protection |
+| `tag_recenter_exit_deg` | `11.0` | deg | RECENTER 이탈 | FOV protection |
+| `near_normal_correction_limit_deg` | `6.0` | deg | near normal correction limit | FOV protection |
+| `final_realign_yaw_error_deg` | `8.0` | deg | final yaw 재정렬 진입 | hybrid threshold |
+| `blind_final_approach_enabled` | `false` | bool | restricted odometry fallback | 반드시 기본 OFF |
+| `blind_activation_max_tag_x` | `0.35` | m | blind handoff 최대 tag x | blind-only gate |
+| `blind_max_distance` | `0.10` | m | blind 최대 주행 거리 | blind-only safety |
+| `blind_last_tag_max_age` | `0.25` | s | blind eligibility용 last-tag age | blind enabled일 때만 사용 |
+| `blind_handoff_max_age` | `0.40` | s | blind handoff 최대 receipt age | blind-only gate |
+| `blind_max_duration` | `5.0` | s | blind 최대 지속 시간 | blind-only safety |
+| `blind_odom_timeout` | `0.25` | s | odometry source/receipt timeout | blind-only safety |
+| `blind_max_odom_step` | `0.05` | m | odometry jump limit | blind-only safety |
+| `blind_max_lateral_deviation` | `0.03` | m | blind lateral abort | blind-only safety |
+| `blind_max_yaw_deviation_deg` | `12.0` | deg | blind yaw abort | blind-only safety |
+| `blind_reverse_tolerance` | `0.01` | m | reverse progress abort tolerance | blind-only safety |
+| `odom_topic` | `/follower/odom/raw` | topic | blind odometry input | Follower interface |
 
 ### 11.5 `/follower/approach_controller`
 

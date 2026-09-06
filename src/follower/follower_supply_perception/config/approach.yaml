@@ -29,7 +29,10 @@
     base_forward_tolerance: 0.03
     base_lateral_tolerance: 0.02
     base_bearing_tolerance_deg: 5.0
-    base_stable_time: 0.8
+    base_stable_time: 0.30
+    aligned_confirm_samples: 3
+    stabilizing_tag_loss_grace_sec: 0.30
+    final_approach_tag_loss_grace_sec: 0.30
 
     # Hybrid center/normal alignment. The 0.35 m pre-align point preserves a
     # 0.10 m staging interval ahead of the Follower's 0.25 m final target.

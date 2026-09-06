@@ -105,6 +105,8 @@ AprilTag 검출 및 상대 위치 TF 계산
   - 측정 camera extrinsic, camera/base 상태 병렬 유지와 exact-stamp TF2 변환
   - approach controller, STOP/APPROACH/COOPERATION selector, 기존 final safety guard
   - 관련 4개 패키지 자동시험 236개와 실카메라 PASS/NOT VERIFIED 구분
+  - 현재 후속 구현은 base 안정화 0.30 s + fresh sample 3회, FINAL_APPROACH/STABILIZING
+    0.30 s zero-command grace와 approach-session ALIGNED latch reset을 포함
 
 ### 8. 이전 기록
 

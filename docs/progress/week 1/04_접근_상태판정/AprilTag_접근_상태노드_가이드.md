@@ -1,5 +1,13 @@
 # AprilTag 접근 상태 판정 노드 — 개발 현황과 사용법
 
+> 이 문서는 2026-07-20 최초 camera-state 구현의 과거 실행 기록이다. 현재 Follower
+> hybrid base alignment, `base_stable_time=0.30 s`, fresh confirmation 3회,
+> FINAL_APPROACH/STABILIZING `0.30 s` zero-command tag-loss grace, freshness 분리와
+> approach-session ALIGNED reset은
+> [`FOLLOWER_HYBRID_ALIGNMENT_MIGRATION.md`](../../../../src/follower/follower_supply_perception/docs/FOLLOWER_HYBRID_ALIGNMENT_MIGRATION.md)를
+> 기준으로 한다. 아래의 `tag_timeout=0.3`, 37 tests, perception-only 범위는 당시
+> 결과를 보존한 것이며 현재 런타임 기본값이 아니다.
+
 - 정리 문서 경로: `04_접근_상태판정/AprilTag_접근_상태노드_가이드.md`
 - Jetson 원본 문서 경로: `docs/APRILTAG_APPROACH_NODE_GUIDE.md`
 - 패키지: `follower_supply_perception`

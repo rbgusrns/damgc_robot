@@ -61,23 +61,46 @@ ros2 topic echo /follower/supply/relative_pose
 
 ## 3. 물리 상태 시험
 
-시험값 기준은 `target_distance=0.15 m`, `distance_tolerance=0.02 m`,
-`lateral_tolerance=0.02 m`, `angle_tolerance=5 deg`, `tag_timeout=0.3 s`,
-`stable_time=0.8 s`이다. 이 값들은 실제 그리퍼 동작 거리로 확정된 값이 아니다.
+기존 camera-state 시험값은 `target_distance=0.15 m`, `distance_tolerance=0.02 m`,
+`lateral_tolerance=0.02 m`, `angle_tolerance=5 deg`, `stable_time=0.8 s`이다.
+현재 freshness는 source-stamp sanity bound `tag_timeout=2.0 s`와 local monotonic dropout
+bound `tag_receipt_timeout=0.35 s`를 분리해 사용한다. 이 값들은 실제 그리퍼 동작
+거리로 확정된 값이 아니다.
 
 optical frame에서 `x<0`은 왼쪽, `x>0`은 오른쪽, `z`는 전방 거리다.
 
 | 시험 | 조작 | 예상 출력 | 사용자 기록 |
 |---|---|---|---|
-| 태그 유실 | 태그를 완전히 가리고 0.3초 이상 대기 | `detected=false`, `tag_id=-1`, `TAG_LOST` | 미확인 |
+| 태그 유실 | 태그를 완전히 가리고 0.35초 이상 대기 | 일반 상태에서 `detected=false`, `tag_id=-1`, `TAG_LOST` | 미확인 |
 | 왼쪽 각도 | 태그를 영상 왼쪽으로 충분히 이동 | `TURN_LEFT` | 미확인 |
 | 오른쪽 각도 | 태그를 영상 오른쪽으로 충분히 이동 | `TURN_RIGHT` | 미확인 |
 | 먼 거리 | 태그를 정면에 두고 `z>0.17 m` | `APPROACH` | 미확인 |
 | 너무 가까움 | 태그를 정면에 두고 `z<0.13 m` | `TOO_CLOSE` | 미확인 |
-| 목표 위치 | 거리·좌우·각도 오차를 모두 허용 범위에 유지 | 즉시 `STABILIZING`, 0.8초 후 `ALIGNED` | 미확인 |
+| camera 목표 위치 | 거리·좌우·각도 오차를 모두 허용 범위에 유지 | camera state는 즉시 `STABILIZING`, `stable_time=0.8 s` 후 `ALIGNED` | 미확인 |
 
 각 시험에서 `/follower/supply/distance`, `lateral_error`, `angle`도 함께 기록한다.
 상태 우선순위 때문에 각도가 5도를 벗어나면 거리보다 TURN 상태가 먼저 출력된다.
+
+### 3.1 Hybrid base state와 tag-loss grace 시험
+
+`/follower/base_alignment/state`, `/follower/alignment/control_mode`,
+`/follower/alignment/command`, `/follower/approach/cmd_vel_raw`을 함께 관찰한다. Base 기준은
+`base_target_forward=0.25 m`, `base_stable_time=0.30 s`,
+`aligned_confirm_samples=3`, 두 tag-loss grace 모두 `0.30 s`다.
+
+| 시험 | 조작 | 예상 출력 | 사용자 기록 |
+|---|---|---|---|
+| FINAL 짧은 유실 | `FINAL_APPROACH`에서 태그를 0.30 s 이내 가림 | state/mode는 `FINAL_APPROACH`, detected false, raw `cmd_vel=0` | 미확인 |
+| FINAL 재검출 | grace 안에 태그를 다시 보임 | strictly newer sample부터 visual control 복구 | 미확인 |
+| FINAL grace 초과 | blind가 false인 채 0.30 s 초과 가림 | `TAG_LOST`, raw `cmd_vel=0` | 미확인 |
+| STABILIZING 짧은 유실 | 안정화 중 0.30 s 이내 가림 | `STABILIZING` 유지, 안정화 clock 정지, raw `cmd_vel=0` | 미확인 |
+| STABILIZING 재검출 | grace 안에 태그를 다시 보임 | dropout 시간을 제외하고 안정화 재개 | 미확인 |
+| 일반 상태 유실 | FAR/COARSE에서 태그를 가림 | 기존 receipt timeout 후 `TAG_LOST`, raw `cmd_vel=0` | 미확인 |
+| session reset | `ALIGNED` 후 controller disable/enable | 다음 접근은 fresh sample부터 시작하며 즉시 `ALIGNED` 금지 | 미확인 |
+
+Grace는 state/control mode 표시를 유지할 뿐 blind 주행 시간이 아니다. 태그가 실제로
+보이지 않는 동안 atomic command에 stale pose가 없어야 하며 raw linear/angular velocity는
+모두 zero여야 한다. 같은 TF source stamp의 반복은 재검출이나 grace reset으로 세지 않는다.
 
 ## 4. ID 변경 시험
 

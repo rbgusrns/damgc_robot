@@ -32,8 +32,10 @@ def thresholds(**overrides) -> BaseAlignmentThresholds:
         final_lateral_tolerance=0.02,
         final_yaw_tolerance_deg=5.0,
         final_realign_yaw_error_deg=8.0,
-        stable_time=0.8,
+        stable_time=0.30,
         sample_timeout=0.35,
+        aligned_confirm_samples=3,
+        stabilizing_tag_loss_grace_sec=0.30,
     )
     values.update(overrides)
     return BaseAlignmentThresholds(**values)
@@ -166,8 +168,12 @@ def test_final_yaw_align_and_final_approach_realign() -> None:
 def test_stabilizing_requires_position_and_yaw_then_aligns() -> None:
     machine = BaseAlignmentStateMachine(thresholds())
     first = enter_final(machine, final_x=0.01, final_y=0.01, stamp=10.0)
-    aligned = enter_final(machine, final_x=0.01, final_y=0.01, stamp=10.8)
+    confirm_one = enter_final(machine, final_x=0.01, final_y=0.01, stamp=10.3)
+    confirm_two = enter_final(machine, final_x=0.01, final_y=0.01, stamp=10.4)
+    aligned = enter_final(machine, final_x=0.01, final_y=0.01, stamp=10.5)
     assert first.state == ApproachState.STABILIZING
+    assert confirm_one.state == ApproachState.STABILIZING
+    assert confirm_two.state == ApproachState.STABILIZING
     assert aligned.state == ApproachState.ALIGNED
     wrong_position = BaseAlignmentStateMachine(thresholds())
     assert enter_final(wrong_position, final_y=0.03).state == ApproachState.FINAL_APPROACH
@@ -184,6 +190,76 @@ def test_loss_stale_invalid_and_tag_change_reset_state() -> None:
     assert machine.update(measurement(stamp=9.0), 10.0, 0).mode == ControlMode.TAG_LOST
     assert machine.update(measurement(tag_x=nan), 10.0, 0).mode == ControlMode.TAG_LOST
     assert machine.update(measurement(), 10.0, 1).mode == ControlMode.COARSE_TRACK
+
+
+def test_stabilizing_loss_grace_pauses_elapsed_time_and_recovers() -> None:
+    machine = BaseAlignmentStateMachine(thresholds())
+    good = measurement(
+        tag_x=0.25, prealign_x=0.0, final_x=0.0, final_y=0.0, stamp=10.0
+    )
+
+    assert machine.update(good, 10.0, 0).state == ApproachState.STABILIZING
+    dropout = machine.update(None, 10.29, None)
+    grace_boundary = machine.update(None, 10.30, None)
+    assert dropout.state == grace_boundary.state == ApproachState.STABILIZING
+    assert dropout.control_x == dropout.control_y == 0.0
+    assert grace_boundary.control_x == grace_boundary.control_y == 0.0
+
+    recovered = measurement(
+        tag_x=0.25, prealign_x=0.0, final_x=0.0, final_y=0.0, stamp=10.31
+    )
+    assert machine.update(recovered, 10.31, 0).state == ApproachState.STABILIZING
+    assert machine._stable_since == pytest.approx(10.02)
+
+
+def test_stabilizing_loss_beyond_grace_enters_tag_lost() -> None:
+    machine = BaseAlignmentStateMachine(thresholds())
+    good = measurement(
+        tag_x=0.25, prealign_x=0.0, final_x=0.0, final_y=0.0, stamp=10.0
+    )
+    assert machine.update(good, 10.0, 0).state == ApproachState.STABILIZING
+    assert machine.update(None, 10.1, None).state == ApproachState.STABILIZING
+    assert machine.update(None, 10.400001, None).state == ApproachState.TAG_LOST
+
+
+def test_duplicate_samples_do_not_confirm_alignment() -> None:
+    machine = BaseAlignmentStateMachine(thresholds(stable_time=0.0))
+    good = measurement(
+        tag_x=0.25, prealign_x=0.0, final_x=0.0, final_y=0.0, stamp=10.0
+    )
+    assert machine.update(good, 10.0, 0).state == ApproachState.STABILIZING
+    for now in (10.1, 10.2, 10.3):
+        assert (
+            machine.update(good, now, 0, is_new_observation=False).state
+            == ApproachState.STABILIZING
+        )
+    assert machine.update(
+        measurement(tag_x=0.25, prealign_x=0.0, final_x=0.0, final_y=0.0, stamp=10.4),
+        10.4,
+        0,
+    ).state == ApproachState.STABILIZING
+
+
+def test_aligned_latch_survives_short_loss_and_reset_starts_new_session() -> None:
+    machine = BaseAlignmentStateMachine(thresholds(stable_time=0.0))
+    for stamp in (10.0, 10.1, 10.2):
+        decision = machine.update(
+            measurement(
+                tag_x=0.25,
+                prealign_x=0.0,
+                final_x=0.0,
+                final_y=0.0,
+                stamp=stamp,
+            ),
+            stamp,
+            0,
+        )
+    assert decision.state == ApproachState.ALIGNED
+    assert machine.update(None, 10.3, None).state == ApproachState.ALIGNED
+
+    machine.reset()
+    next_session = machine.update(measurement(stamp=11.0), 11.0, 0)
+    assert next_session.state == ApproachState.APPROACH
 
 
 def blind_kwargs(**overrides):
@@ -253,6 +329,8 @@ def test_blind_distance_and_forward_progress_are_bounded() -> None:
         thresholds(final_forward_tolerance=0.0),
         thresholds(final_lateral_tolerance=0.0),
         thresholds(final_realign_yaw_error_deg=5.0),
+        thresholds(aligned_confirm_samples=0),
+        thresholds(stabilizing_tag_loss_grace_sec=-0.01),
     ],
 )
 def test_invalid_thresholds_are_rejected(invalid) -> None:

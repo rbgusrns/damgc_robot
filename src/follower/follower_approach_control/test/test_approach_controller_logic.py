@@ -92,6 +92,9 @@ def test_failed_safety_gate_is_zero(gate) -> None:
 def test_detection_and_tag_are_required_except_blind() -> None:
     assert command(APPROACH, COARSE_TRACK, detected=False) == PlanarCommand()
     assert command(APPROACH, COARSE_TRACK, tag_valid=False) == PlanarCommand()
+    assert command(
+        FINAL_APPROACH, FINAL_APPROACH, detected=False, tag_valid=False
+    ) == PlanarCommand()
 
 
 def test_unknown_incompatible_and_nonfinite_commands_are_zero() -> None:

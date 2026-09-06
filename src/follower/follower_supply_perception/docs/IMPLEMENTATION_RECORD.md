@@ -130,3 +130,24 @@ fatal: not a git repository (or any of the parent directories): .git
 `git diff --stat`도 동일하게 저장소가 아니어서 diff 기준을 만들 수 없었다. 따라서 Git
 변경 수나 patch 통계는 제공하지 않는다. 이 문서의 파일 표, 최종 `find` 결과와
 build/test 결과를 현재 상태의 근거로 사용한다. 자동 커밋은 수행하지 않았다.
+
+## 9. 2026-09-06 hybrid tag-loss tolerance 갱신
+
+현재 Git 저장소 `/home/kde/damgc_robot`의 HEAD `1f4d2ed`를 기준으로 Leader의 최신
+tag-loss handling을 Follower 구조에 맞게 최소 이식했다.
+
+- `base_stable_time=0.30 s`, `aligned_confirm_samples=3`
+- `stabilizing_tag_loss_grace_sec=0.30 s`
+- `final_approach_tag_loss_grace_sec=0.30 s`
+- Grace 동안 state/control mode만 유지하고 stale target pose를 발행하지 않아 raw
+  `cmd_vel`을 zero로 유지
+- Strictly newer source stamp만 valid observation/reacquisition/grace reset으로 인정
+- `tag_timeout=2.0 s` source sanity와 `tag_receipt_timeout=0.35 s` monotonic dropout 분리
+- blind가 disabled일 때 `blind_last_tag_max_age`가 일반 visual loss를 앞당기던 경로 분리
+- `blind_final_approach_enabled=false` 기본값 유지
+- selected tag 변경, explicit reset과 `/follower/approach/enabled` session event에서
+  `ALIGNED` latch reset
+
+관련 targeted perception/controller tests 81개와 `follower_supply_perception` 전체
+135개가 통과했고, `follower_supply_perception` 및 `follower_approach_control` build가
+성공했다. 실제 로봇/카메라 runtime grace timing은 아직 물리 검증 결과로 기록하지 않는다.
