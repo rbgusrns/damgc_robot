@@ -56,7 +56,7 @@ BASE_TO_CAMERA_BODY = FixedTransform(
     parent_frame=BASE_FRAME,
     child_frame=CAMERA_BODY_FRAME,
     xyz=(0.042, 0.01, 0.120),
-    rpy=(0.0, 0.0, 0.0),
+    rpy=(0.0, 0.0, -0.10),
 )
 
 # REP-103 camera convention: body +X forward/+Y left/+Z up becomes optical
