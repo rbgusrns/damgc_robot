@@ -13,7 +13,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("raw_command_topic", default_value="/leader/dynamixel/command"),
         DeclareLaunchArgument("gripper_topic", default_value="/leader/gripper/command"),
-        DeclareLaunchArgument("open_raw", default_value="1021"),
+        DeclareLaunchArgument("open_raw", default_value="950"),
         DeclareLaunchArgument("close_raw", default_value="450"),
         DeclareLaunchArgument("close_wait", default_value="2.0"),
         Node(

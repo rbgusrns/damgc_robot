@@ -29,7 +29,7 @@ class GripperSequenceNode(Node):
         self.declare_parameter("alignment_topic", "/leader/base_alignment/state")
         self.declare_parameter("raw_command_topic", "/leader/dynamixel/command")
         self.declare_parameter("gripper_topic", "/leader/gripper/command")
-        self.declare_parameter("open_raw", 1021)
+        self.declare_parameter("open_raw", 950)
         self.declare_parameter("close_raw", 450)
         self.declare_parameter("close_wait", 2.0)
         self.declare_parameter("enabled", False)
