@@ -32,12 +32,13 @@ class GripperSequenceNode(Node):
         self.declare_parameter("alignment_topic", "/leader/base_alignment/state")
         self.declare_parameter("raw_command_topic", "/leader/dynamixel/command")
         self.declare_parameter("gripper_topic", "/leader/gripper/command")
-        self.declare_parameter("open_raw", 1000)
-        self.declare_parameter("close_raw", 450)
-        self.declare_parameter("close_wait", 2.0)
+        self.declare_parameter("open_raw", 950)
+        self.declare_parameter("close_raw", 350)
+        self.declare_parameter("close_wait", 3.0)
         self.declare_parameter("enabled", False)
+        self.declare_parameter("robot", "leader")
         self.declare_parameter("lift_enabled", False)
-        self.declare_parameter("lift_raw", -1.0)
+        self.declare_parameter("lift_raw", 350.0)
 
         detection_topic = str(self.get_parameter("detection_topic").value)
         alignment_topic = str(self.get_parameter("alignment_topic").value)
@@ -60,7 +61,8 @@ class GripperSequenceNode(Node):
             and self._lift_raw_value.is_integer()
             else -1
         )
-        profile = get_profile("leader")
+        robot = str(self.get_parameter("robot").value)
+        profile = get_profile(robot)
         self._lift_min_raw = int(profile["rx64_min"])
         self._lift_max_raw = int(profile["rx64_max"])
         self._lift_raw_valid = (
@@ -122,7 +124,7 @@ class GripperSequenceNode(Node):
         data = [rx64, rx28, torque]
         if rx64_torque is not None and rx28_torque is not None:
             data.extend([rx64_torque, rx28_torque])
-        self._raw_pub.publish(Float64MultiArray(data=data))
+        self._raw_pub.publish(Float64MultiArray(data=[rx64, rx28, torque]))
         self.get_logger().info(
             "raw command rx64=%s rx28=%s torque=%s" % (rx64, rx28, torque)
         )
