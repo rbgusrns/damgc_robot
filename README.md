@@ -174,6 +174,18 @@ ros2 service call /cooperation/enable std_srvs/srv/SetBool "{data: true}"
 heartbeat 또는 명령이 끊기면 0 속도로 정지합니다. 상세 계약은
 [leader_cooperation README](src/leader/leader_cooperation/README.md)를 참고합니다.
 
+기존 방향키 이동, 역할별 STM32 bridge와 DDS 연결을 한 번에 기동하는 전용 실행기는
+팔로워에서 먼저, 리더에서 다음 순서로 실행합니다. 기본적으로 팔로워 velocity guard는
+닫혀 있어 별도 enable 전에는 움직이지 않습니다.
+
+```bash
+./scripts/run_cooperative_transport.sh follower
+./scripts/run_cooperative_transport.sh leader
+```
+
+모터 없는 네트워크 점검과 실제 장비의 안전한 enable/종료 순서는
+[협동 이동 실행 가이드](docs/COOPERATIVE_TRANSPORT_RUN_GUIDE.md)를 따릅니다.
+
 ## 팔로워 인식 파이프라인
 
 ```bash

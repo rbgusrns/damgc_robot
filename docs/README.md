@@ -13,6 +13,7 @@
 6. [Orin–STM32 UART 통신 규격](STM32_UART_PROTOCOL.md) — 명령, IMU, 엔코더, 상태 패킷 초안
 7. [통합 진행 기록](INTEGRATION_STATUS_2026-08-25.md) — STM32·EKF·VSLAM·nvblox 실행 결과와 재현 절차
 8. [VSLAM 키보드 매핑 진행 기록](VSLAM_MAPPING_PROGRESS_2026-08-28.md) — 원클릭 실행, 방향키 주행, 영구 Docker 이미지와 실제 통합 검증
+9. [협동 이동 실행 가이드](COOPERATIVE_TRANSPORT_RUN_GUIDE.md) — 역할별 원클릭 실행, DDS heartbeat 확인과 fail-closed 주행 절차
 
 ## 문서 목록
 
