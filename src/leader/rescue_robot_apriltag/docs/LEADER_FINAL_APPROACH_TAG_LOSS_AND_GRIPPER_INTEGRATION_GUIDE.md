@@ -1,5 +1,61 @@
 # Leader FINAL_APPROACH Tag-Loss Grace and Gripper Integration
 
+> **Current integrated-launch behavior (2026 update)**
+>
+> The active Leader integration is now provided by
+> `rescue_robot_bringup/launch/leader_apriltag_drive.launch.py`. Its defaults are
+> `gripper_enabled=true`, RX-28 `open_raw=1000`, RX-28 `close_raw=450`, and
+> `lift_enabled=false`. The active sequence is
+> `/leader/supply/detected=true` -> RX-28 OPEN 1000 -> existing approach and
+> `/leader/base_alignment/state=ALIGNED` -> RX-28 CLOSE 450 -> DONE. No automatic
+> RX-64 position or torque command is sent while lift is disabled. The old
+> `rx64_middle` automatic step described in historical sections below is no longer
+> part of the integrated sequence; the semantic command remains available for
+> manual Dynamixel tests. A verified lift can later be requested without source
+> changes with `lift_enabled:=true lift_raw:=<VERIFIED_RAW_VALUE>`.
+>
+> `gripper_enabled=false` is the top-level master gate and excludes both the
+> Dynamixel node and sequence launch. It does not change the existing wheel safety:
+> `velocity_guard` remains startup-disabled.
+
+## Current launch arguments and verification
+
+| Argument | Default | Safety meaning |
+|---|---:|---|
+| `gripper_enabled` | `true` | Includes/excludes the complete Dynamixel subsystem |
+| `gripper_open_raw` | `1000` | RX-28 OPEN goal |
+| `lift_enabled` | `false` | Master switch for automatic RX-64 lift |
+| `lift_raw` | `-1` | Unset sentinel; accepted Leader range is 450..775 |
+
+Start the complete integration with wheel output still safely blocked:
+
+```bash
+ros2 launch rescue_robot_bringup leader_apriltag_drive.launch.py
+```
+
+Inspect `/leader/supply/detected`, `/leader/base_alignment/state`,
+`/leader/dynamixel/command`, `/leader/dynamixel/status`, and `/sequence/status`.
+The expected default cycle is OPEN 1000, ALIGNED, CLOSE 450, DONE; no RX-64 raw
+command is expected. Enable wheels only after the existing safety checks:
+
+```bash
+ros2 service call /leader/velocity_guard/enable std_srvs/srv/SetBool "{data: true}"
+```
+
+For AprilTag-only regression, restart with:
+
+```bash
+ros2 launch rescue_robot_bringup leader_apriltag_drive.launch.py \
+  gripper_enabled:=false
+```
+
+`ros2 node list` must then contain no `dynamixel_orin_node` or `gripper_sequence`;
+the camera, alignment, approach, guard, and STM32 nodes remain present. For a
+future lift bench test, first verify the mechanical direction and choose a raw value,
+then use `lift_enabled:=true lift_raw:=<VERIFIED_RAW_VALUE>`. An unset, negative,
+non-finite, or out-of-range value produces a warning/error and skips RX-64 motion;
+it never crashes the node or undoes the RX-28 CLOSE.
+
 ## 1. 목적과 변경 배경
 
 이 변경 전에도 Leader의 COARSE, NEAR, FINAL_YAW_ALIGN, FINAL_APPROACH,
@@ -131,18 +187,24 @@ COARSE, NEAR, FINAL_YAW_ALIGN과 정상적인 visual FINAL_APPROACH control 계�
 호출하지 않으므로 short dropout이 기존 phase latch를 reset하지 않는다. Grace timeout
 이후에만 기존 TAG_LOST/reset 경로를 호출한다.
 
-## 6. Gripper와 Dynamixel 구조
+## 6. Historical standalone gripper behavior
+
+The remainder of this section records the previously validated standalone
+sequence for historical reference. It is superseded for the integrated launch by
+the current behavior at the top of this document: OPEN 1000, conditional lift,
+and `lift_enabled=false` by default.
 
 Leader Dynamixel profile은 변경하지 않았다.
 
 | Actuator | 용도 | ID | min | max | sequence command |
 |---|---|---:|---:|---:|---|
-| RX-28 | gripper open/close | 2 | 1 | 1021 | open `1021`, close `450` |
+| RX-28 | gripper open/close | 2 | 1 | 1021 | historical open `1021`, close `450` |
 | RX-64 | lift | 33 | 450 | 775 | `rx64_middle` = raw `612` |
 
-`gripper_sequence_node.py`의 `open_raw=1021`, `close_raw=450`, `close_wait=2.0 s`를
-그대로 사용한다. Close 완료 후 `rx64_middle`을 한 번 발행하고, LIFTING 상태를 추가
-2초 유지한 뒤 DONE이 된다.
+The old standalone sequence used `open_raw=1021`, `close_raw=450`,
+`close_wait=2.0 s`, then emitted `rx64_middle`. This behavior is retained here
+only as historical context; the integrated sequence no longer emits that lift
+command automatically.
 
 Authoritative topic 연결은 다음과 같이 바뀌었다. 두 topic의 message type은 모두
 `std_msgs/msg/String`이다.

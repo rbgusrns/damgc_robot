@@ -3,6 +3,7 @@
 
 Raw command topic: /<namespace>/dynamixel/command
 Message: std_msgs/msg/Float64MultiArray, data=[rx64_raw, rx28_raw, torque]
+Optional targeted form: [rx64_raw, rx28_raw, rx64_torque, rx28_torque]
 
 Semantic command topic: /<namespace>/gripper/command
 Message: std_msgs/msg/String, data=open|close|middle|rx64_high|rx64_low|rx64_middle|stop
@@ -113,17 +114,36 @@ class DynamixelOrinNode(Node):
         if self.controller is None:
             self.publish_status("ERROR controller is not connected")
             return
-        if len(message.data) < 3:
-            self.publish_status("ERROR command must be [rx64_raw, rx28_raw, torque]")
+        if len(message.data) not in (3, 4):
+            self.publish_status(
+                "ERROR command must be [rx64_raw, rx28_raw, torque] or "
+                "[rx64_raw, rx28_raw, rx64_torque, rx28_torque]"
+            )
             return
 
-        rx64_raw, rx28_raw, torque = message.data[:3]
-        if not all(math.isfinite(value) for value in (rx64_raw, rx28_raw, torque)):
+        values = message.data[:4]
+        if not all(math.isfinite(value) for value in values):
             self.publish_status("ERROR command contains NaN or infinity")
             return
 
+        rx64_raw, rx28_raw = values[:2]
+        targeted_torque = len(values) == 4
+        if targeted_torque:
+            rx64_torque, rx28_torque = values[2:4]
+        else:
+            torque = values[2]
+
         try:
-            if torque >= 0:
+            if targeted_torque:
+                if rx64_torque >= 0:
+                    self.controller.set_torque(
+                        self.profile["rx64_id"], bool(round(rx64_torque))
+                    )
+                if rx28_torque >= 0:
+                    self.controller.set_torque(
+                        self.profile["rx28_id"], bool(round(rx28_torque))
+                    )
+            elif torque >= 0:
                 enabled = bool(round(torque))
                 self.controller.set_torque(self.profile["rx64_id"], enabled)
                 self.controller.set_torque(self.profile["rx28_id"], enabled)
@@ -145,7 +165,17 @@ class DynamixelOrinNode(Node):
                 )
 
             self.publish_status(
-                f"OK rx64={round(rx64_raw)} rx28={round(rx28_raw)} torque={round(torque)}"
+                "OK rx64=%d rx28=%d %s"
+                % (
+                    round(rx64_raw),
+                    round(rx28_raw),
+                    (
+                        "rx64_torque=%d rx28_torque=%d"
+                        % (round(rx64_torque), round(rx28_torque))
+                        if targeted_torque
+                        else "torque=%d" % round(torque)
+                    ),
+                )
             )
         except Exception as exc:
             self.publish_status(f"ERROR command failed: {exc}")

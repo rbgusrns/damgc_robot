@@ -21,6 +21,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_gripper_sequence test/test_gripper_sequence_node.py
     APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/scripts
   )
+  ament_add_pytest_test(test_dynamixel_orin_node test/test_dynamixel_orin_node.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/scripts
+  )
 endif()
 
 ament_package()

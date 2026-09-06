@@ -28,6 +28,68 @@ RealSense D435
 Depth stream도 향후 perception 사용을 위해 함께 켜진다. 현재 AprilTag 주행
 controller는 rectified color image를 사용한다.
 
+### 1.1 현재 통합 gripper 동작
+
+`leader_apriltag_drive.launch.py`는 주행 pipeline과 함께 Dynamixel Orin node 및
+gripper sequence를 준비한다. 기본값은 `gripper_enabled=true`,
+`gripper_open_raw=1000`, `lift_enabled=false`이다.
+
+```text
+RealSense/AprilTag -> Leader hybrid alignment -> approach controller
+                                      -> velocity_guard -> STM32/I2C
+
+gripper_enabled=true                 (독립적인 manipulator gate)
+  -> Dynamixel Orin node
+  -> gripper sequence
+       /leader/supply/detected=true -> RX-28 OPEN 1000
+       /leader/base_alignment/state=ALIGNED -> RX-28 CLOSE 450
+       lift_enabled=false -> DONE (RX-64 command 없음)
+```
+
+gripper subsystem은 Tag detection 전에는 actuator command를 발행하지 않는다.
+`velocity_guard`는 기존처럼 startup disabled이며, gripper enabled 여부와 wheel
+motion enable 여부는 서로 독립적이다.
+
+기존에 별도 터미널에서 `dynamixel_orin.launch.py`와
+`gripper_sequence.launch.py`를 실행하던 절차는 통합 launch로 대체된다. 단,
+gripper-only bench test가 필요하면 각 child launch를 기존 방식으로 실행할 수 있다.
+
+관련 launch arguments:
+
+| Argument | Default | 의미 |
+|---|---:|---|
+| `gripper_enabled` | `true` | Dynamixel 및 sequence 전체 master gate |
+| `gripper_open_raw` | `1000` | RX-28 OPEN raw position |
+| `lift_enabled` | `false` | RX-64 자동 lift 허용 여부 |
+| `lift_raw` | `-1` | unset sentinel; valid configured range는 450..775 |
+| child `close_raw` | `450` | 검증된 RX-28 CLOSE 값 |
+| child `close_wait` | `2.0` | lift enabled일 때 CLOSE 후 대기 시간 |
+
+RX-64 hardware 방향은 아직 검증되지 않았으므로 기본 lift를 의도적으로 끈다.
+`lift_enabled=true`일 때도 `lift_raw`가 450..775 밖이면 RX-64 command를 보내지 않고
+ERROR status를 남긴다. 안전한 raw 값이 검증된 뒤에만 아래처럼 활성화한다.
+
+sequence는 RX-28과 RX-64 torque를 분리한 targeted raw 형식으로 command를 보낸다.
+OPEN/CLOSE는 `[-1, rx28_raw, -1, 1]`, lift는 `[rx64_raw, -1, 1, -1]`이다.
+기존 driver의 3-field `[rx64_raw, rx28_raw, torque]` 형식도 수동 사용을 위해
+그대로 지원한다.
+
+```bash
+ros2 launch rescue_robot_bringup leader_apriltag_drive.launch.py \
+  lift_enabled:=true lift_raw:=<VERIFIED_RAW_VALUE>
+```
+
+gripper subsystem을 완전히 제외하는 AprilTag-only 회귀 실행:
+
+```bash
+ros2 launch rescue_robot_bringup leader_apriltag_drive.launch.py \
+  gripper_enabled:=false
+```
+
+이 경우 `/leader/dynamixel/command`, `/leader/gripper/command`, `/sequence/status`
+publisher를 제공하는 gripper node 자체가 실행되지 않으며, camera/AprilTag,
+alignment, approach, velocity guard, STM32 pipeline은 기존과 동일하다.
+
 ## 2. 가장 중요한 startup safety
 
 통합 launch 직후의 상태는 다음과 같다.
@@ -71,6 +133,7 @@ colcon build --symlink-install --packages-select \
   rescue_robot_apriltag \
   leader_approach_control \
   stm32_bridge \
+  rescue_robot_tools \
   rescue_robot_bringup
 source install/local_setup.bash
 ```
