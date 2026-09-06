@@ -26,9 +26,9 @@
     # Follower geometry baseline. Do not replace this 0.25 m target with the
     # Leader robot's 0.20 m value during algorithm migration.
     base_target_forward: 0.25
-    base_forward_tolerance: 0.03
-    base_lateral_tolerance: 0.02
-    base_bearing_tolerance_deg: 5.0
+    base_forward_tolerance: 0.04
+    base_lateral_tolerance: 0.04
+    base_bearing_tolerance_deg: 8.0
     base_stable_time: 0.30
     aligned_confirm_samples: 3
     stabilizing_tag_loss_grace_sec: 0.30
@@ -44,7 +44,7 @@
     tag_recenter_enter_deg: 18.0
     tag_recenter_exit_deg: 11.0
     near_normal_correction_limit_deg: 6.0
-    final_realign_yaw_error_deg: 8.0
+    final_realign_yaw_error_deg: 12.0
 
     # Restricted close-range odometry fallback. It is implemented for testing
     # but remains disabled until Follower wheel odometry is validated in situ.

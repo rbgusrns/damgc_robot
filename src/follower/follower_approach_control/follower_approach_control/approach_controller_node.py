@@ -87,7 +87,7 @@ class ApproachControllerNode(Node):
         self.declare_parameter("max_raw_angular_speed", 0.20)
         self.declare_parameter("near_max_angular_speed", 0.10)
         self.declare_parameter("max_final_linear_speed", 0.02)
-        self.declare_parameter("max_final_angular_speed", 0.08)
+        self.declare_parameter("max_final_angular_speed", 0.06)
         self.declare_parameter("blind_final_speed", 0.015)
         # Deprecated compatibility parameter; hybrid control remains forward-only.
         self.declare_parameter("allow_reverse", False)

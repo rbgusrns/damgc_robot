@@ -22,7 +22,7 @@
     max_raw_angular_speed: 0.20
     near_max_angular_speed: 0.10
     max_final_linear_speed: 0.02
-    max_final_angular_speed: 0.08
+    max_final_angular_speed: 0.06
     blind_final_speed: 0.015
     # Deprecated no-op retained for compatibility; reverse remains prohibited.
     allow_reverse: false
