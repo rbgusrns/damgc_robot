@@ -27,6 +27,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("gripper_enabled", default_value="true"),
             DeclareLaunchArgument("gripper_open_raw", default_value="1000"),
+            DeclareLaunchArgument("gripper_close_raw", default_value="450"),
             DeclareLaunchArgument("lift_enabled", default_value="false"),
             DeclareLaunchArgument("lift_raw", default_value="-1"),
             LogInfo(
@@ -81,6 +82,7 @@ def generate_launch_description():
                     "detection_topic": "/leader/supply/detected",
                     "alignment_topic": "/leader/base_alignment/state",
                     "open_raw": LaunchConfiguration("gripper_open_raw"),
+                    "close_raw": LaunchConfiguration("gripper_close_raw"),
                     "lift_enabled": LaunchConfiguration("lift_enabled"),
                     "lift_raw": LaunchConfiguration("lift_raw"),
                 },
