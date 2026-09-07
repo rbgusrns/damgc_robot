@@ -16,7 +16,7 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import SetRemap
 
 
-def _include(package_name, launch_file, launch_arguments=None):
+def _include(package_name, launch_file, launch_arguments=None, condition=None):
     launch_path = os.path.join(
         get_package_share_directory(package_name),
         "launch",
@@ -25,6 +25,7 @@ def _include(package_name, launch_file, launch_arguments=None):
     return IncludeLaunchDescription(
         PythonLaunchDescriptionSource(launch_path),
         launch_arguments=(launch_arguments or {}).items(),
+        condition=condition,
     )
 
 
@@ -36,6 +37,38 @@ def generate_launch_description() -> LaunchDescription:
     i2c_write_enabled = LaunchConfiguration("i2c_write_enabled")
 
     arguments = [
+        DeclareLaunchArgument(
+            "gripper_enabled",
+            default_value="true",
+            choices=["true", "false"],
+            description="Launch the Follower Dynamixel gripper subsystem",
+        ),
+        DeclareLaunchArgument(
+            "gripper_port",
+            default_value="/dev/ttyUSB0",
+            description="Follower U2D2 serial device",
+        ),
+        DeclareLaunchArgument(
+            "gripper_open_raw",
+            default_value="950",
+            description="Follower RX-28 OPEN raw goal",
+        ),
+        DeclareLaunchArgument(
+            "gripper_close_raw",
+            default_value="350",
+            description="Follower RX-28 CLOSE raw goal",
+        ),
+        DeclareLaunchArgument(
+            "lift_enabled",
+            default_value="true",
+            choices=["true", "false"],
+            description="Enable automatic Follower RX-64 lift after close",
+        ),
+        DeclareLaunchArgument(
+            "lift_raw",
+            default_value="300",
+            description="Follower RX-64 lift raw goal (valid range 260..670)",
+        ),
         DeclareLaunchArgument(
             "use_stm32_bridge",
             default_value="true",
@@ -109,5 +142,31 @@ def generate_launch_description() -> LaunchDescription:
                 {"guard_enabled_on_startup": "false"},
             ),
             stm32_bridge,
+            _include(
+                "rescue_robot_tools",
+                "dynamixel_orin.launch.py",
+                {
+                    "robot": "follower",
+                    "port": LaunchConfiguration("gripper_port"),
+                },
+                condition=IfCondition(LaunchConfiguration("gripper_enabled")),
+            ),
+            _include(
+                "rescue_robot_tools",
+                "gripper_sequence.launch.py",
+                {
+                    "enabled": "true",
+                    "robot": "follower",
+                    "detection_topic": "/follower/supply/detected",
+                    "alignment_topic": "/follower/base_alignment/state",
+                    "raw_command_topic": "/follower/dynamixel/command",
+                    "gripper_topic": "/follower/gripper/command",
+                    "open_raw": LaunchConfiguration("gripper_open_raw"),
+                    "close_raw": LaunchConfiguration("gripper_close_raw"),
+                    "lift_enabled": LaunchConfiguration("lift_enabled"),
+                    "lift_raw": LaunchConfiguration("lift_raw"),
+                },
+                condition=IfCondition(LaunchConfiguration("gripper_enabled")),
+            ),
         ]
     )

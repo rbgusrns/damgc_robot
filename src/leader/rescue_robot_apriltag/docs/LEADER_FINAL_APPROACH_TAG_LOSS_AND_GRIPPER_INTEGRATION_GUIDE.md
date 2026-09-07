@@ -18,6 +18,57 @@
 > Dynamixel node and sequence launch. It does not change the existing wheel safety:
 > `velocity_guard` remains startup-disabled.
 
+## Follower 적용값
+
+이 문서의 Leader 시퀀스를 Follower에 적용할 때는 Leader의 거리·모터 ID·raw
+범위를 그대로 사용하지 않는다. 현재 Follower 소스 기준 값은 다음과 같다.
+
+| 항목 | Follower 값 | 설명 |
+|---|---:|---|
+| camera `target_distance` | `0.15 m` | 기존 Follower AprilTag 접근 기준 |
+| `base_target_forward` | `0.25 m` | Follower base-frame 최종 목표 |
+| `base_forward_tolerance` | `0.04 m` | 최종 전방 허용 오차 |
+| `base_lateral_tolerance` | `0.04 m` | 최종 횡방향 허용 오차 |
+| `base_bearing_tolerance_deg` | `8.0 deg` | 최종 yaw 허용 오차 |
+| `base_stable_time` | `0.30 s` | ALIGNED 안정 시간 |
+| `aligned_confirm_samples` | `3` | ALIGNED fresh confirmation 횟수 |
+| `stabilizing_tag_loss_grace_sec` | `0.30 s` | STABILIZING tag-loss grace |
+| `final_approach_tag_loss_grace_sec` | `0.30 s` | FINAL_APPROACH tag-loss grace |
+| RX-28 | ID `1`, raw `1..1021` | Follower gripper |
+| RX-64 | ID `50`, raw `260..670` | Follower lift |
+| OPEN | RX-28 raw `950` | Follower 기본 OPEN |
+| CLOSE | RX-28 raw `350` | Follower 기본 CLOSE |
+| LIFT | RX-64 raw `300` | Follower 설정값 |
+
+Follower의 authoritative alignment topic은
+`/follower/base_alignment/state`이며 detection topic은
+`/follower/supply/detected`이다. 따라서 Follower 시퀀스는 다음 순서로
+동작한다.
+
+```text
+/follower/supply/detected=true
+  -> RX-28 OPEN 950
+  -> /follower/base_alignment/state=ALIGNED
+  -> RX-28 CLOSE 350
+  -> close_wait(3.0 s)
+  -> RX-64 LIFT 300
+  -> DONE
+```
+
+Follower launch에서는 Follower의 검증된 설정값으로 `lift_enabled`를 `true`로
+두어 raw 300 lift까지 자동 실행한다. lift를 제외한 시험이 필요하면 다음처럼
+명시적으로 비활성화한다.
+
+```bash
+ros2 launch follower_supply_perception follower_apriltag_drive.launch.py \
+  lift_enabled:=false
+```
+
+Follower 관련 명령 토픽은 `/follower/dynamixel/command`, 상태 확인 토픽은
+`/follower/dynamixel/status`와 `/sequence/status`이다. 이 Follower 적용값은
+Leader의 `final_target_distance=0.23 m`, RX-28 ID 2, RX-64 ID 33,
+`open_raw=1000`, `close_raw=450` 기준과 다르다.
+
 ## Current launch arguments and verification
 
 | Argument | Default | Safety meaning |
