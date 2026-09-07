@@ -9,6 +9,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("enabled", default_value="false"),
         DeclareLaunchArgument("robot", default_value="leader"),
+        DeclareLaunchArgument("node_namespace", default_value=""),
         DeclareLaunchArgument("detection_topic", default_value="/leader/supply/detected"),
         DeclareLaunchArgument(
             "alignment_topic", default_value="/leader/base_alignment/state"
@@ -22,27 +23,46 @@ def generate_launch_description():
         DeclareLaunchArgument("lift_raw", default_value="-1.0"),
         DeclareLaunchArgument("lost_rx64_raw", default_value="600"),
         DeclareLaunchArgument("lost_rx28_raw", default_value="500"),
+        DeclareLaunchArgument("tag_lost_idle_enabled", default_value="true"),
         Node(
             package="rescue_robot_tools",
             executable="gripper_sequence_node.py",
             name="gripper_sequence",
+            namespace=LaunchConfiguration("node_namespace"),
             output="screen",
             parameters=[{
-                "enabled": LaunchConfiguration("enabled"),
+                "enabled": ParameterValue(
+                    LaunchConfiguration("enabled"), value_type=bool
+                ),
                 "robot": LaunchConfiguration("robot"),
                 "detection_topic": LaunchConfiguration("detection_topic"),
                 "alignment_topic": LaunchConfiguration("alignment_topic"),
                 "raw_command_topic": LaunchConfiguration("raw_command_topic"),
                 "gripper_topic": LaunchConfiguration("gripper_topic"),
-                "open_raw": LaunchConfiguration("open_raw"),
-                "close_raw": LaunchConfiguration("close_raw"),
-                "close_wait": LaunchConfiguration("close_wait"),
-                "lift_enabled": LaunchConfiguration("lift_enabled"),
+                "open_raw": ParameterValue(
+                    LaunchConfiguration("open_raw"), value_type=int
+                ),
+                "close_raw": ParameterValue(
+                    LaunchConfiguration("close_raw"), value_type=int
+                ),
+                "close_wait": ParameterValue(
+                    LaunchConfiguration("close_wait"), value_type=float
+                ),
+                "lift_enabled": ParameterValue(
+                    LaunchConfiguration("lift_enabled"), value_type=bool
+                ),
                 "lift_raw": ParameterValue(
                     LaunchConfiguration("lift_raw"), value_type=float
                 ),
-                "lost_rx64_raw": LaunchConfiguration("lost_rx64_raw"),
-                "lost_rx28_raw": LaunchConfiguration("lost_rx28_raw"),
+                "lost_rx64_raw": ParameterValue(
+                    LaunchConfiguration("lost_rx64_raw"), value_type=int
+                ),
+                "lost_rx28_raw": ParameterValue(
+                    LaunchConfiguration("lost_rx28_raw"), value_type=int
+                ),
+                "tag_lost_idle_enabled": ParameterValue(
+                    LaunchConfiguration("tag_lost_idle_enabled"), value_type=bool
+                ),
             }],
         ),
     ])

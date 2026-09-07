@@ -3,8 +3,10 @@
 import ast
 import importlib.util
 from pathlib import Path
+from unittest.mock import patch
 
-from launch import LaunchDescription
+from launch import LaunchContext, LaunchDescription
+from launch.actions import IncludeLaunchDescription
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -37,7 +39,8 @@ def test_integrated_launch_is_importable() -> None:
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    assert isinstance(module.generate_launch_description(), LaunchDescription)
+    with patch.object(module, "get_package_share_directory", return_value="/tmp/share"):
+        assert isinstance(module.generate_launch_description(), LaunchDescription)
 
 
 def test_integrated_launch_declares_bridge_arguments_and_safe_defaults() -> None:
@@ -81,13 +84,59 @@ def test_integrated_gripper_uses_follower_profile_and_alignment_values() -> None
     assert 'DeclareLaunchArgument(\n            "gripper_enabled"' in source
     assert 'default_value="950"' in source
     assert 'default_value="350"' in source
-    assert 'default_value="300"' in source
-    assert '"lift_enabled",\n            default_value="true"' in source
+    assert '"lift_raw",\n            default_value="-1"' in source
+    assert '"lift_enabled",\n            default_value="false"' in source
     assert '"robot": "follower"' in source
+    assert source.count('"robot": "follower"') == 2
+    assert '"startup_pose_enabled": "false"' in source
+    assert '"startup_torque": "false"' in source
+    assert '"tag_lost_idle_enabled": "false"' in source
+    assert '"node_namespace": "follower"' in source
     assert '"detection_topic": "/follower/supply/detected"' in source
     assert '"alignment_topic": "/follower/base_alignment/state"' in source
     assert '"raw_command_topic": "/follower/dynamixel/command"' in source
     assert '"gripper_topic": "/follower/gripper/command"' in source
+
+
+def test_gripper_master_gate_excludes_both_children() -> None:
+    source = _source(DRIVE_LAUNCH)
+
+    assert source.count(
+        'condition=IfCondition(LaunchConfiguration("gripper_enabled"))'
+    ) == 2
+    assert source.count('"dynamixel_orin.launch.py"') == 1
+    assert source.count('"gripper_sequence.launch.py"') == 1
+
+
+def test_gripper_master_gate_condition_evaluates_false_and_true() -> None:
+    spec = importlib.util.spec_from_file_location(
+        "follower_apriltag_drive_conditions", DRIVE_LAUNCH
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with patch.object(module, "get_package_share_directory", return_value="/tmp/share"):
+        description = module.generate_launch_description()
+
+    conditioned_includes = [
+        entity
+        for entity in description.entities
+        if isinstance(entity, IncludeLaunchDescription) and entity.condition is not None
+    ]
+    assert len(conditioned_includes) == 2
+
+    disabled_context = LaunchContext()
+    disabled_context.launch_configurations["gripper_enabled"] = "false"
+    assert all(
+        not entity.condition.evaluate(disabled_context)
+        for entity in conditioned_includes
+    )
+
+    enabled_context = LaunchContext()
+    enabled_context.launch_configurations["gripper_enabled"] = "true"
+    assert all(
+        entity.condition.evaluate(enabled_context) for entity in conditioned_includes
+    )
 
 
 def test_selected_pipeline_and_bridge_remap_are_explicit() -> None:

@@ -32,6 +32,7 @@ class DynamixelOrinNode(Node):
         self.declare_parameter("startup_rx64_raw", 600)
         self.declare_parameter("startup_rx28_raw", 500)
         self.declare_parameter("startup_torque", True)
+        self.declare_parameter("startup_pose_enabled", True)
 
         robot = str(self.get_parameter("robot").value)
         self.profile = get_profile(robot)
@@ -40,32 +41,19 @@ class DynamixelOrinNode(Node):
         startup_rx64 = int(self.get_parameter("startup_rx64_raw").value)
         startup_rx28 = int(self.get_parameter("startup_rx28_raw").value)
         startup_torque = bool(self.get_parameter("startup_torque").value)
+        startup_pose_enabled = bool(
+            self.get_parameter("startup_pose_enabled").value
+        )
         self.controller = None
 
         try:
             self.controller = DynamixelOrin(port, self.profile, baudrate)
             self.publish_status(f"READY robot={robot} port={port} baudrate={baudrate}")
-            if not (
-                self.profile["rx64_min"] <= startup_rx64 <= self.profile["rx64_max"]
-                and self.profile["rx28_min"] <= startup_rx28 <= self.profile["rx28_max"]
-            ):
-                raise ValueError(
-                    "startup positions are outside the configured Dynamixel limits"
-                )
-            if startup_torque:
-                self.controller.set_torque(self.profile["rx64_id"], True)
-                self.controller.set_torque(self.profile["rx28_id"], True)
-            self.controller.set_position(
-                self.profile["rx64_id"], startup_rx64,
-                self.profile["rx64_min"], self.profile["rx64_max"]
-            )
-            self.controller.set_position(
-                self.profile["rx28_id"], startup_rx28,
-                self.profile["rx28_min"], self.profile["rx28_max"]
-            )
-            self.publish_status(
-                f"STARTUP idle pose rx64={startup_rx64} rx28={startup_rx28} "
-                f"torque={int(startup_torque)}"
+            self._apply_startup_configuration(
+                startup_pose_enabled,
+                startup_torque,
+                startup_rx64,
+                startup_rx28,
             )
         except Exception as exc:
             self.publish_status(f"ERROR opening U2D2: {exc}")
@@ -84,6 +72,44 @@ class DynamixelOrinNode(Node):
             10,
         )
         self.status_publisher = self.create_publisher(String, "dynamixel/status", 10)
+
+    def _apply_startup_configuration(
+        self,
+        startup_pose_enabled: bool,
+        startup_torque: bool,
+        startup_rx64: int,
+        startup_rx28: int,
+    ) -> None:
+        """Apply the optional startup torque and pose without implicit writes."""
+        if startup_pose_enabled and not (
+            self.profile["rx64_min"] <= startup_rx64 <= self.profile["rx64_max"]
+            and self.profile["rx28_min"] <= startup_rx28 <= self.profile["rx28_max"]
+        ):
+            raise ValueError(
+                "startup positions are outside the configured Dynamixel limits"
+            )
+
+        if startup_torque:
+            self.controller.set_torque(self.profile["rx64_id"], True)
+            self.controller.set_torque(self.profile["rx28_id"], True)
+
+        if startup_pose_enabled:
+            self.controller.set_position(
+                self.profile["rx64_id"], startup_rx64,
+                self.profile["rx64_min"], self.profile["rx64_max"]
+            )
+            self.controller.set_position(
+                self.profile["rx28_id"], startup_rx28,
+                self.profile["rx28_min"], self.profile["rx28_max"]
+            )
+            self.publish_status(
+                f"STARTUP idle pose rx64={startup_rx64} rx28={startup_rx28} "
+                f"torque={int(startup_torque)}"
+            )
+        else:
+            self.publish_status(
+                "STARTUP pose disabled torque=%d" % int(startup_torque)
+            )
 
     def gripper_command_callback(self, message: String):
         """Handle simple semantic commands without exposing raw positions."""

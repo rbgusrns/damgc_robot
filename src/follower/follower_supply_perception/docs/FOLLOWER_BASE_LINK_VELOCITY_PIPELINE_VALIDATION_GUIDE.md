@@ -22,12 +22,15 @@ USB camera
   → final safe ROS 2 velocity topic
 ```
 
-다음 항목은 완료 범위가 아니다.
+다음 항목은 이 문서가 기록한 **2026-08-29 base-link velocity pipeline 단계**의 완료
+범위가 아니다. 이후 Follower gripper software integration은
+`follower_apriltag_drive.launch.py`에 추가되었으며, 현재 기본 동작과 안전 정책은
+패키지 `README.md`의 "통합 Dynamixel gripper" 절을 따른다.
 
 - STM32 bridge 및 UART
 - Motor 연결과 실제 주행
 - Wheel-air 또는 ground driving test
-- Gripper 제어와 실제 grasp
+- 당시 Gripper software integration 및 실제 grasp
 
 즉, 완료의 의미는 **USB camera에서 `/follower/safe_cmd_vel`까지의 ROS 2 software
 pipeline 완료**이며, hardware motion 완료가 아니다.
@@ -1075,8 +1078,8 @@ NOT VERIFIED이므로 실제 closed-loop readiness를 주장하지 않는다.
 - [ ] 실제 AprilTag closed-loop motor test
 - [ ] Hardware speed/acceleration tuning
 - [ ] Cooperation + AprilTag full mission arbitration validation
-- [ ] Gripper control
-- [ ] Grasp validation
+- [x] Gripper software integration (`follower_apriltag_drive.launch.py`; RX-28 기본 자동 동작)
+- [ ] Physical gripper motion 및 grasp validation
 - [ ] Physical RIGHT/TARGET/HIDDEN scenario 재검증
 
 ## 22. Known limitations

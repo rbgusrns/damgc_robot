@@ -116,7 +116,8 @@ ROS_LOG_DIR=/home/kde/ros2_ws/log \
 - target_distance 0.15 m는 시험값이다.
 - 파라미터는 시작 시 읽으므로 target_tag_id 동적 적용 callback이 없다.
 - nearest 선택 hysteresis가 없어 비슷한 거리 태그 사이에서 전환될 수 있다.
-- cmd_vel, STM32, 그리퍼와 MarkerArray는 구현되지 않았다.
+- 당시 범위에서는 cmd_vel, STM32, 그리퍼와 MarkerArray가 구현되지 않았다. 이후 추가된
+  velocity/gripper integration은 아래 최신 절과 각 authoritative run guide를 따른다.
 - TAG_LOST일 때 이전 pose/metric을 재발행하지 않으므로 consumer가 detected를 확인해야 한다.
 
 ## 8. Git status와 diff 요약
@@ -151,3 +152,28 @@ tag-loss handling을 Follower 구조에 맞게 최소 이식했다.
 관련 targeted perception/controller tests 81개와 `follower_supply_perception` 전체
 135개가 통과했고, `follower_supply_perception` 및 `follower_approach_control` build가
 성공했다. 실제 로봇/카메라 runtime grace timing은 아직 물리 검증 결과로 기록하지 않는다.
+
+## 10. 2026-09-07 Follower Dynamixel gripper 안전 감사
+
+Follower gripper는 새 subsystem으로 추가한 것이 아니라 기존
+`follower_apriltag_drive.launch.py`의 Dynamixel 및 gripper sequence integration을 현재
+source 기준으로 감사하고 안전 기본값을 보완했다. 상세 운영 절차와 architecture는 패키지
+`README.md`의 "통합 Dynamixel gripper" 절, software-only 검증 결과는
+`docs/LAUNCH_VALIDATION_APRILTAG.md`를 authoritative source로 사용한다.
+
+- 기존 `gripper_enabled=true`, `robot=follower`, detection/alignment/command topic 연결과
+  RX-28 OPEN `950`, CLOSE `350`은 유지
+- Follower 기본값을 `lift_enabled=false`, `lift_raw=-1`로 변경
+- Follower override `startup_pose_enabled=false`, `startup_torque=false`로 launch 직후
+  RX-64/RX-28 torque 및 Goal Position write 차단
+- Follower override `tag_lost_idle_enabled=false`로 temporary Tag loss 시 두 Dynamixel의
+  idle reposition 차단
+- OPEN `[-1,950,-1,1]`, CLOSE `[-1,350,-1,1]` targeted command로 RX-64 unchanged 유지
+- `close_wait` 및 `LIFTING`을 삭제하지 않았으며, 향후 검증된 `lift_raw`와
+  `lift_enabled=true`만으로 정상 RX-64 lift path 활성화 가능
+- shared defaults는 startup pose/torque와 Tag-loss idle을 `true`로 유지하여 Leader 기존
+  동작 보존
+- Follower sequence node/status를 `/follower/gripper_sequence`,
+  `/follower/sequence/status`로 분리하여 Leader와 같은 ROS graph에서 이름 충돌 방지
+- 실제 U2D2, Dynamixel, wheel motion은 실행하지 않았으며 hardware 검증은 여전히
+  `NOT VERIFIED`

@@ -127,3 +127,36 @@ ros2 param get /follower/apriltag_approach blind_final_approach_enabled
 현재 기대값은 grace 두 개 모두 `0.30`, blind final은 `False`다. Controller
 enable/disable은 `/follower/approach/enabled`를 통해 perception의 approach-session reset을
 발생시키며, launch 시작 또는 session 전환 후 과거 ALIGNED latch를 재사용하지 않는다.
+
+## Follower Dynamixel integration 안전 계약
+
+`follower_apriltag_drive.launch.py`에는 기존부터 Dynamixel controller와 gripper sequence가
+조건부 통합되어 있다. 현재 감사에서는 이 연결을 유지하고 Follower의 기본 actuator
+정책만 다음과 같이 고정했다.
+
+- `gripper_enabled=true`, `robot=follower`, OPEN `950`, CLOSE `350`
+- `lift_enabled=false`, `lift_raw=-1`
+- startup pose/torque disabled: Tag 전 RX-64/RX-28 write 없음
+- Tag-loss idle disabled: detection flicker에 따른 reposition 없음
+- OPEN `[-1,950,-1,1]`, CLOSE `[-1,350,-1,1]`
+- sequence status `/follower/sequence/status`
+- wheel velocity guard startup disabled 유지
+
+Future lift는 삭제하지 않았다. mock test에서는 유효 범위의 시험용 raw 값으로 CLOSE 후
+`close_wait`가 지난 뒤 RX-64 targeted command가 정확히 한 번 발생하고 `LIFTING → DONE`이
+되는지를 확인한다. 이 시험값은 실제 hardware-safe 값이 아니다. 실제 하드웨어 검증은
+README의 단계별 절차를 따르며 자동 검증 중에는 actuator 또는 wheel command를 발행하지
+않는다.
+
+2026-09-07 software-only 검증 결과:
+
+- 변경 package `rescue_robot_tools`, `follower_supply_perception` symlink build 성공
+- shared Dynamixel/sequence unit test 18개 성공
+- Follower package test 143개 성공
+- Leader integrated launch regression test 성공
+- `ros2 launch ... --show-args`로 top-level/child argument와 package resolution 확인
+- master gate의 두 child condition이 `false`에서 모두 제외되고 `true`에서 모두
+  포함되는 것을 launch context로 확인
+- focused shared/Follower/Leader regression: 33 tests passed
+- `colcon test-result --verbose`: 444 tests, 0 errors, 0 failures, 0 skipped
+- 실제 U2D2, Dynamixel, wheel 또는 integrated robot process는 실행하지 않음

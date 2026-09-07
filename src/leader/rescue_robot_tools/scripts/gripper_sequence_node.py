@@ -41,6 +41,7 @@ class GripperSequenceNode(Node):
         self.declare_parameter("lift_raw", -1.0)
         self.declare_parameter("lost_rx64_raw", 600)
         self.declare_parameter("lost_rx28_raw", 500)
+        self.declare_parameter("tag_lost_idle_enabled", True)
 
         detection_topic = str(self.get_parameter("detection_topic").value)
         alignment_topic = str(self.get_parameter("alignment_topic").value)
@@ -53,6 +54,9 @@ class GripperSequenceNode(Node):
         self._lift_enabled = bool(self.get_parameter("lift_enabled").value)
         self._lost_rx64_raw = int(self.get_parameter("lost_rx64_raw").value)
         self._lost_rx28_raw = int(self.get_parameter("lost_rx28_raw").value)
+        self._tag_lost_idle_enabled = bool(
+            self.get_parameter("tag_lost_idle_enabled").value
+        )
         # RX-64 remains disabled by default until its mechanical direction is validated.
         lift_raw_value = self.get_parameter("lift_raw").value
         try:
@@ -79,9 +83,12 @@ class GripperSequenceNode(Node):
             raise ValueError("open_raw must be between 1 and 1021")
         if not 1 <= self._close_raw <= 1021:
             raise ValueError("close_raw must be between 1 and 1021")
-        if not self._lift_min_raw <= self._lost_rx64_raw <= self._lift_max_raw:
+        if (
+            self._tag_lost_idle_enabled
+            and not self._lift_min_raw <= self._lost_rx64_raw <= self._lift_max_raw
+        ):
             raise ValueError("lost_rx64_raw is outside the configured RX-64 limits")
-        if not 1 <= self._lost_rx28_raw <= 1021:
+        if self._tag_lost_idle_enabled and not 1 <= self._lost_rx28_raw <= 1021:
             raise ValueError("lost_rx28_raw must be between 1 and 1021")
 
         self._raw_pub = self.create_publisher(Float64MultiArray, raw_topic, 10)
@@ -148,7 +155,7 @@ class GripperSequenceNode(Node):
         detected = bool(message.data)
         was_detected = self._tag_detected
         self._tag_detected = detected
-        if not detected and was_detected:
+        if not detected and was_detected and self._tag_lost_idle_enabled:
             self._publish_raw(
                 float(self._lost_rx64_raw), float(self._lost_rx28_raw),
                 -1.0, 1.0, 1.0
@@ -190,16 +197,13 @@ class GripperSequenceNode(Node):
             if self._deadline is not None and self._now() >= self._deadline:
                 self._state = SequenceState.LIFTING
                 self._publish_raw(float(self._lift_raw), -1.0, -1.0, 1.0, -1.0)
-                self._state = SequenceState.DONE
                 self._deadline = None
-                self._publish_status("DONE lift_raw=%d" % self._lift_raw)
+                self._publish_status("LIFTING lift_raw=%d" % self._lift_raw)
             return
 
         if self._state == SequenceState.LIFTING:
-            if self._deadline is not None and self._now() >= self._deadline:
-                self._state = SequenceState.DONE
-                self._deadline = None
-                self._publish_status("DONE")
+            self._state = SequenceState.DONE
+            self._publish_status("DONE lift_raw=%d" % self._lift_raw)
             return
 
         if (

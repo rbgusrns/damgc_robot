@@ -2,6 +2,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -12,6 +13,7 @@ def generate_launch_description():
         DeclareLaunchArgument("startup_rx64_raw", default_value="600"),
         DeclareLaunchArgument("startup_rx28_raw", default_value="500"),
         DeclareLaunchArgument("startup_torque", default_value="true"),
+        DeclareLaunchArgument("startup_pose_enabled", default_value="true"),
         Node(
             package="rescue_robot_tools",
             executable="dynamixel_orin_node.py",
@@ -20,11 +22,22 @@ def generate_launch_description():
             output="screen",
             parameters=[{
                 "port": LaunchConfiguration("port"),
-                "baudrate": LaunchConfiguration("baudrate"),
+                "baudrate": ParameterValue(
+                    LaunchConfiguration("baudrate"), value_type=int
+                ),
                 "robot": LaunchConfiguration("robot"),
-                "startup_rx64_raw": LaunchConfiguration("startup_rx64_raw"),
-                "startup_rx28_raw": LaunchConfiguration("startup_rx28_raw"),
-                "startup_torque": LaunchConfiguration("startup_torque"),
+                "startup_rx64_raw": ParameterValue(
+                    LaunchConfiguration("startup_rx64_raw"), value_type=int
+                ),
+                "startup_rx28_raw": ParameterValue(
+                    LaunchConfiguration("startup_rx28_raw"), value_type=int
+                ),
+                "startup_torque": ParameterValue(
+                    LaunchConfiguration("startup_torque"), value_type=bool
+                ),
+                "startup_pose_enabled": ParameterValue(
+                    LaunchConfiguration("startup_pose_enabled"), value_type=bool
+                ),
             }],
         ),
     ])

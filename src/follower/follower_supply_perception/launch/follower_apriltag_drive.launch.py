@@ -60,14 +60,14 @@ def generate_launch_description() -> LaunchDescription:
         ),
         DeclareLaunchArgument(
             "lift_enabled",
-            default_value="true",
+            default_value="false",
             choices=["true", "false"],
             description="Enable automatic Follower RX-64 lift after close",
         ),
         DeclareLaunchArgument(
             "lift_raw",
-            default_value="300",
-            description="Follower RX-64 lift raw goal (valid range 260..670)",
+            default_value="-1",
+            description="Follower RX-64 lift raw goal; -1 is the unset sentinel",
         ),
         DeclareLaunchArgument(
             "use_stm32_bridge",
@@ -148,6 +148,8 @@ def generate_launch_description() -> LaunchDescription:
                 {
                     "robot": "follower",
                     "port": LaunchConfiguration("gripper_port"),
+                    "startup_pose_enabled": "false",
+                    "startup_torque": "false",
                 },
                 condition=IfCondition(LaunchConfiguration("gripper_enabled")),
             ),
@@ -157,6 +159,7 @@ def generate_launch_description() -> LaunchDescription:
                 {
                     "enabled": "true",
                     "robot": "follower",
+                    "node_namespace": "follower",
                     "detection_topic": "/follower/supply/detected",
                     "alignment_topic": "/follower/base_alignment/state",
                     "raw_command_topic": "/follower/dynamixel/command",
@@ -165,6 +168,7 @@ def generate_launch_description() -> LaunchDescription:
                     "close_raw": LaunchConfiguration("gripper_close_raw"),
                     "lift_enabled": LaunchConfiguration("lift_enabled"),
                     "lift_raw": LaunchConfiguration("lift_raw"),
+                    "tag_lost_idle_enabled": "false",
                 },
                 condition=IfCondition(LaunchConfiguration("gripper_enabled")),
             ),

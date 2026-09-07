@@ -1,10 +1,14 @@
 """Safety and compatibility tests for raw Dynamixel command routing."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from std_msgs.msg import Float64MultiArray
 
 from dynamixel_orin_node import DynamixelOrinNode
+
+
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
 
 def make_harness():
@@ -63,3 +67,66 @@ def test_legacy_three_field_command_remains_compatible():
     assert ("torque", 33, True) in harness.calls
     assert ("torque", 2, True) in harness.calls
     assert ("position", 2, 450, 1, 1021) in harness.calls
+
+
+def test_disabled_startup_pose_and_torque_write_nothing():
+    harness = make_harness()
+
+    DynamixelOrinNode._apply_startup_configuration(
+        harness,
+        startup_pose_enabled=False,
+        startup_torque=False,
+        startup_rx64=600,
+        startup_rx28=500,
+    )
+
+    assert harness.calls == []
+    assert harness.statuses == ["STARTUP pose disabled torque=0"]
+
+
+def test_leader_compatible_startup_pose_remains_enabled():
+    harness = make_harness()
+
+    DynamixelOrinNode._apply_startup_configuration(
+        harness,
+        startup_pose_enabled=True,
+        startup_torque=True,
+        startup_rx64=600,
+        startup_rx28=500,
+    )
+
+    assert harness.calls == [
+        ("torque", 33, True),
+        ("torque", 2, True),
+        ("position", 33, 600, 260, 670),
+        ("position", 2, 500, 1, 1021),
+    ]
+
+
+def test_startup_pose_disabled_does_not_validate_unused_positions():
+    harness = make_harness()
+
+    DynamixelOrinNode._apply_startup_configuration(
+        harness,
+        startup_pose_enabled=False,
+        startup_torque=False,
+        startup_rx64=-1,
+        startup_rx28=-1,
+    )
+
+    assert harness.calls == []
+
+
+def test_shared_startup_defaults_remain_leader_compatible_and_typed():
+    source = (PACKAGE_ROOT / "launch/dynamixel_orin.launch.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'DeclareLaunchArgument("robot", default_value="leader")' in source
+    assert 'DeclareLaunchArgument("startup_torque", default_value="true")' in source
+    assert (
+        'DeclareLaunchArgument("startup_pose_enabled", default_value="true")'
+        in source
+    )
+    assert 'LaunchConfiguration("startup_torque"), value_type=bool' in source
+    assert 'LaunchConfiguration("startup_pose_enabled"), value_type=bool' in source
