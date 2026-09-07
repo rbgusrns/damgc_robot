@@ -25,9 +25,11 @@ setup(
     license="Apache-2.0",
     tests_require=["pytest"],
     entry_points={
-        "console_scripts": [
-            "apriltag_approach_node = "
-            "follower_supply_perception.apriltag_approach_node:main",
-        ],
+       "console_scripts": [
+   	 "apriltag_approach_node = "
+   	 "follower_supply_perception.apriltag_approach_node:main",
+   	 "leader_path_follower = "
+   	 "follower_supply_perception.leader_path_follower:main",
+	],
     },
 )
