@@ -26,6 +26,8 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("gripper_enabled", default_value="true"),
+            DeclareLaunchArgument("gripper_port", default_value="/dev/ttyUSB0"),
+            DeclareLaunchArgument("gripper_baudrate", default_value="115200"),
             DeclareLaunchArgument("gripper_open_raw", default_value="1000"),
             DeclareLaunchArgument("gripper_close_raw", default_value="450"),
             DeclareLaunchArgument("lift_enabled", default_value="false"),
@@ -75,6 +77,8 @@ def generate_launch_description():
                 "dynamixel_orin.launch.py",
                 {
                     "robot": "leader",
+                    "port": LaunchConfiguration("gripper_port"),
+                    "baudrate": LaunchConfiguration("gripper_baudrate"),
                     # Keep the shared child defaults unchanged, but prevent the
                     # integrated Leader launch from writing an arbitrary startup
                     # pose or enabling torque before a targeted command exists.
