@@ -38,7 +38,7 @@ class GripperSequenceNode(Node):
         self.declare_parameter("enabled", False)
         self.declare_parameter("robot", "leader")
         self.declare_parameter("lift_enabled", False)
-        self.declare_parameter("lift_raw", 350.0)
+        self.declare_parameter("lift_raw", -1.0)
 
         detection_topic = str(self.get_parameter("detection_topic").value)
         alignment_topic = str(self.get_parameter("alignment_topic").value)
@@ -121,10 +121,11 @@ class GripperSequenceNode(Node):
         rx64_torque: Optional[float] = None,
         rx28_torque: Optional[float] = None,
     ) -> None:
-        data = [rx64, rx28, torque]
         if rx64_torque is not None and rx28_torque is not None:
-            data.extend([rx64_torque, rx28_torque])
-        self._raw_pub.publish(Float64MultiArray(data=[rx64, rx28, torque]))
+            data = [rx64, rx28, rx64_torque, rx28_torque]
+        else:
+            data = [rx64, rx28, torque]
+        self._raw_pub.publish(Float64MultiArray(data=data))
         self.get_logger().info(
             "raw command rx64=%s rx28=%s torque=%s" % (rx64, rx28, torque)
         )

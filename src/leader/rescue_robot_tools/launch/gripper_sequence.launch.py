@@ -8,6 +8,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("enabled", default_value="false"),
+        DeclareLaunchArgument("robot", default_value="leader"),
         DeclareLaunchArgument("detection_topic", default_value="/leader/supply/detected"),
         DeclareLaunchArgument(
             "alignment_topic", default_value="/leader/base_alignment/state"
@@ -18,7 +19,7 @@ def generate_launch_description():
         DeclareLaunchArgument("close_raw", default_value="350"),
         DeclareLaunchArgument("close_wait", default_value="3.0"),
         DeclareLaunchArgument("lift_enabled", default_value="false"),
-        DeclareLaunchArgument("lift_raw", default_value="350.0"),
+        DeclareLaunchArgument("lift_raw", default_value="-1.0"),
         Node(
             package="rescue_robot_tools",
             executable="gripper_sequence_node.py",
@@ -26,6 +27,7 @@ def generate_launch_description():
             output="screen",
             parameters=[{
                 "enabled": LaunchConfiguration("enabled"),
+                "robot": LaunchConfiguration("robot"),
                 "detection_topic": LaunchConfiguration("detection_topic"),
                 "alignment_topic": LaunchConfiguration("alignment_topic"),
                 "raw_command_topic": LaunchConfiguration("raw_command_topic"),
