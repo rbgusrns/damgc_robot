@@ -93,6 +93,38 @@ command is expected. Enable wheels only after the existing safety checks:
 ros2 service call /leader/velocity_guard/enable std_srvs/srv/SetBool "{data: true}"
 ```
 
+### Dynamixel ROS write-path diagnosis
+
+The Leader RX-28 uses Dynamixel Protocol 1.0, ID `2`, baudrate `115200`,
+Torque Enable address `24`, and Goal Position address `30`. The ROS node uses the
+ROBOTIS Python SDK (`PortHandler` and `PacketHandler(1.0)`) for serial direction,
+packet construction, and response validation. The ROS raw interfaces remain:
+
+```text
+[rx64_raw, rx28_raw, torque]
+[rx64_raw, rx28_raw, rx64_torque, rx28_torque]
+```
+
+`-1` leaves that position or torque field unchanged. For example,
+`[-1, 1000, -1, 1]` enables only RX-28 torque and writes RX-28 Goal Position
+`1000`; RX-64 is not touched. `OK` status is emitted only after the SDK reports
+`COMM_SUCCESS` and packet error `0`. Failures identify the operation, such as
+`ERROR RX28 position=1000: [TxRxResult] ...`.
+
+Troubleshoot in this order:
+
+1. Confirm `/dev/ttyUSB0`, baudrate `115200`, Protocol 1.0, and RX-28 ID `2`.
+2. Run the SDK ping test.
+3. Run the SDK direct test: `write1ByteTxRx(ID=2, address=24, data=1)` followed by
+   `write2ByteTxRx(ID=2, address=30, data=<target>)`.
+4. If SDK ping/direct motion succeeds but ROS does not, inspect
+   `/leader/dynamixel/status` for the SDK TxRx or packet-error message and treat it
+   as a software driver-path failure.
+
+The package declares the `dynamixel_sdk` ROS runtime dependency; install the ROS
+Humble package on a deployed machine with `ros-humble-dynamixel-sdk` when it is
+not already present.
+
 For AprilTag-only regression, restart with:
 
 ```bash
@@ -388,6 +420,39 @@ ros2 service call /leader/velocity_guard/enable std_srvs/srv/SetBool "{data: fal
 Phase A가 모두 정상일 때만 U2D2와 gripper sequence를 실행한다. 사람과 물체를 actuator
 가동 범위 밖에 두고 `/dev/ttyUSB0`가 실제 U2D2인지 먼저 확인한다.
 
+ROS보다 먼저 RX-28 단독 통신을 확인하려면 다음 SDK smoke test를 사용한다. 이 명령은
+실제 RX-28을 움직이므로 actuator 주변을 비운 뒤 사용자가 직접 실행한다.
+
+```bash
+source /opt/ros/humble/setup.bash
+python3 - <<'PY'
+from dynamixel_sdk import COMM_SUCCESS, PacketHandler, PortHandler
+
+port = PortHandler('/dev/ttyUSB0')
+packet = PacketHandler(1.0)
+if not port.openPort() or not port.setBaudRate(115200):
+    raise RuntimeError('cannot open /dev/ttyUSB0 at 115200')
+try:
+    model, comm, error = packet.ping(port, 2)
+    print('ping', model, comm, error)
+    if comm != COMM_SUCCESS or error != 0:
+        raise RuntimeError('RX-28 ping failed')
+    comm, error = packet.write1ByteTxRx(port, 2, 24, 1)
+    print('torque', comm, error)
+    if comm != COMM_SUCCESS or error != 0:
+        raise RuntimeError('RX-28 torque write failed')
+    comm, error = packet.write2ByteTxRx(port, 2, 30, 1000)
+    print('goal_position', comm, error)
+    if comm != COMM_SUCCESS or error != 0:
+        raise RuntimeError('RX-28 goal-position write failed')
+finally:
+    port.closePort()
+PY
+```
+
+성공한 SDK ping/direct test 뒤 ROS 경로가 실패하면 `/leader/dynamixel/status`의
+`ERROR RX28 ...` 내용을 기준으로 software driver path를 진단한다.
+
 Terminal 1은 Phase A의 Leader drive를 그대로 유지한다.
 
 Terminal 2:
@@ -395,7 +460,8 @@ Terminal 2:
 ```bash
 source ~/damgc_robot/install/setup.bash
 ros2 launch rescue_robot_tools dynamixel_orin.launch.py \
-  robot:=leader port:=/dev/ttyUSB0 baudrate:=115200
+  robot:=leader port:=/dev/ttyUSB0 baudrate:=115200 \
+  startup_pose_enabled:=false startup_torque:=false
 ```
 
 Terminal 3:

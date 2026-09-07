@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from std_msgs.msg import Float64MultiArray
 
+from dynamixel_orin import DynamixelCommunicationError
 from dynamixel_orin_node import DynamixelOrinNode
 
 
@@ -67,6 +68,41 @@ def test_legacy_three_field_command_remains_compatible():
     assert ("torque", 33, True) in harness.calls
     assert ("torque", 2, True) in harness.calls
     assert ("position", 2, 450, 1, 1021) in harness.calls
+
+
+def test_semantic_open_and_close_use_rx28_targeted_writes():
+    harness = make_harness()
+
+    DynamixelOrinNode.gripper_command_callback(
+        harness, SimpleNamespace(data="open")
+    )
+    DynamixelOrinNode.gripper_command_callback(
+        harness, SimpleNamespace(data="close")
+    )
+
+    assert harness.calls == [
+        ("torque", 2, True),
+        ("position", 2, 1021, 1, 1021),
+        ("torque", 2, True),
+        ("position", 2, 1, 1, 1021),
+    ]
+    assert harness.statuses == [
+        "OK RX28 position=1021 command=open",
+        "OK RX28 position=1 command=close",
+    ]
+
+
+def test_sdk_failure_is_published_as_error_status():
+    harness = make_harness()
+    harness.controller.set_torque = lambda device_id, enabled: (_ for _ in ()).throw(
+        DynamixelCommunicationError("RX28 torque: tx failure")
+    )
+
+    DynamixelOrinNode.command_callback(
+        harness, Float64MultiArray(data=[-1.0, 1000.0, -1.0, 1.0])
+    )
+
+    assert harness.statuses == ["ERROR RX28 torque: tx failure"]
 
 
 def test_disabled_startup_pose_and_torque_write_nothing():

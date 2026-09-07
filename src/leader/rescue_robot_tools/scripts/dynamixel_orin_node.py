@@ -19,7 +19,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray, String
 
-from dynamixel_orin import DynamixelOrin, get_profile
+from dynamixel_orin import DynamixelCommunicationError, DynamixelOrin, get_profile
 
 
 class DynamixelOrinNode(Node):
@@ -138,7 +138,9 @@ class DynamixelOrinNode(Node):
                     self.profile["rx28_min"],
                     self.profile["rx28_max"],
                 )
-                self.publish_status(f"OK command={command} rx28={rx28_positions[command]}")
+                self.publish_status(
+                    f"OK RX28 position={rx28_positions[command]} command={command}"
+                )
             elif command in rx64_positions:
                 self.controller.set_torque(self.profile["rx64_id"], True)
                 self.controller.set_position(
@@ -147,7 +149,9 @@ class DynamixelOrinNode(Node):
                     self.profile["rx64_min"],
                     self.profile["rx64_max"],
                 )
-                self.publish_status(f"OK command={command} rx64={rx64_positions[command]}")
+                self.publish_status(
+                    f"OK RX64 position={rx64_positions[command]} command={command}"
+                )
             elif command == "stop":
                 self.controller.set_torque(self.profile["rx64_id"], False)
                 self.controller.set_torque(self.profile["rx28_id"], False)
@@ -157,6 +161,8 @@ class DynamixelOrinNode(Node):
                     "ERROR command must be open, close, middle, "
                     "rx64_high, rx64_low, rx64_middle, or stop"
                 )
+        except DynamixelCommunicationError as exc:
+            self.publish_status(f"ERROR {exc}")
         except Exception as exc:
             self.publish_status(f"ERROR command failed: {exc}")
 
@@ -232,6 +238,8 @@ class DynamixelOrinNode(Node):
                     ),
                 )
             )
+        except DynamixelCommunicationError as exc:
+            self.publish_status(f"ERROR {exc}")
         except Exception as exc:
             self.publish_status(f"ERROR command failed: {exc}")
 

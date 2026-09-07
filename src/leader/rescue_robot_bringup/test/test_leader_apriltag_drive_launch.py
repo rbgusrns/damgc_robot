@@ -34,6 +34,9 @@ def test_integrated_launch_exposes_safe_gripper_and_lift_defaults():
     assert 'DeclareLaunchArgument("gripper_lost_rx64_raw", default_value="600")' in source
     assert 'DeclareLaunchArgument("gripper_lost_rx28_raw", default_value="500")' in source
     assert 'condition=IfCondition(LaunchConfiguration("gripper_enabled"))' in source
+    assert '"startup_pose_enabled": "false"' in source
+    assert '"startup_torque": "false"' in source
+    assert '"tag_lost_idle_enabled": "false"' in source
     assert source.count('"dynamixel_orin.launch.py"') == 1
     assert source.count('"gripper_sequence.launch.py"') == 1
     assert '"alignment_topic": "/leader/base_alignment/state"' in source

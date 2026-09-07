@@ -90,9 +90,51 @@ Visualization Manager:
           Value: true
         cad_model_link:
           Value: true
+        camera_color_frame:
+          Value: true
+        camera_color_optical_frame:
+          Value: true
+        camera_depth_frame:
+          Value: true
+        camera_depth_optical_frame:
+          Value: true
         camera_link:
           Value: true
+        front_left_post_link:
+          Value: true
+        front_right_post_link:
+          Value: true
+        gripper_bridge_link:
+          Value: true
+        gripper_connector_link:
+          Value: true
         imu_link:
+          Value: true
+        leader/tag36h11:0:
+          Value: true
+        left_gripper_arm_link:
+          Value: true
+        left_gripper_tip_link:
+          Value: true
+        left_wheel_link:
+          Value: true
+        lower_body_plate_link:
+          Value: true
+        rear_left_post_link:
+          Value: true
+        rear_right_post_link:
+          Value: true
+        right_gripper_arm_link:
+          Value: true
+        right_gripper_tip_link:
+          Value: true
+        right_wheel_link:
+          Value: true
+        sensor_plate_link:
+          Value: true
+        top_front_bridge_link:
+          Value: true
+        top_rear_bridge_link:
           Value: true
       Marker Scale: 0.11999999731779099
       Name: TF
@@ -105,8 +147,46 @@ Visualization Manager:
             cad_model_link:
               {}
             camera_link:
+              camera_color_frame:
+                camera_color_optical_frame:
+                  leader/tag36h11:0:
+                    {}
+              camera_depth_frame:
+                camera_depth_optical_frame:
+                  {}
+            front_left_post_link:
+              {}
+            front_right_post_link:
+              {}
+            gripper_bridge_link:
+              {}
+            gripper_connector_link:
               {}
             imu_link:
+              {}
+            left_gripper_arm_link:
+              {}
+            left_gripper_tip_link:
+              {}
+            left_wheel_link:
+              {}
+            lower_body_plate_link:
+              {}
+            rear_left_post_link:
+              {}
+            rear_right_post_link:
+              {}
+            right_gripper_arm_link:
+              {}
+            right_gripper_tip_link:
+              {}
+            right_wheel_link:
+              {}
+            sensor_plate_link:
+              {}
+            top_front_bridge_link:
+              {}
+            top_rear_bridge_link:
               {}
       Update Interval: 0
       Value: true
@@ -129,7 +209,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 0.75
+      Distance: 0.9007397890090942
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -144,10 +224,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.3950005769729614
+      Pitch: 0.22000069916248322
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz_default_plugins)
-      Yaw: 1.2318265438079834
+      Yaw: 5.53501033782959
     Saved: ~
 Window Geometry:
   Displays:

@@ -73,7 +73,14 @@ def generate_launch_description():
             _include(
                 "rescue_robot_tools",
                 "dynamixel_orin.launch.py",
-                {"robot": "leader"},
+                {
+                    "robot": "leader",
+                    # Keep the shared child defaults unchanged, but prevent the
+                    # integrated Leader launch from writing an arbitrary startup
+                    # pose or enabling torque before a targeted command exists.
+                    "startup_pose_enabled": "false",
+                    "startup_torque": "false",
+                },
                 condition=IfCondition(LaunchConfiguration("gripper_enabled")),
             ),
             _include(
@@ -89,6 +96,9 @@ def generate_launch_description():
                     "lift_raw": LaunchConfiguration("lift_raw"),
                     "lost_rx64_raw": LaunchConfiguration("gripper_lost_rx64_raw"),
                     "lost_rx28_raw": LaunchConfiguration("gripper_lost_rx28_raw"),
+                    # A transient detector loss must not reposition either
+                    # actuator; retain the last commanded gripper position.
+                    "tag_lost_idle_enabled": "false",
                 },
                 condition=IfCondition(LaunchConfiguration("gripper_enabled")),
             ),

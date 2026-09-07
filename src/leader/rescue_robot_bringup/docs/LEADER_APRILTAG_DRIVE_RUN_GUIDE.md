@@ -31,8 +31,11 @@ controller는 rectified color image를 사용한다.
 ### 1.1 현재 통합 gripper 동작
 
 `leader_apriltag_drive.launch.py`는 주행 pipeline과 함께 Dynamixel Orin node 및
-gripper sequence를 준비한다. 기본값은 `gripper_enabled=true`,
-`gripper_open_raw=1000`, `lift_enabled=false`이다.
+gripper sequence를 준비한다. Leader 통합 launch의 gripper 기본값은
+`gripper_enabled=true`, `gripper_open_raw=1000`, `gripper_close_raw=450`,
+`lift_enabled=false`, `startup_pose_enabled=false`,
+`tag_lost_idle_enabled=false`이다. 마지막 세 안전 설정은 shared child launch의
+default를 바꾸지 않고 이 Leader top-level launch에서만 override한다.
 
 ```text
 RealSense/AprilTag -> Leader hybrid alignment -> approach controller
@@ -42,11 +45,13 @@ gripper_enabled=true                 (독립적인 manipulator gate)
   -> Dynamixel Orin node
   -> gripper sequence
        /leader/supply/detected=true -> RX-28 OPEN 1000
+       temporary Tag loss -> gripper position unchanged
        /leader/base_alignment/state=ALIGNED -> RX-28 CLOSE 450
        lift_enabled=false -> DONE (RX-64 command 없음)
 ```
 
-gripper subsystem은 Tag detection 전에는 actuator command를 발행하지 않는다.
+launch 직후에는 startup pose/torque write가 없으므로 임의의 gripper 위치로 움직이지
+않는다. Tag detection 전에도 actuator position command를 발행하지 않는다.
 `velocity_guard`는 기존처럼 startup disabled이며, gripper enabled 여부와 wheel
 motion enable 여부는 서로 독립적이다.
 
@@ -64,6 +69,9 @@ gripper-only bench test가 필요하면 각 child launch를 기존 방식으로 
 | `lift_raw` | `-1` | unset sentinel; valid configured range는 260..670 |
 | child `close_raw` | `450` | 검증된 RX-28 CLOSE 값 |
 | child `close_wait` | `2.0` | lift enabled일 때 CLOSE 후 대기 시간 |
+| child `startup_pose_enabled` | shared `true`, Leader override `false` | launch 직후 임의 위치 write 차단 |
+| child `startup_torque` | shared `true`, Leader override `false` | launch 직후 torque write 차단 |
+| child `tag_lost_idle_enabled` | shared `true`, Leader override `false` | Tag flicker 시 idle pose 차단 |
 
 RX-64 hardware 방향은 아직 검증되지 않았으므로 기본 lift를 의도적으로 끈다.
 `lift_enabled=true`일 때도 `lift_raw`가 260..670 밖이면 RX-64 command를 보내지 않고
@@ -78,6 +86,22 @@ OPEN/CLOSE는 `[-1, rx28_raw, -1, 1]`, lift는 `[rx64_raw, -1, 1, -1]`이다.
 ros2 launch rescue_robot_bringup leader_apriltag_drive.launch.py \
   lift_enabled:=true lift_raw:=<VERIFIED_RAW_VALUE>
 ```
+
+Leader gripper의 hardware 확인은 통합 launch에서 다음 명령으로 수행한다.
+
+```bash
+ros2 launch rescue_robot_bringup leader_apriltag_drive.launch.py
+ros2 topic echo /leader/supply/detected
+ros2 topic echo /sequence/status
+ros2 topic echo /leader/dynamixel/command
+ros2 param get /gripper_sequence tag_lost_idle_enabled
+ros2 param get /leader/dynamixel_orin_node startup_pose_enabled
+```
+
+정상 기대값은 두 parameter 모두 `false`이다. 최초 Tag 검출은
+`[-1, 1000, -1, 1]`, `ALIGNED`는 `[-1, 450, -1, 1]`을 내며, 일시적인 Tag loss는
+`[600, 500, 1, 1]` 같은 idle pose command를 내지 않는다. `lift_enabled=false`인
+기본 상태에서는 RX-64 position command도 없어야 한다.
 
 gripper subsystem을 완전히 제외하는 AprilTag-only 회귀 실행:
 
