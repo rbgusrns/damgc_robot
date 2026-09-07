@@ -39,7 +39,7 @@ class GripperSequenceNode(Node):
         self.declare_parameter("robot", "leader")
         self.declare_parameter("lift_enabled", False)
         self.declare_parameter("lift_raw", -1.0)
-        self.declare_parameter("lost_rx64_raw", 750)
+        self.declare_parameter("lost_rx64_raw", 600)
         self.declare_parameter("lost_rx28_raw", 500)
 
         detection_topic = str(self.get_parameter("detection_topic").value)

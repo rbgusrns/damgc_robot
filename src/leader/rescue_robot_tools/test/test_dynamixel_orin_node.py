@@ -21,8 +21,8 @@ def make_harness():
         ),
         profile={
             "rx64_id": 33,
-            "rx64_min": 450,
-            "rx64_max": 775,
+            "rx64_min": 260,
+            "rx64_max": 670,
             "rx28_id": 2,
             "rx28_min": 1,
             "rx28_max": 1021,
@@ -50,7 +50,7 @@ def test_targeted_lift_command_does_not_touch_rx28():
         harness, Float64MultiArray(data=[520.0, -1.0, 1.0, -1.0])
     )
 
-    assert harness.calls == [("torque", 33, True), ("position", 33, 520, 450, 775)]
+    assert harness.calls == [("torque", 33, True), ("position", 33, 520, 260, 670)]
 
 
 def test_legacy_three_field_command_remains_compatible():

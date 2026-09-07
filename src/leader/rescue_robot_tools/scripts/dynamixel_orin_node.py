@@ -29,7 +29,7 @@ class DynamixelOrinNode(Node):
         self.declare_parameter("baudrate", 115200)
         self.declare_parameter("robot", "leader")
         # Safe idle pose used immediately after the Dynamixel bus is opened.
-        self.declare_parameter("startup_rx64_raw", 750)
+        self.declare_parameter("startup_rx64_raw", 600)
         self.declare_parameter("startup_rx28_raw", 500)
         self.declare_parameter("startup_torque", True)
 

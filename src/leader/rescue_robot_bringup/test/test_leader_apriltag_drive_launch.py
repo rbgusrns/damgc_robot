@@ -31,7 +31,7 @@ def test_integrated_launch_exposes_safe_gripper_and_lift_defaults():
     assert 'DeclareLaunchArgument("gripper_open_raw", default_value="1000")' in source
     assert 'DeclareLaunchArgument("lift_enabled", default_value="false")' in source
     assert 'DeclareLaunchArgument("lift_raw", default_value="-1")' in source
-    assert 'DeclareLaunchArgument("gripper_lost_rx64_raw", default_value="750")' in source
+    assert 'DeclareLaunchArgument("gripper_lost_rx64_raw", default_value="600")' in source
     assert 'DeclareLaunchArgument("gripper_lost_rx28_raw", default_value="500")' in source
     assert 'condition=IfCondition(LaunchConfiguration("gripper_enabled"))' in source
     assert source.count('"dynamixel_orin.launch.py"') == 1

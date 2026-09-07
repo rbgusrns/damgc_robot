@@ -20,8 +20,8 @@ GOAL_POSITION = 30
 PROFILES = {
     "leader": {
         "rx64_id": 33,
-        "rx64_min": 450,
-        "rx64_max": 775,
+        "rx64_min": 260,
+        "rx64_max": 670,
         "rx28_id": 2,
         "rx28_min": 1,
         "rx28_max": 1021,

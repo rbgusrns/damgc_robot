@@ -23,10 +23,10 @@ def make_harness() -> SimpleNamespace:
         _close_wait=2.0,
         _lift_enabled=False,
         _lift_raw=-1,
-        _lift_min_raw=450,
-        _lift_max_raw=775,
+        _lift_min_raw=260,
+        _lift_max_raw=670,
         _lift_raw_valid=False,
-        _lost_rx64_raw=750,
+        _lost_rx64_raw=600,
         _lost_rx28_raw=500,
         _deadline=None,
         _now=lambda: clock["now"],
@@ -91,8 +91,8 @@ def test_tag_loss_restores_safe_idle_pose_with_torque_enabled() -> None:
 
     GripperSequenceNode._detection_callback(harness, Bool(data=False))
 
-    assert harness.raw_commands == [(750.0, 500.0, -1.0, 1.0, 1.0)]
-    assert harness.statuses[-1] == "TAG_LOST idle pose rx64=750 rx28=500"
+    assert harness.raw_commands == [(600.0, 500.0, -1.0, 1.0, 1.0)]
+    assert harness.statuses[-1] == "TAG_LOST idle pose rx64=600 rx28=500"
 
 
 def test_valid_lift_runs_once_after_close_wait() -> None:

@@ -61,12 +61,12 @@ gripper-only bench test가 필요하면 각 child launch를 기존 방식으로 
 | `gripper_enabled` | `true` | Dynamixel 및 sequence 전체 master gate |
 | `gripper_open_raw` | `1000` | RX-28 OPEN raw position |
 | `lift_enabled` | `false` | RX-64 자동 lift 허용 여부 |
-| `lift_raw` | `-1` | unset sentinel; valid configured range는 450..775 |
+| `lift_raw` | `-1` | unset sentinel; valid configured range는 260..670 |
 | child `close_raw` | `450` | 검증된 RX-28 CLOSE 값 |
 | child `close_wait` | `2.0` | lift enabled일 때 CLOSE 후 대기 시간 |
 
 RX-64 hardware 방향은 아직 검증되지 않았으므로 기본 lift를 의도적으로 끈다.
-`lift_enabled=true`일 때도 `lift_raw`가 450..775 밖이면 RX-64 command를 보내지 않고
+`lift_enabled=true`일 때도 `lift_raw`가 260..670 밖이면 RX-64 command를 보내지 않고
 ERROR status를 남긴다. 안전한 raw 값이 검증된 뒤에만 아래처럼 활성화한다.
 
 sequence는 RX-28과 RX-64 torque를 분리한 targeted raw 형식으로 command를 보낸다.

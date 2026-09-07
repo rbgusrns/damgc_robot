@@ -20,7 +20,7 @@ def generate_launch_description():
         DeclareLaunchArgument("close_wait", default_value="3.0"),
         DeclareLaunchArgument("lift_enabled", default_value="false"),
         DeclareLaunchArgument("lift_raw", default_value="-1.0"),
-        DeclareLaunchArgument("lost_rx64_raw", default_value="750"),
+        DeclareLaunchArgument("lost_rx64_raw", default_value="600"),
         DeclareLaunchArgument("lost_rx28_raw", default_value="500"),
         Node(
             package="rescue_robot_tools",

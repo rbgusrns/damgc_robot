@@ -30,7 +30,7 @@ def generate_launch_description():
             DeclareLaunchArgument("gripper_close_raw", default_value="450"),
             DeclareLaunchArgument("lift_enabled", default_value="false"),
             DeclareLaunchArgument("lift_raw", default_value="-1"),
-            DeclareLaunchArgument("gripper_lost_rx64_raw", default_value="750"),
+            DeclareLaunchArgument("gripper_lost_rx64_raw", default_value="600"),
             DeclareLaunchArgument("gripper_lost_rx28_raw", default_value="500"),
             LogInfo(
                 msg=(
