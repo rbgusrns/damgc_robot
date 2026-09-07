@@ -192,6 +192,39 @@ def test_measured_leader_tf_outward_normal_produces_front_side_targets() -> None
     assert geometry.target_yaw == pytest.approx(0.247, abs=0.002)
 
 
+def test_final_distance_override_changes_error_and_prevents_early_stabilizing() -> None:
+    def decide(geometry):
+        return BaseAlignmentStateMachine(make_alignment_thresholds()).update(
+            BaseAlignmentMeasurement(
+                tag_x=0.242,
+                tag_y=0.0,
+                prealign_x=geometry.prealign_x,
+                prealign_y=geometry.prealign_y,
+                final_x=geometry.final_x,
+                final_y=geometry.final_y,
+                final_yaw_error=geometry.final_yaw_error,
+                stamp_seconds=10.0,
+            ),
+            10.0,
+            0,
+        )
+
+    configured_default = compute_target_geometry(
+        0.242, 0.0, -1.0, 0.0, 0.30, 0.23
+    )
+    launch_override = compute_target_geometry(
+        0.242, 0.0, -1.0, 0.0, 0.30, 0.19
+    )
+
+    assert configured_default.final_position_error == pytest.approx(0.012)
+    assert decide(configured_default).state == ApproachState.STABILIZING
+    assert launch_override.final_x == pytest.approx(0.052)
+    assert launch_override.final_position_error == pytest.approx(0.052)
+    override_decision = decide(launch_override)
+    assert override_decision.state == ApproachState.FINAL_APPROACH
+    assert override_decision.mode == ControlMode.FINAL_APPROACH
+
+
 def test_robot_looking_at_tag_from_the_side_must_not_be_aligned() -> None:
     geometry = compute_target_geometry(
         0.50, 0.0, -cos(radians(45.0)), cos(radians(45.0)), 0.30, 0.20

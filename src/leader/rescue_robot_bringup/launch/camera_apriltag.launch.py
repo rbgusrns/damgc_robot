@@ -7,6 +7,7 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -33,6 +34,11 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "approach_config",
             default_value=os.path.join(apriltag_share, "config", "approach.yaml"),
+        ),
+        DeclareLaunchArgument(
+            "final_target_distance",
+            default_value="0.23",
+            description="Final tag-normal distance from tag plane to base_link",
         ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(realsense_launch),
@@ -95,7 +101,15 @@ def generate_launch_description():
             executable="apriltag_approach_node",
             namespace="leader",
             name="apriltag_approach",
-            parameters=[approach_config],
+            parameters=[
+                approach_config,
+                {
+                    "final_target_distance": ParameterValue(
+                        LaunchConfiguration("final_target_distance"),
+                        value_type=float,
+                    )
+                },
+            ],
             condition=IfCondition(approach_enabled),
             output="screen",
         ),

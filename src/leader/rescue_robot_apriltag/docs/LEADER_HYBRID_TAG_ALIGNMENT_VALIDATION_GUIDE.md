@@ -122,9 +122,13 @@ ros2 topic echo /leader/alignment/tag_normal_heading --once
 
 ```text
 prealign_target = tag + 0.30 × robot_facing_normal
-final_target    = tag + 0.23 × robot_facing_normal
+final_target    = tag + final_target_distance × robot_facing_normal
+final_position_error = hypot(final_target.x, final_target.y)
 ```
 
+`final_target_distance`는 Tag plane에서 목표 `base_link` origin까지의 tag-normal
+방향 거리이며 기본값은 `0.23 m`다. 정면 Tag에서는
+`final_position_error ≈ abs(base_forward_distance - final_target_distance)`로 단순화된다.
 Detector quaternion 부호 표현이 반대여도 target이 Tag 뒤쪽으로 생성되면 안 된다.
 
 ## 8. Tilted Tag validation
@@ -462,9 +466,10 @@ disable은 blind completion보다 우선해야 한다.
 
 ## 24. Visual-Only Final Alignment Validation
 
-이번 실차 tuning은 Tag 높이를 올려 final target 약 `0.23 m`에서도 AprilTag 전체가
-camera image에 유지되는 조건에서 수행한다. 목적은 odometry blind fallback이 아닌
-visual `FINAL_APPROACH`의 최종 정렬과 stabilization을 먼저 검증하는 것이다.
+기본 final target은 `0.23 m`이며, 통합 launch의 `final_target_distance` argument로
+시험값을 바꿀 수 있다. 이번 검증은 Tag 높이를 올려 목표 거리에서도 AprilTag 전체가
+camera image에 유지되는 조건에서 수행한다. 목적은 odometry blind fallback이 아닌 visual
+`FINAL_APPROACH`의 최종 정렬과 stabilization을 먼저 검증하는 것이다.
 
 ### 24.1 Parameter and launch check
 
@@ -477,6 +482,21 @@ source /opt/ros/humble/setup.bash
 source install/local_setup.bash
 ros2 launch rescue_robot_bringup leader_apriltag_drive.launch.py
 ```
+
+기본값을 유지하는 전달 경로는 다음과 같다.
+
+```text
+leader_apriltag_drive.launch.py final_target_distance=0.23
+  -> camera_apriltag.launch.py final_target_distance
+  -> /leader/apriltag_approach ROS parameter override
+  -> compute_target_geometry()
+  -> final target pose / final_position_error / alignment state
+```
+
+`camera_apriltag.launch.py`는 `approach.yaml`을 먼저 로드하고 launch argument를 같은 이름의
+typed ROS parameter로 나중에 적용한다. 따라서 command-line 값이 YAML의 `0.23`보다 높은
+우선순위를 갖는다. 이 parameter는 노드 시작 시 읽는 startup 설정이므로 실행 중
+`ros2 param set`으로 접근 거리를 tuning하는 절차로 사용하지 않는다.
 
 다른 terminal에서 실제 node의 startup parameter를 확인한다.
 
@@ -493,7 +513,40 @@ ros2 param get /leader/apriltag_approach stabilizing_tag_loss_grace_sec
 Expected output은 `false`, `0.020 m`, `5.0 deg`, `0.30 s`, `0.23 m`, `3`,
 `0.20 s`다. 실제 ROS 2 배포판의 출력 표현이 다르더라도 값 자체를 확인한다.
 
-### 24.2 Runtime validation
+`/leader/approach_controller`는 final target pose를 소비할 뿐 별도의
+`final_target_distance`, `stop_distance`, `target_distance` parameter를 갖지 않는다.
+두 노드의 parameter 구성을 함께 확인할 때는 다음 명령을 사용한다.
+
+```bash
+ros2 param dump /leader/apriltag_approach
+ros2 param dump /leader/approach_controller
+```
+
+### 24.2 `0.19 m` override validation
+
+```bash
+ros2 launch rescue_robot_bringup leader_apriltag_drive.launch.py \
+  lift_enabled:=false \
+  final_target_distance:=0.19
+```
+
+다른 terminal에서 전달값과 geometry 출력을 확인한다.
+
+```bash
+ros2 param get /leader/apriltag_approach final_target_distance
+ros2 topic echo /leader/supply/base_forward_distance
+ros2 topic echo /leader/alignment/final_position_error
+ros2 topic echo /leader/alignment/control_mode
+ros2 topic echo /leader/base_alignment/state
+ros2 topic echo /leader/approach/cmd_vel_raw
+```
+
+parameter 결과는 `0.19`이어야 한다. 정면 Tag에서 `base_forward_distance ≈ 0.242 m`이면
+`final_position_error ≈ 0.052 m`이며, `0.020 m` position tolerance 밖이므로
+`FINAL_APPROACH`가 계속되어야 한다. 약 `0.19 m` 근처에서 position과 yaw 조건을 모두
+만족한 뒤에만 `STABILIZING → ALIGNED`를 기대한다.
+
+### 24.3 Runtime validation
 
 ```bash
 ros2 topic echo /leader/base_alignment/state
@@ -522,7 +575,7 @@ timestamp의 valid observation 3개를 확인할 때 최초로 기대한다. 이
 loss와 jitter에도 `ALIGNED`/zero를 유지한다. Perception timer는 20 Hz이고 source TF는
 약 30 Hz이므로 동일 timestamp 중복 count가 없어야 한다.
 
-### 24.3 Loss, failure, and follow-up criteria
+### 24.4 Loss, failure, and follow-up criteria
 
 `blind_final_approach_enabled`가 `false`이므로 close-range에서 Tag가 사라지면
 odometry fallback으로 계속 전진하지 않고 기존 `TAG_LOST` 및 stop behavior가

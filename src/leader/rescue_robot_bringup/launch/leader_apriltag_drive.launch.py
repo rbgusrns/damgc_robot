@@ -35,6 +35,11 @@ def generate_launch_description():
             DeclareLaunchArgument("lift_raw", default_value="300"),
             DeclareLaunchArgument("gripper_lost_rx64_raw", default_value="600"),
             DeclareLaunchArgument("gripper_lost_rx28_raw", default_value="500"),
+            DeclareLaunchArgument(
+                "final_target_distance",
+                default_value="0.23",
+                description="Final tag-normal distance from tag plane to base_link",
+            ),
             LogInfo(
                 msg=(
                     "Leader AprilTag drive startup safety: approach controller "
@@ -50,6 +55,9 @@ def generate_launch_description():
                     "enable_infra": "false",
                     "enable_imu": "false",
                     "enable_approach": "true",
+                    "final_target_distance": LaunchConfiguration(
+                        "final_target_distance"
+                    ),
                 },
             ),
             _include(
