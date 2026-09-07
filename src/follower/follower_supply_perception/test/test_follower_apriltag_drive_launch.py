@@ -51,7 +51,7 @@ def test_integrated_launch_declares_bridge_arguments_and_safe_defaults() -> None
         assert 'DeclareLaunchArgument(\n            "%s"' % argument in source
     assert 'default_value="/dev/i2c-7"' in source
     assert 'default_value="66"' in source
-    assert source.count('default_value="true"') == 2
+    assert source.count('default_value="true"') == 3
     assert 'condition=IfCondition(use_stm32_bridge)' in source
 
 
@@ -74,6 +74,20 @@ def test_integrated_startup_overrides_are_explicit() -> None:
     assert '{"enabled_on_startup": "true"}' in source
     assert '{"source_mode": "APPROACH"}' in source
     assert '{"guard_enabled_on_startup": "false"}' in source
+
+
+def test_integrated_gripper_uses_follower_profile_and_alignment_values() -> None:
+    source = _source(DRIVE_LAUNCH)
+    assert 'DeclareLaunchArgument(\n            "gripper_enabled"' in source
+    assert 'default_value="950"' in source
+    assert 'default_value="350"' in source
+    assert 'default_value="300"' in source
+    assert '"lift_enabled",\n            default_value="true"' in source
+    assert '"robot": "follower"' in source
+    assert '"detection_topic": "/follower/supply/detected"' in source
+    assert '"alignment_topic": "/follower/base_alignment/state"' in source
+    assert '"raw_command_topic": "/follower/dynamixel/command"' in source
+    assert '"gripper_topic": "/follower/gripper/command"' in source
 
 
 def test_selected_pipeline_and_bridge_remap_are_explicit() -> None:

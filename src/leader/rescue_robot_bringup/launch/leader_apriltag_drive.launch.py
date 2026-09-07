@@ -30,6 +30,8 @@ def generate_launch_description():
             DeclareLaunchArgument("gripper_close_raw", default_value="450"),
             DeclareLaunchArgument("lift_enabled", default_value="false"),
             DeclareLaunchArgument("lift_raw", default_value="-1"),
+            DeclareLaunchArgument("gripper_lost_rx64_raw", default_value="750"),
+            DeclareLaunchArgument("gripper_lost_rx28_raw", default_value="500"),
             LogInfo(
                 msg=(
                     "Leader AprilTag drive startup safety: approach controller "
@@ -85,6 +87,8 @@ def generate_launch_description():
                     "close_raw": LaunchConfiguration("gripper_close_raw"),
                     "lift_enabled": LaunchConfiguration("lift_enabled"),
                     "lift_raw": LaunchConfiguration("lift_raw"),
+                    "lost_rx64_raw": LaunchConfiguration("gripper_lost_rx64_raw"),
+                    "lost_rx28_raw": LaunchConfiguration("gripper_lost_rx28_raw"),
                 },
                 condition=IfCondition(LaunchConfiguration("gripper_enabled")),
             ),

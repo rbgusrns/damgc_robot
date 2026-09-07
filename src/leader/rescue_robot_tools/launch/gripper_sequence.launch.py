@@ -20,6 +20,8 @@ def generate_launch_description():
         DeclareLaunchArgument("close_wait", default_value="3.0"),
         DeclareLaunchArgument("lift_enabled", default_value="false"),
         DeclareLaunchArgument("lift_raw", default_value="-1.0"),
+        DeclareLaunchArgument("lost_rx64_raw", default_value="750"),
+        DeclareLaunchArgument("lost_rx28_raw", default_value="500"),
         Node(
             package="rescue_robot_tools",
             executable="gripper_sequence_node.py",
@@ -39,6 +41,8 @@ def generate_launch_description():
                 "lift_raw": ParameterValue(
                     LaunchConfiguration("lift_raw"), value_type=float
                 ),
+                "lost_rx64_raw": LaunchConfiguration("lost_rx64_raw"),
+                "lost_rx28_raw": LaunchConfiguration("lost_rx28_raw"),
             }],
         ),
     ])

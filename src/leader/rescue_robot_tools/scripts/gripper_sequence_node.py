@@ -39,6 +39,8 @@ class GripperSequenceNode(Node):
         self.declare_parameter("robot", "leader")
         self.declare_parameter("lift_enabled", False)
         self.declare_parameter("lift_raw", -1.0)
+        self.declare_parameter("lost_rx64_raw", 750)
+        self.declare_parameter("lost_rx28_raw", 500)
 
         detection_topic = str(self.get_parameter("detection_topic").value)
         alignment_topic = str(self.get_parameter("alignment_topic").value)
@@ -49,6 +51,8 @@ class GripperSequenceNode(Node):
         self._close_wait = float(self.get_parameter("close_wait").value)
         self._enabled = bool(self.get_parameter("enabled").value)
         self._lift_enabled = bool(self.get_parameter("lift_enabled").value)
+        self._lost_rx64_raw = int(self.get_parameter("lost_rx64_raw").value)
+        self._lost_rx28_raw = int(self.get_parameter("lost_rx28_raw").value)
         # RX-64 remains disabled by default until its mechanical direction is validated.
         lift_raw_value = self.get_parameter("lift_raw").value
         try:
@@ -75,6 +79,10 @@ class GripperSequenceNode(Node):
             raise ValueError("open_raw must be between 1 and 1021")
         if not 1 <= self._close_raw <= 1021:
             raise ValueError("close_raw must be between 1 and 1021")
+        if not self._lift_min_raw <= self._lost_rx64_raw <= self._lift_max_raw:
+            raise ValueError("lost_rx64_raw is outside the configured RX-64 limits")
+        if not 1 <= self._lost_rx28_raw <= 1021:
+            raise ValueError("lost_rx28_raw must be between 1 and 1021")
 
         self._raw_pub = self.create_publisher(Float64MultiArray, raw_topic, 10)
         self._gripper_pub = self.create_publisher(String, gripper_topic, 10)
@@ -138,7 +146,17 @@ class GripperSequenceNode(Node):
         if not self._enabled:
             return
         detected = bool(message.data)
+        was_detected = self._tag_detected
         self._tag_detected = detected
+        if not detected and was_detected:
+            self._publish_raw(
+                float(self._lost_rx64_raw), float(self._lost_rx28_raw),
+                -1.0, 1.0, 1.0
+            )
+            self._publish_status(
+                "TAG_LOST idle pose rx64=%d rx28=%d"
+                % (self._lost_rx64_raw, self._lost_rx28_raw)
+            )
         if detected and self._state == SequenceState.WAITING_FOR_TAG:
             self._state = SequenceState.OPENING
             self._publish_raw(-1.0, float(self._open_raw), -1.0, -1.0, 1.0)

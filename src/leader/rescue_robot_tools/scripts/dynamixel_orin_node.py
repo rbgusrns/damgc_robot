@@ -28,16 +28,45 @@ class DynamixelOrinNode(Node):
         self.declare_parameter("port", "/dev/ttyUSB0")
         self.declare_parameter("baudrate", 115200)
         self.declare_parameter("robot", "leader")
+        # Safe idle pose used immediately after the Dynamixel bus is opened.
+        self.declare_parameter("startup_rx64_raw", 750)
+        self.declare_parameter("startup_rx28_raw", 500)
+        self.declare_parameter("startup_torque", True)
 
         robot = str(self.get_parameter("robot").value)
         self.profile = get_profile(robot)
         port = str(self.get_parameter("port").value)
         baudrate = int(self.get_parameter("baudrate").value)
+        startup_rx64 = int(self.get_parameter("startup_rx64_raw").value)
+        startup_rx28 = int(self.get_parameter("startup_rx28_raw").value)
+        startup_torque = bool(self.get_parameter("startup_torque").value)
         self.controller = None
 
         try:
             self.controller = DynamixelOrin(port, self.profile, baudrate)
             self.publish_status(f"READY robot={robot} port={port} baudrate={baudrate}")
+            if not (
+                self.profile["rx64_min"] <= startup_rx64 <= self.profile["rx64_max"]
+                and self.profile["rx28_min"] <= startup_rx28 <= self.profile["rx28_max"]
+            ):
+                raise ValueError(
+                    "startup positions are outside the configured Dynamixel limits"
+                )
+            if startup_torque:
+                self.controller.set_torque(self.profile["rx64_id"], True)
+                self.controller.set_torque(self.profile["rx28_id"], True)
+            self.controller.set_position(
+                self.profile["rx64_id"], startup_rx64,
+                self.profile["rx64_min"], self.profile["rx64_max"]
+            )
+            self.controller.set_position(
+                self.profile["rx28_id"], startup_rx28,
+                self.profile["rx28_min"], self.profile["rx28_max"]
+            )
+            self.publish_status(
+                f"STARTUP idle pose rx64={startup_rx64} rx28={startup_rx28} "
+                f"torque={int(startup_torque)}"
+            )
         except Exception as exc:
             self.publish_status(f"ERROR opening U2D2: {exc}")
             self.get_logger().error(str(exc))

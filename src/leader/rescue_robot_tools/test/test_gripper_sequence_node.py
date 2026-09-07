@@ -26,6 +26,8 @@ def make_harness() -> SimpleNamespace:
         _lift_min_raw=450,
         _lift_max_raw=775,
         _lift_raw_valid=False,
+        _lost_rx64_raw=750,
+        _lost_rx28_raw=500,
         _deadline=None,
         _now=lambda: clock["now"],
         _publish_raw=lambda *values: raw_commands.append(values),
@@ -51,8 +53,8 @@ def test_alignment_topic_defaults_to_authoritative_base_state() -> None:
     )
     launch_source = launch_file.read_text(encoding="utf-8")
     node_source = (scripts_dir / "gripper_sequence_node.py").read_text(encoding="utf-8")
-    assert 'DeclareLaunchArgument("open_raw", default_value="1000")' in launch_source
-    assert 'self.declare_parameter("open_raw", 1000)' in node_source
+    assert 'DeclareLaunchArgument("open_raw", default_value="950")' in launch_source
+    assert 'self.declare_parameter("open_raw", 950)' in node_source
     assert 'DeclareLaunchArgument("lift_enabled", default_value="false")' in launch_source
 
 
@@ -80,6 +82,17 @@ def test_detection_opens_once_and_only_aligned_closes() -> None:
     assert harness.raw_commands[-1] == (-1.0, 450.0, -1.0, -1.0, 1.0)
     assert harness._state == SequenceState.CLOSING
     assert harness._deadline == 12.0
+
+
+def test_tag_loss_restores_safe_idle_pose_with_torque_enabled() -> None:
+    harness = make_harness()
+    harness._tag_detected = True
+    harness._state = SequenceState.OPENING
+
+    GripperSequenceNode._detection_callback(harness, Bool(data=False))
+
+    assert harness.raw_commands == [(750.0, 500.0, -1.0, 1.0, 1.0)]
+    assert harness.statuses[-1] == "TAG_LOST idle pose rx64=750 rx28=500"
 
 
 def test_valid_lift_runs_once_after_close_wait() -> None:
