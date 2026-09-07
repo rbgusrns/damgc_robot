@@ -135,17 +135,22 @@ enable/disable은 `/follower/approach/enabled`를 통해 perception의 approach-
 정책만 다음과 같이 고정했다.
 
 - `gripper_enabled=true`, `robot=follower`, OPEN `950`, CLOSE `350`
-- `lift_enabled=false`, `lift_raw=-1`
-- startup pose/torque disabled: Tag 전 RX-64/RX-28 write 없음
+- `lift_enabled=true`, `lift_raw=300`, `rx64_speed=50`
+- startup pose/torque disabled: Tag 전 RX-64/RX-28 position/torque write 없음
 - Tag-loss idle disabled: detection flicker에 따른 reposition 없음
 - OPEN `[-1,950,-1,1]`, CLOSE `[-1,350,-1,1]`
 - sequence status `/follower/sequence/status`
 - wheel velocity guard startup disabled 유지
 
-Future lift는 삭제하지 않았다. mock test에서는 유효 범위의 시험용 raw 값으로 CLOSE 후
-`close_wait`가 지난 뒤 RX-64 targeted command가 정확히 한 번 발생하고 `LIFTING → DONE`이
-되는지를 확인한다. 이 시험값은 실제 hardware-safe 값이 아니다. 실제 하드웨어 검증은
-README의 단계별 절차를 따르며 자동 검증 중에는 actuator 또는 wheel command를 발행하지
+RX-64 Moving Speed는 Protocol 1.0 주소 `32`에 2-byte raw 값 `50`을 연결 시 한 번 쓰고,
+CLOSE 후 기존 `close_wait=3.0 s`가 지나면 targeted Goal Position command
+`[300,-1,1,-1]`을 정확히 한 번 발행하여 `LIFTING → DONE`으로 진행한다. raw 300은
+Follower RX-64 profile `260..670` 안에 있다. 실제 hardware에서 RX-64 `500 → 300` 이동과
+speed `50`이 검증되었으며, RX-28 Moving Speed register에는 write하지 않는다.
+
+`lift_enabled:=false`는 OPEN/CLOSE까지만 수행하고 RX-64 Goal Position을 생략한다.
+`gripper_enabled:=false`는 speed 설정을 포함한 두 gripper child를 모두 제외한다. 실제
+hardware 절차는 README를 따르며 자동 검증에서는 actuator 또는 wheel command를 발행하지
 않는다.
 
 2026-09-07 software-only 검증 결과:
@@ -159,4 +164,16 @@ README의 단계별 절차를 따르며 자동 검증 중에는 actuator 또는 
   포함되는 것을 launch context로 확인
 - focused shared/Follower/Leader regression: 33 tests passed
 - `colcon test-result --verbose`: 444 tests, 0 errors, 0 failures, 0 skipped
+- 실제 U2D2, Dynamixel, wheel 또는 integrated robot process는 실행하지 않음
+
+2026-09-08 RX-64 speed/default lift software-only 검증 결과:
+
+- 변경 package `rescue_robot_tools`, `rescue_robot_bringup`,
+  `follower_supply_perception` symlink build 성공
+- focused shared/Leader/Follower tests: 47 passed
+- Leader/Follower `--show-args`: `lift_enabled=true`, `lift_raw=300`,
+  `rx64_speed=50` 확인
+- `colcon test-result --verbose`: 549 tests, 0 errors, 0 failures, 0 skipped
+- mock SDK로 RX-64 ID/주소 32/2-byte/raw 50 및 통신 오류 확인
+- RX-28 Moving Speed write 없음과 lift/master-gate disable regression 확인
 - 실제 U2D2, Dynamixel, wheel 또는 integrated robot process는 실행하지 않음

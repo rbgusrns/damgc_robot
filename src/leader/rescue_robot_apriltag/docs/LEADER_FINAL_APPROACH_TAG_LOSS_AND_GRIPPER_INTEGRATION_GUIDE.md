@@ -5,14 +5,14 @@
 > The active Leader integration is now provided by
 > `rescue_robot_bringup/launch/leader_apriltag_drive.launch.py`. Its defaults are
 > `gripper_enabled=true`, RX-28 `open_raw=1000`, RX-28 `close_raw=450`, and
-> `lift_enabled=false`. The active sequence is
+> `lift_enabled=true`, `lift_raw=300`, and RX-64 Moving Speed raw `50`. The active sequence is
 > `/leader/supply/detected=true` -> RX-28 OPEN 1000 -> existing approach and
-> `/leader/base_alignment/state=ALIGNED` -> RX-28 CLOSE 450 -> DONE. No automatic
-> RX-64 position or torque command is sent while lift is disabled. The old
+> `/leader/base_alignment/state=ALIGNED` -> RX-28 CLOSE 450 -> existing
+> `close_wait=3.0 s` -> RX-64 Goal Position 300 -> DONE. The old
 > `rx64_middle` automatic step described in historical sections below is no longer
 > part of the integrated sequence; the semantic command remains available for
-> manual Dynamixel tests. A verified lift can later be requested without source
-> changes with `lift_enabled:=true lift_raw:=<VERIFIED_RAW_VALUE>`.
+> manual Dynamixel tests. Automatic lift can be disabled without source changes
+> with `lift_enabled:=false`.
 >
 > `gripper_enabled=false` is the top-level master gate and excludes both the
 > Dynamixel node and sequence launch. It does not change the existing wheel safety:
@@ -65,7 +65,7 @@ ros2 launch follower_supply_perception follower_apriltag_drive.launch.py \
 ```
 
 Follower 관련 명령 토픽은 `/follower/dynamixel/command`, 상태 확인 토픽은
-`/follower/dynamixel/status`와 `/sequence/status`이다. 이 Follower 적용값은
+`/follower/dynamixel/status`와 `/follower/sequence/status`이다. 이 Follower 적용값은
 Leader의 `final_target_distance=0.23 m`, RX-28 ID 2, RX-64 ID 33,
 `open_raw=1000`, `close_raw=450` 기준과 다르다.
 
@@ -75,8 +75,10 @@ Leader의 `final_target_distance=0.23 m`, RX-28 ID 2, RX-64 ID 33,
 |---|---:|---|
 | `gripper_enabled` | `true` | Includes/excludes the complete Dynamixel subsystem |
 | `gripper_open_raw` | `1000` | RX-28 OPEN goal |
-| `lift_enabled` | `false` | Master switch for automatic RX-64 lift |
-| `lift_raw` | `-1` | Unset sentinel; accepted Leader range is 450..775 |
+| `gripper_close_raw` | `450` | RX-28 CLOSE goal |
+| `lift_enabled` | `true` | Switch for automatic RX-64 lift |
+| `lift_raw` | `300` | RX-64 Goal Position; accepted Leader range is 260..670 |
+| `rx64_speed` | `50` | RX-64 Moving Speed raw value |
 
 Start the complete integration with wheel output still safely blocked:
 
@@ -86,8 +88,8 @@ ros2 launch rescue_robot_bringup leader_apriltag_drive.launch.py
 
 Inspect `/leader/supply/detected`, `/leader/base_alignment/state`,
 `/leader/dynamixel/command`, `/leader/dynamixel/status`, and `/sequence/status`.
-The expected default cycle is OPEN 1000, ALIGNED, CLOSE 450, DONE; no RX-64 raw
-command is expected. Enable wheels only after the existing safety checks:
+The expected default cycle is OPEN 1000, ALIGNED, CLOSE 450, wait 3.0 seconds,
+RX-64 300, and DONE. Enable wheels only after the existing safety checks:
 
 ```bash
 ros2 service call /leader/velocity_guard/enable std_srvs/srv/SetBool "{data: true}"
@@ -111,6 +113,13 @@ packet construction, and response validation. The ROS raw interfaces remain:
 `COMM_SUCCESS` and packet error `0`. Failures identify the operation, such as
 `ERROR RX28 position=1000: [TxRxResult] ...`.
 
+RX-64 Moving Speed uses address `32`, a 2-byte SDK write, and default raw value
+`50` for both robot profiles. It is configured once after the bus opens and before
+any RX-64 Goal Position. This register write does not enable torque or command
+motion. Raw `0` means unrestricted maximum speed, not stop. RX-64 raw `500 → 300`
+at speed `50` has been hardware-validated. RX-28 Moving Speed is not written, so
+its existing OPEN/CLOSE speed behavior remains independent and unchanged.
+
 Troubleshoot in this order:
 
 1. Confirm `/dev/ttyUSB0`, baudrate `115200`, Protocol 1.0, and RX-28 ID `2`.
@@ -133,9 +142,9 @@ ros2 launch rescue_robot_bringup leader_apriltag_drive.launch.py \
 ```
 
 `ros2 node list` must then contain no `dynamixel_orin_node` or `gripper_sequence`;
-the camera, alignment, approach, guard, and STM32 nodes remain present. For a
-future lift bench test, first verify the mechanical direction and choose a raw value,
-then use `lift_enabled:=true lift_raw:=<VERIFIED_RAW_VALUE>`. An unset, negative,
+the camera, alignment, approach, guard, and STM32 nodes remain present. To retain
+RX-28 OPEN/CLOSE while disabling only automatic lift, use `lift_enabled:=false`.
+An unset, negative,
 non-finite, or out-of-range value produces a warning/error and skips RX-64 motion;
 it never crashes the node or undoes the RX-28 CLOSE.
 
@@ -274,10 +283,11 @@ COARSE, NEAR, FINAL_YAW_ALIGN과 정상적인 visual FINAL_APPROACH control 계�
 
 The remainder of this section records the previously validated standalone
 sequence for historical reference. It is superseded for the integrated launch by
-the current behavior at the top of this document: OPEN 1000, conditional lift,
-and `lift_enabled=false` by default.
+the current behavior at the top of this document: OPEN 1000, CLOSE 450, and
+automatic RX-64 raw 300 lift at Moving Speed raw 50.
 
-Leader Dynamixel profile은 변경하지 않았다.
+아래 표는 당시 standalone profile을 기록한 것이며 현재 integrated profile
+`260..670`의 설정값이 아니다.
 
 | Actuator | 용도 | ID | min | max | sequence command |
 |---|---|---:|---:|---:|---|

@@ -28,14 +28,19 @@ def test_integrated_launch_is_importable():
 def test_integrated_launch_exposes_safe_gripper_and_lift_defaults():
     source = LAUNCH_FILE.read_text(encoding="utf-8")
     assert 'DeclareLaunchArgument("gripper_enabled", default_value="true")' in source
+    assert 'DeclareLaunchArgument("rx64_speed", default_value="50")' in source
     assert 'DeclareLaunchArgument("gripper_open_raw", default_value="1000")' in source
-    assert 'DeclareLaunchArgument("lift_enabled", default_value="false")' in source
-    assert 'DeclareLaunchArgument("lift_raw", default_value="-1")' in source
+    assert 'DeclareLaunchArgument("gripper_close_raw", default_value="450")' in source
+    assert 'DeclareLaunchArgument("lift_enabled", default_value="true")' in source
+    assert 'DeclareLaunchArgument("lift_raw", default_value="300")' in source
     assert 'DeclareLaunchArgument("gripper_lost_rx64_raw", default_value="600")' in source
     assert 'DeclareLaunchArgument("gripper_lost_rx28_raw", default_value="500")' in source
-    assert 'condition=IfCondition(LaunchConfiguration("gripper_enabled"))' in source
+    assert source.count(
+        'condition=IfCondition(LaunchConfiguration("gripper_enabled"))'
+    ) == 2
     assert '"startup_pose_enabled": "false"' in source
     assert '"startup_torque": "false"' in source
+    assert '"rx64_speed": LaunchConfiguration("rx64_speed")' in source
     assert '"tag_lost_idle_enabled": "false"' in source
     assert source.count('"dynamixel_orin.launch.py"') == 1
     assert source.count('"gripper_sequence.launch.py"') == 1

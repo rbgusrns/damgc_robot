@@ -28,6 +28,7 @@ class DynamixelOrinNode(Node):
         self.declare_parameter("port", "/dev/ttyUSB0")
         self.declare_parameter("baudrate", 115200)
         self.declare_parameter("robot", "leader")
+        self.declare_parameter("rx64_speed", 50)
         # Safe idle pose used immediately after the Dynamixel bus is opened.
         self.declare_parameter("startup_rx64_raw", 600)
         self.declare_parameter("startup_rx28_raw", 500)
@@ -38,6 +39,7 @@ class DynamixelOrinNode(Node):
         self.profile = get_profile(robot)
         port = str(self.get_parameter("port").value)
         baudrate = int(self.get_parameter("baudrate").value)
+        rx64_speed = int(self.get_parameter("rx64_speed").value)
         startup_rx64 = int(self.get_parameter("startup_rx64_raw").value)
         startup_rx28 = int(self.get_parameter("startup_rx28_raw").value)
         startup_torque = bool(self.get_parameter("startup_torque").value)
@@ -48,7 +50,11 @@ class DynamixelOrinNode(Node):
 
         try:
             self.controller = DynamixelOrin(port, self.profile, baudrate)
-            self.publish_status(f"READY robot={robot} port={port} baudrate={baudrate}")
+            self._apply_rx64_speed(rx64_speed)
+            self.publish_status(
+                f"READY robot={robot} port={port} baudrate={baudrate} "
+                f"rx64_speed={rx64_speed}"
+            )
             self._apply_startup_configuration(
                 startup_pose_enabled,
                 startup_torque,
@@ -56,7 +62,10 @@ class DynamixelOrinNode(Node):
                 startup_rx28,
             )
         except Exception as exc:
-            self.publish_status(f"ERROR opening U2D2: {exc}")
+            if self.controller is not None:
+                self.controller.close()
+                self.controller = None
+            self.publish_status(f"ERROR opening/configuring U2D2: {exc}")
             self.get_logger().error(str(exc))
 
         self.subscription = self.create_subscription(
@@ -72,6 +81,11 @@ class DynamixelOrinNode(Node):
             10,
         )
         self.status_publisher = self.create_publisher(String, "dynamixel/status", 10)
+
+    def _apply_rx64_speed(self, rx64_speed: int) -> None:
+        """Configure RX-64 speed once without commanding torque or position."""
+        self.controller.set_rx64_speed(rx64_speed)
+        self.publish_status(f"RX64_SPEED raw={rx64_speed}")
 
     def _apply_startup_configuration(
         self,

@@ -23,6 +23,7 @@ def make_harness():
             set_position=lambda device_id, position, minimum, maximum: calls.append(
                 ("position", device_id, position, minimum, maximum)
             ),
+            set_rx64_speed=lambda speed: calls.append(("rx64_speed", speed)),
         ),
         profile={
             "rx64_id": 33,
@@ -120,6 +121,15 @@ def test_disabled_startup_pose_and_torque_write_nothing():
     assert harness.statuses == ["STARTUP pose disabled torque=0"]
 
 
+def test_rx64_speed_is_applied_without_torque_or_position_write():
+    harness = make_harness()
+
+    DynamixelOrinNode._apply_rx64_speed(harness, 50)
+
+    assert harness.calls == [("rx64_speed", 50)]
+    assert harness.statuses == ["RX64_SPEED raw=50"]
+
+
 def test_leader_compatible_startup_pose_remains_enabled():
     harness = make_harness()
 
@@ -159,6 +169,7 @@ def test_shared_startup_defaults_remain_leader_compatible_and_typed():
     )
 
     assert 'DeclareLaunchArgument("robot", default_value="leader")' in source
+    assert 'DeclareLaunchArgument("rx64_speed", default_value="50")' in source
     assert 'DeclareLaunchArgument("startup_torque", default_value="true")' in source
     assert (
         'DeclareLaunchArgument("startup_pose_enabled", default_value="true")'
@@ -166,3 +177,10 @@ def test_shared_startup_defaults_remain_leader_compatible_and_typed():
     )
     assert 'LaunchConfiguration("startup_torque"), value_type=bool' in source
     assert 'LaunchConfiguration("startup_pose_enabled"), value_type=bool' in source
+    assert 'LaunchConfiguration("rx64_speed"), value_type=int' in source
+
+    node_source = (PACKAGE_ROOT / "scripts/dynamixel_orin_node.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'self.declare_parameter("rx64_speed", 50)' in node_source
+    assert "self._apply_rx64_speed(rx64_speed)" in node_source

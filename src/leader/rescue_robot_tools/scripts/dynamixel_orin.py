@@ -14,6 +14,8 @@ BAUDRATE = 115200
 PROTOCOL_VERSION = 1.0
 TORQUE_ENABLE = 24
 GOAL_POSITION = 30
+MOVING_SPEED = 32
+MAX_JOINT_MODE_SPEED = 1023
 
 PROFILES = {
     "leader": {
@@ -87,6 +89,17 @@ class DynamixelOrin:
         operation = f"{self._label(device_id)} position={position}"
         result, packet_error = self.packet_handler.write2ByteTxRx(
             self.port_handler, device_id, GOAL_POSITION, position
+        )
+        self._check_result(operation, result, packet_error)
+
+    def set_rx64_speed(self, speed: int):
+        if not 0 <= speed <= MAX_JOINT_MODE_SPEED:
+            raise ValueError(
+                f"RX64 moving speed must be between 0 and {MAX_JOINT_MODE_SPEED}"
+            )
+        operation = f"RX64 moving speed={speed}"
+        result, packet_error = self.packet_handler.write2ByteTxRx(
+            self.port_handler, self.profile["rx64_id"], MOVING_SPEED, speed
         )
         self._check_result(operation, result, packet_error)
 

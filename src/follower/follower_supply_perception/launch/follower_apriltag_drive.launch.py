@@ -59,15 +59,20 @@ def generate_launch_description() -> LaunchDescription:
             description="Follower RX-28 CLOSE raw goal",
         ),
         DeclareLaunchArgument(
+            "rx64_speed",
+            default_value="50",
+            description="Follower RX-64 Moving Speed raw value",
+        ),
+        DeclareLaunchArgument(
             "lift_enabled",
-            default_value="false",
+            default_value="true",
             choices=["true", "false"],
             description="Enable automatic Follower RX-64 lift after close",
         ),
         DeclareLaunchArgument(
             "lift_raw",
-            default_value="-1",
-            description="Follower RX-64 lift raw goal; -1 is the unset sentinel",
+            default_value="300",
+            description="Follower RX-64 lift raw goal (valid range 260..670)",
         ),
         DeclareLaunchArgument(
             "use_stm32_bridge",
@@ -148,6 +153,7 @@ def generate_launch_description() -> LaunchDescription:
                 {
                     "robot": "follower",
                     "port": LaunchConfiguration("gripper_port"),
+                    "rx64_speed": LaunchConfiguration("rx64_speed"),
                     "startup_pose_enabled": "false",
                     "startup_torque": "false",
                 },

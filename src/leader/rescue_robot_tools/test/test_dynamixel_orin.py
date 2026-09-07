@@ -72,6 +72,49 @@ def test_position_is_clamped_before_sdk_write(sdk_controller):
     assert ("write2", 2, module.GOAL_POSITION, 1021) in calls
 
 
+def test_rx64_speed_uses_protocol_1_moving_speed_register(sdk_controller):
+    controller, calls = sdk_controller
+
+    controller.set_rx64_speed(50)
+
+    assert ("write2", 33, module.MOVING_SPEED, 50) in calls
+    assert not any(
+        call[0] == "write2" and call[1] == 2 and call[2] == module.MOVING_SPEED
+        for call in calls
+    )
+
+
+def test_follower_rx64_speed_uses_follower_id_and_never_rx28(sdk_controller):
+    controller, calls = sdk_controller
+    controller.profile = module.get_profile("follower")
+
+    controller.set_rx64_speed(50)
+
+    assert ("write2", 50, module.MOVING_SPEED, 50) in calls
+    assert not any(
+        call[0] == "write2" and call[1] == 1 and call[2] == module.MOVING_SPEED
+        for call in calls
+    )
+
+
+@pytest.mark.parametrize("robot", ["leader", "follower"])
+def test_lift_raw_300_is_valid_for_each_rx64_profile(robot):
+    profile = module.get_profile(robot)
+
+    assert profile["rx64_min"] <= 300 <= profile["rx64_max"]
+
+
+def test_rx64_speed_rejects_out_of_range_value_without_write(sdk_controller):
+    controller, calls = sdk_controller
+
+    with pytest.raises(ValueError, match=r"between 0 and 1023"):
+        controller.set_rx64_speed(1024)
+
+    assert not any(
+        call[0] == "write2" and call[2] == module.MOVING_SPEED for call in calls
+    )
+
+
 def test_transport_failure_is_reported(sdk_controller):
     controller, _ = sdk_controller
     controller.packet_handler.tx_result = 7
@@ -89,3 +132,25 @@ def test_packet_error_is_reported(sdk_controller):
         match=r"RX28 position=450: packet=32",
     ):
         controller.set_position(2, 450, 1, 1021)
+
+
+def test_rx64_speed_communication_error_is_reported(sdk_controller):
+    controller, _ = sdk_controller
+    controller.packet_handler.tx_result = 7
+
+    with pytest.raises(
+        module.DynamixelCommunicationError,
+        match=r"RX64 moving speed=50: tx=7",
+    ):
+        controller.set_rx64_speed(50)
+
+
+def test_rx64_speed_packet_error_is_reported(sdk_controller):
+    controller, _ = sdk_controller
+    controller.packet_handler.packet_error = 32
+
+    with pytest.raises(
+        module.DynamixelCommunicationError,
+        match=r"RX64 moving speed=50: packet=32",
+    ):
+        controller.set_rx64_speed(50)

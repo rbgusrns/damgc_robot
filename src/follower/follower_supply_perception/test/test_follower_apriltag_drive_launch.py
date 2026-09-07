@@ -54,7 +54,8 @@ def test_integrated_launch_declares_bridge_arguments_and_safe_defaults() -> None
         assert 'DeclareLaunchArgument(\n            "%s"' % argument in source
     assert 'default_value="/dev/i2c-7"' in source
     assert 'default_value="66"' in source
-    assert source.count('default_value="true"') == 3
+    assert '"use_stm32_bridge",\n            default_value="true"' in source
+    assert '"i2c_write_enabled",\n            default_value="true"' in source
     assert 'condition=IfCondition(use_stm32_bridge)' in source
 
 
@@ -84,12 +85,14 @@ def test_integrated_gripper_uses_follower_profile_and_alignment_values() -> None
     assert 'DeclareLaunchArgument(\n            "gripper_enabled"' in source
     assert 'default_value="950"' in source
     assert 'default_value="350"' in source
-    assert '"lift_raw",\n            default_value="-1"' in source
-    assert '"lift_enabled",\n            default_value="false"' in source
+    assert '"rx64_speed",\n            default_value="50"' in source
+    assert '"lift_raw",\n            default_value="300"' in source
+    assert '"lift_enabled",\n            default_value="true"' in source
     assert '"robot": "follower"' in source
     assert source.count('"robot": "follower"') == 2
     assert '"startup_pose_enabled": "false"' in source
     assert '"startup_torque": "false"' in source
+    assert '"rx64_speed": LaunchConfiguration("rx64_speed")' in source
     assert '"tag_lost_idle_enabled": "false"' in source
     assert '"node_namespace": "follower"' in source
     assert '"detection_topic": "/follower/supply/detected"' in source

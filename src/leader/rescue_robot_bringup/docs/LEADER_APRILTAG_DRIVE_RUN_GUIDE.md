@@ -33,9 +33,9 @@ controller는 rectified color image를 사용한다.
 `leader_apriltag_drive.launch.py`는 주행 pipeline과 함께 Dynamixel Orin node 및
 gripper sequence를 준비한다. Leader 통합 launch의 gripper 기본값은
 `gripper_enabled=true`, `gripper_open_raw=1000`, `gripper_close_raw=450`,
-`lift_enabled=false`, `startup_pose_enabled=false`,
-`tag_lost_idle_enabled=false`이다. 마지막 세 안전 설정은 shared child launch의
-default를 바꾸지 않고 이 Leader top-level launch에서만 override한다.
+`lift_enabled=true`, `lift_raw=300`, `rx64_speed=50`, `startup_pose_enabled=false`,
+`tag_lost_idle_enabled=false`이다. Startup pose/torque와 Tag-loss idle 안전 설정은
+shared child launch의 default를 바꾸지 않고 이 Leader top-level launch에서만 override한다.
 
 ```text
 RealSense/AprilTag -> Leader hybrid alignment -> approach controller
@@ -47,7 +47,7 @@ gripper_enabled=true                 (독립적인 manipulator gate)
        /leader/supply/detected=true -> RX-28 OPEN 1000
        temporary Tag loss -> gripper position unchanged
        /leader/base_alignment/state=ALIGNED -> RX-28 CLOSE 450
-       lift_enabled=false -> DONE (RX-64 command 없음)
+       -> close_wait(3.0 s) -> RX-64 LIFT 300 -> DONE
 ```
 
 launch 직후에는 startup pose/torque write가 없으므로 임의의 gripper 위치로 움직이지
@@ -64,18 +64,24 @@ gripper-only bench test가 필요하면 각 child launch를 기존 방식으로 
 | Argument | Default | 의미 |
 |---|---:|---|
 | `gripper_enabled` | `true` | Dynamixel 및 sequence 전체 master gate |
+| `robot` | `leader` | RX-64 ID 33, RX-28 ID 2 profile |
+| `gripper_port` | `/dev/ttyUSB0` | Leader U2D2 device |
+| `gripper_baudrate` | `115200` | Dynamixel bus baudrate |
 | `gripper_open_raw` | `1000` | RX-28 OPEN raw position |
-| `lift_enabled` | `false` | RX-64 자동 lift 허용 여부 |
-| `lift_raw` | `-1` | unset sentinel; valid configured range는 260..670 |
-| child `close_raw` | `450` | 검증된 RX-28 CLOSE 값 |
-| child `close_wait` | `2.0` | lift enabled일 때 CLOSE 후 대기 시간 |
+| `gripper_close_raw` | `450` | RX-28 CLOSE raw position |
+| `lift_enabled` | `true` | RX-64 자동 lift 허용 여부 |
+| `lift_raw` | `300` | RX-64 Goal Position; valid range는 260..670 |
+| `rx64_speed` | `50` | RX-64 Moving Speed raw 값 |
+| child `close_wait` | `3.0 s` | CLOSE와 LIFT 사이 기존 대기 시간 |
 | child `startup_pose_enabled` | shared `true`, Leader override `false` | launch 직후 임의 위치 write 차단 |
 | child `startup_torque` | shared `true`, Leader override `false` | launch 직후 torque write 차단 |
 | child `tag_lost_idle_enabled` | shared `true`, Leader override `false` | Tag flicker 시 idle pose 차단 |
 
-RX-64 hardware 방향은 아직 검증되지 않았으므로 기본 lift를 의도적으로 끈다.
-`lift_enabled=true`일 때도 `lift_raw`가 260..670 밖이면 RX-64 command를 보내지 않고
-ERROR status를 남긴다. 안전한 raw 값이 검증된 뒤에만 아래처럼 활성화한다.
+RX-64 raw `500 → 300` 이동은 Moving Speed raw `50`에서 실제 hardware로 검증되었다.
+속도를 낮춘 목적은 RX-28 파지 후 lift를 더 천천히 움직여 물체 이동을 안정화하는
+것이다. `rx64_speed`는 주소 32에 쓰는 raw 값이며 `0`은 정지가 아니라 속도 제한 없는
+최대 속도라는 점에 주의한다. RX-28 Moving Speed에는 write하지 않으므로 기존 RX-28
+OPEN/CLOSE 속도와 torque/position 동작은 바뀌지 않는다.
 
 sequence는 RX-28과 RX-64 torque를 분리한 targeted raw 형식으로 command를 보낸다.
 OPEN/CLOSE는 `[-1, rx28_raw, -1, 1]`, lift는 `[rx64_raw, -1, 1, -1]`이다.
@@ -84,7 +90,7 @@ OPEN/CLOSE는 `[-1, rx28_raw, -1, 1]`, lift는 `[rx64_raw, -1, 1, -1]`이다.
 
 ```bash
 ros2 launch rescue_robot_bringup leader_apriltag_drive.launch.py \
-  lift_enabled:=true lift_raw:=<VERIFIED_RAW_VALUE>
+  rx64_speed:=50
 ```
 
 Leader gripper의 hardware 확인은 통합 launch에서 다음 명령으로 수행한다.
@@ -96,12 +102,21 @@ ros2 topic echo /sequence/status
 ros2 topic echo /leader/dynamixel/command
 ros2 param get /gripper_sequence tag_lost_idle_enabled
 ros2 param get /leader/dynamixel_orin_node startup_pose_enabled
+ros2 param get /leader/dynamixel_orin_node rx64_speed
 ```
 
-정상 기대값은 두 parameter 모두 `false`이다. 최초 Tag 검출은
+정상 기대값은 앞의 두 safety parameter가 `false`, `rx64_speed`가 `50`이다. 최초 Tag 검출은
 `[-1, 1000, -1, 1]`, `ALIGNED`는 `[-1, 450, -1, 1]`을 내며, 일시적인 Tag loss는
-`[600, 500, 1, 1]` 같은 idle pose command를 내지 않는다. `lift_enabled=false`인
-기본 상태에서는 RX-64 position command도 없어야 한다.
+`[600, 500, 1, 1]` 같은 idle pose command를 내지 않는다. CLOSE 후 3초가 지나면
+`[300, -1, 1, -1]`을 한 번 발행하고 `LIFTING → DONE`으로 진행한다.
+
+자동 lift만 끄려면 다음과 같이 실행한다. RX-28 OPEN/CLOSE는 그대로 수행되고 RX-64
+Goal Position은 발행되지 않는다.
+
+```bash
+ros2 launch rescue_robot_bringup leader_apriltag_drive.launch.py \
+  lift_enabled:=false
+```
 
 gripper subsystem을 완전히 제외하는 AprilTag-only 회귀 실행:
 
@@ -365,22 +380,36 @@ ros2 topic echo /leader/system_state
 ## 12. 실제 바닥 검증 절차
 
 1. 로봇 주변과 즉시 정지 수단을 확보한다.
-2. 통합 launch를 실행한다.
-3. motor가 움직이지 않는지 확인한다.
-4. `/leader/base_alignment/state`를 확인한다.
-5. AprilTag를 보여주고 state 변화를 확인한다.
-6. 필요하면 `/leader/approach/cmd_vel_raw`을 확인한다.
-7. `/leader/cmd_vel`이 아직 zero인지 확인한다.
-8. velocity guard를 `true`로 변경한다.
-9. LEFT, RIGHT, FAR/CENTER 동작을 낮은 위험 조건에서 각각 확인한다.
-10. 태그를 숨겼을 때 `TAG_LOST`, final zero 및 motor 정지를 확인한다.
-11. velocity guard를 `false`로 변경한다.
-12. motor 정지를 확인한 다음 launch를 `Ctrl+C`로 종료한다.
+2. 통합 launch를 실행하고 runtime `rx64_speed=50`을 확인한다.
+3. Tag 전 wheel과 RX-28/RX-64가 움직이지 않는지 확인한다. Speed register 설정 자체는
+   Goal Position이나 torque command가 아니므로 RX-64 motion을 만들지 않아야 한다.
+4. AprilTag를 보여 RX-28 OPEN 1000을 확인한다.
+5. `/leader/base_alignment/state`와 `/leader/approach/cmd_vel_raw`을 확인하고,
+   `/leader/cmd_vel`이 guard를 열기 전까지 zero인지 확인한다.
+6. 주변과 lift 기구의 간섭을 다시 확인한 뒤 velocity guard를 `true`로 변경한다.
+7. ALIGNED에서 RX-28 CLOSE 450, 기존 close wait 3초, RX-64의 저속 raw 300 이동,
+   `LIFTING → DONE`을 순서대로 확인한다.
+8. 태그를 숨겼을 때 `TAG_LOST`, final zero 및 예기치 않은 gripper reposition이 없는지 확인한다.
+9. `lift_enabled:=false`로 다시 실행하여 OPEN/CLOSE 후 RX-64가 움직이지 않는지 확인한다.
+10. velocity guard를 `false`로 변경하고 motor 정지를 확인한 다음 launch를 종료한다.
 
 실제 motor 주행은 자동 테스트하지 않는다. 이 절차의 결과는 작업자가 별도로
 기록한다.
 
 ## 13. Troubleshooting
+
+### RX-64 lift 또는 speed 이상
+
+- RX-64가 너무 빠르면 `/leader/dynamixel_orin_node`의 `rx64_speed`가 `50`인지 확인한다.
+- RX-64가 움직이지 않으면 `lift_enabled`, `lift_raw=300`, configured range `260..670`,
+  `/sequence/status`와 `/leader/dynamixel/status`를 확인한다.
+- status packet error가 있으면 `/dev/ttyUSB0`, `115200`, `robot=leader`, ID `33`과
+  케이블·전원을 확인한다.
+- RX-28 속도가 달라졌다면 이번 코드에는 RX-28 Moving Speed write가 없으므로 regression
+  또는 다른 Dynamixel process를 의심한다.
+- `lift_enabled=false`인데 RX-64 Goal Position이 발생하면 외부 publisher나 중복 node를
+  확인하고 regression으로 취급한다.
+- raw 300 validation error는 실행 중 profile과 `260..670` 범위를 확인한다.
 
 ### `package not found`
 

@@ -56,6 +56,8 @@ def test_alignment_topic_defaults_to_authoritative_base_state() -> None:
     node_source = (scripts_dir / "gripper_sequence_node.py").read_text(encoding="utf-8")
     assert 'DeclareLaunchArgument("open_raw", default_value="950")' in launch_source
     assert 'self.declare_parameter("open_raw", 950)' in node_source
+    assert 'DeclareLaunchArgument("close_wait", default_value="3.0")' in launch_source
+    assert 'self.declare_parameter("close_wait", 3.0)' in node_source
     assert 'DeclareLaunchArgument("lift_enabled", default_value="false")' in launch_source
     assert 'DeclareLaunchArgument("tag_lost_idle_enabled", default_value="true")' in (
         launch_source
@@ -116,7 +118,7 @@ def test_follower_tag_loss_policy_does_not_reposition_either_motor() -> None:
 def test_valid_lift_runs_once_after_close_wait() -> None:
     harness = make_harness()
     harness._lift_enabled = True
-    harness._lift_raw = 520
+    harness._lift_raw = 300
     harness._lift_raw_valid = True
     harness._state = SequenceState.CLOSING
     harness._tag_detected = True
@@ -127,15 +129,15 @@ def test_valid_lift_runs_once_after_close_wait() -> None:
     GripperSequenceNode._on_timer(harness)
 
     assert harness._state == SequenceState.LIFTING
-    assert harness.raw_commands == [(520.0, -1.0, -1.0, 1.0, -1.0)]
-    assert harness.statuses[-1] == "LIFTING lift_raw=520"
+    assert harness.raw_commands == [(300.0, -1.0, -1.0, 1.0, -1.0)]
+    assert harness.statuses[-1] == "LIFTING lift_raw=300"
 
     GripperSequenceNode._alignment_callback(harness, String(data="ALIGNED"))
     GripperSequenceNode._on_timer(harness)
 
     assert harness._state == SequenceState.DONE
-    assert harness.raw_commands == [(520.0, -1.0, -1.0, 1.0, -1.0)]
-    assert harness.statuses[-1] == "DONE lift_raw=520"
+    assert harness.raw_commands == [(300.0, -1.0, -1.0, 1.0, -1.0)]
+    assert harness.statuses[-1] == "DONE lift_raw=300"
     assert not harness.gripper_commands
 
 

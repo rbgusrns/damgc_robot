@@ -126,8 +126,8 @@ command를 통과시키려면 사용자가 guard를 명시적으로 열어야 �
 
 Follower gripper는 별도 launch를 새로 실행하는 구성이 아니라 기존
 `follower_apriltag_drive.launch.py`에 이미 포함되어 있다. 현재 안전 설정은 기존 통합을
-유지하면서 RX-64 기본 lift, Dynamixel startup pose, Tag-loss idle pose만 Follower에서
-비활성화한다.
+유지하면서 Dynamixel startup pose/torque와 Tag-loss idle pose를 Follower에서
+비활성화하고, 검증된 RX-64 저속 lift를 기본 활성화한다.
 
 ```text
 Follower Camera
@@ -148,11 +148,11 @@ Hybrid Alignment
                                          → lift_enabled?
                                              false → DONE
                                              true  → close_wait
-                                                   → RX-64 lift_raw
+                                                   → RX-64 speed 50 / raw 300
                                                    → LIFTING → DONE
 
 Dynamixel profile/namespace: follower
-Default: lift_enabled=false
+Default: lift_enabled=true, lift_raw=300, rx64_speed=50
 ```
 
 기본값은 다음과 같다.
@@ -161,19 +161,24 @@ Default: lift_enabled=false
 |---|---:|---|
 | `gripper_enabled` | `true` | Dynamixel node와 sequence의 master gate |
 | `robot` | `follower` | Follower ID/range/profile 선택 |
+| `gripper_port` | `/dev/ttyUSB0` | Follower U2D2 device |
+| child `baudrate` | `115200` | Dynamixel bus baudrate |
 | `gripper_open_raw` | `950` | RX-28 OPEN Goal Position |
 | `gripper_close_raw` | `350` | RX-28 CLOSE Goal Position |
-| `lift_enabled` | `false` | RX-64 정상 lift path의 enable |
-| `lift_raw` | `-1` | 검증 전 unset/invalid sentinel |
+| `lift_enabled` | `true` | RX-64 정상 lift path의 enable |
+| `lift_raw` | `300` | RX-64 Goal Position; valid range 260..670 |
+| `rx64_speed` | `50` | RX-64 Moving Speed raw 값 |
 | child `close_wait` | `3.0 s` | lift enabled일 때 CLOSE와 LIFT 사이 대기 |
 | child `startup_pose_enabled` | shared `true`, Follower override `false` | launch 직후 Goal Position write 차단 |
 | child `startup_torque` | shared `true`, Follower override `false` | launch 직후 torque write 차단 |
 | child `tag_lost_idle_enabled` | shared `true`, Follower override `false` | Tag flicker에 의한 idle reposition 차단 |
 
 기본 sequence는 `Tag detected → RX-28 OPEN 950 → approach → ALIGNED → RX-28
-CLOSE 350 → DONE`이다. RX-64 hardware와 lift mechanism의 안전 방향/목표가 검증되지
-않았기 때문에 automatic lift는 deliberate safety default로 꺼져 있으며 기능을 삭제한
-것은 아니다. `lift_raw`는 Follower RX-64의 Dynamixel Goal Position raw target이다.
+CLOSE 350 → close_wait 3.0 s → RX-64 speed 50 / Goal Position 300 → DONE`이다.
+RX-64 raw `500 → 300` 이동은 Moving Speed raw `50`에서 실제 hardware로 검증되었다.
+속도를 낮춘 목적은 파지 후 lift를 천천히 동작시켜 물체 이동을 안정화하는 것이다.
+`lift_raw`는 Goal Position raw target이고 `rx64_speed`는 주소 32의 Moving Speed raw
+값이다. Speed raw `0`은 정지가 아니라 속도 제한 없는 최대 속도를 의미한다.
 
 OPEN과 CLOSE는 각각 다음 targeted raw command를 사용한다.
 
@@ -184,9 +189,11 @@ CLOSE [-1, 350, -1, 1]
 ```
 
 `-1`은 해당 position 또는 torque를 변경하지 않는 sentinel이다. 따라서 두 명령은
-RX-64 position/torque를 건드리지 않고 RX-28 torque만 켠 뒤 목표 위치를 쓴다. 기본
-launch에서는 Tag 검출 전에 두 모터의 position/torque write가 없으며, temporary Tag
-loss도 어느 모터의 idle reposition을 유발하지 않는다.
+RX-64 position/torque를 건드리지 않고 RX-28 torque만 켠 뒤 목표 위치를 쓴다. RX-64
+Moving Speed는 연결 시 한 번 설정되지만 Goal Position이나 torque를 쓰지 않으므로 motion을
+발생시키지 않는다. Tag 검출 전 position/torque write는 없고 temporary Tag loss도 어느
+모터의 idle reposition을 유발하지 않는다. RX-28 Moving Speed에는 write하지 않으므로
+기존 RX-28 OPEN/CLOSE 속도 및 torque/position 동작은 그대로다.
 
 Gripper를 완전히 제외하려면 다음처럼 실행한다. `lift_enabled:=true`나 유효한
 `lift_raw`가 함께 주어져도 `gripper_enabled=false`가 우선한다.
@@ -196,17 +203,23 @@ ros2 launch follower_supply_perception follower_apriltag_drive.launch.py \
   gripper_enabled:=false
 ```
 
-향후 RX-64 hardware와 안전한 raw 값이 별도로 검증된 뒤에만 다음처럼 기존 lift path를
-활성화한다. 임의의 raw 값을 안전값으로 간주하면 안 된다.
+자동 lift만 끄려면 다음처럼 실행한다. RX-28 OPEN/CLOSE 후 DONE으로 진행하며 RX-64
+Goal Position은 발행되지 않는다.
 
 ```bash
 ros2 launch follower_supply_perception follower_apriltag_drive.launch.py \
-  lift_enabled:=true \
-  lift_raw:=<VERIFIED_RAW_VALUE>
+  lift_enabled:=false
+```
+
+속도나 lift target을 명시적으로 바꿔 시험하려면 다음처럼 실행한다.
+
+```bash
+ros2 launch follower_supply_perception follower_apriltag_drive.launch.py \
+  rx64_speed:=50 lift_raw:=300
 ```
 
 유효한 값이면 `ALIGNED → RX-28 CLOSE → close_wait → RX-64 lift_raw → LIFTING →
-DONE`으로 진행한다. 값이 finite integer가 아니거나 Follower RX-64 configured range
+DONE`으로 진행한다. `lift_raw`가 finite integer가 아니거나 Follower RX-64 configured range
 밖이면 RX-28 CLOSE를 유지하고 RX-64 command 없이 error status를 남긴 뒤 DONE으로
 끝난다. Tag-loss idle policy와 정상 lift enable은 서로 독립적이다.
 
@@ -231,10 +244,11 @@ Leader shared behavior는 기존 기본값을 유지한다.
 | detection | `/leader/supply/detected` | `/follower/supply/detected` |
 | alignment | `/leader/base_alignment/state` | `/follower/base_alignment/state` |
 | RX-28 OPEN/CLOSE | `1000` / `450` | `950` / `350` |
-| lift default | disabled, `-1` | disabled, `-1` |
-| startup pose | `startup_pose_enabled=true` | `startup_pose_enabled=false` |
-| startup torque | `startup_torque=true` | `startup_torque=false` |
-| Tag-loss idle | `tag_lost_idle_enabled=true` | `tag_lost_idle_enabled=false` |
+| lift default | enabled, `300` | enabled, `300` |
+| RX-64 speed | raw `50` | raw `50` |
+| startup pose | `startup_pose_enabled=false` | `startup_pose_enabled=false` |
+| startup torque | `startup_torque=false` | `startup_torque=false` |
+| Tag-loss idle | `tag_lost_idle_enabled=false` | `tag_lost_idle_enabled=false` |
 
 #### Hardware validation 순서
 
@@ -243,12 +257,13 @@ Leader shared behavior는 기존 기본값을 유지한다.
 
 1. `gripper_enabled:=false`로 기존 AprilTag/drive graph를 회귀 확인한다.
 2. 기본 launch를 wheel guard가 닫힌 상태로 실행하고 Tag가 없을 때 RX-28, RX-64,
-   wheel이 움직이지 않는지 확인한다.
+   wheel이 움직이지 않는지와 runtime `rx64_speed=50`을 확인한다.
 3. Tag를 표시해 RX-28만 OPEN 950으로 한 번 이동하고 RX-64는 정지하는지 확인한다.
 4. 주변 안전 확인 후에만 velocity guard를 열어 approach, `FINAL_APPROACH`,
-   `STABILIZING`, `ALIGNED`를 진행한다. RX-28 CLOSE 350과 RX-64 정지를 확인한다.
-5. temporary Tag loss를 만들어 unexpected gripper motion이 없는지 확인한다.
-6. RX-64 hardware와 안전한 `lift_raw`를 별도 검증한 미래 단계에서만 lift를 활성화한다.
+   `STABILIZING`, `ALIGNED`를 진행한다. RX-28 CLOSE 350을 확인한다.
+5. 기존 close wait 3초 후 RX-64가 천천히 raw 300으로 이동하고 DONE이 되는지 확인한다.
+6. temporary Tag loss를 만들어 unexpected gripper reposition이 없는지 확인한다.
+7. `lift_enabled:=false`로 재실행해 OPEN/CLOSE 후 RX-64가 움직이지 않는지 확인한다.
 
 #### Troubleshooting
 
@@ -270,9 +285,15 @@ Leader shared behavior는 기존 기본값을 유지한다.
 - `gripper_enabled=false`인데 node가 남으면 이전 launch process 또는 stale install을
   확인한다.
 - `lift_enabled=false`인데 RX-64가 움직이면 raw/semantic topic의 외부 publisher와 다른
-  Dynamixel process를 확인한다.
+  Dynamixel process를 확인하고 regression으로 취급한다.
 - lift를 켰는데 LIFTING이 없으면 `lift_raw`가 finite integer이며 configured range 안인지,
   CLOSE 후 `close_wait`가 지났는지 status에서 확인한다.
+- RX-64가 너무 빠르면 `/follower/dynamixel_orin_node`의 `rx64_speed`가 `50`인지 확인한다.
+- RX-64 status packet error는 port `/dev/ttyUSB0`, baudrate `115200`, `robot=follower`,
+  ID `50` 및 케이블·전원을 확인한다.
+- RX-28 속도가 달라졌다면 이번 변경에는 RX-28 Moving Speed write가 없으므로 regression
+  또는 다른 Dynamixel process를 확인한다.
+- raw 300 validation error는 실행 중 profile과 RX-64 range `260..670`을 확인한다.
 - launch 직후 wheel이 움직이면 `/follower/velocity_guard/enable` 상태와 중복 motor
   publisher를 확인하고 guard를 즉시 닫는다.
 
