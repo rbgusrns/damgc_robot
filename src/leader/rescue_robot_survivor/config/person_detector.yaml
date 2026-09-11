@@ -1,0 +1,7 @@
+/leader/person_detector:
+  ros__parameters:
+    image_topic: /leader/camera/color/image_rect
+    debug_image_topic: /leader/survivor/debug_image
+    model_name: yolo11n.pt
+    confidence_threshold: 0.5
+    device: auto

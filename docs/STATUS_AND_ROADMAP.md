@@ -3,8 +3,8 @@
 ## 문서 목적
 
 이 문서는 [개발 계획서](Plan.md)를 실행 상태로 변환한 관리 문서다. 기준일은
-**2026년 7월 27일**이며, 일정상 3주차(7월 27일~8월 2일)의 첫날이다. 2026년 9월 6일
-AprilTag software pipeline 후속 구현 상태는 아래 관련 행과 팔로워 절에 추가 반영했다.
+**2026년 7월 27일**이며, 일정상 3주차(7월 27일~8월 2일)의 첫날이다. 2026년 9월 11일
+AprilTag software pipeline과 Survivor Stage 1 구현 상태를 아래 관련 행에 추가 반영했다.
 
 상태 표시는 다음 기준을 사용한다.
 
@@ -20,7 +20,7 @@ AprilTag software pipeline 후속 구현 상태는 아래 관련 행과 팔로�
 | D435 실시간 3차원 지도 | 부분 완료 | RGB·depth 발행은 확인, Visual SLAM·nvblox 지도는 없음 |
 | Visual SLAM 위치·자세 추정 | 미구현 | 관련 패키지·launch·시험 기록 없음 |
 | BNO055와 wheel odometry 보정 | 미구현 | URDF의 `imu_link`만 있으며 실제 데이터와 융합 없음 |
-| 카메라 기반 생존자 탐지 | 미구현 | 사람 탐지 노드 없음 |
+| 카메라 기반 생존자 탐지 | 부분 완료 | YOLO11n person debug-image pipeline 구현; Jetson AI runtime 및 실제 D435 화면 검증 필요 |
 | depth 기반 생존자 3차원 위치 | 미구현 | 중앙 depth CSV 도구는 있으나 사람 검출 결과와 결합되지 않음 |
 | Nav2 자율주행 | 미구현 | Nav2 구성·지도·주행 시험 없음 |
 | AprilTag 물품 인식·정밀 접근 | 부분 완료 | 양 로봇 camera/base alignment와 guarded software velocity 구현; 실제 접근·파지 검증 필요 |
@@ -38,6 +38,8 @@ AprilTag software pipeline 후속 구현 상태는 아래 관련 행과 팔로�
 - RGB 보정과 CameraInfo QoS 보조
 - `tag36h11`, ID 0, 0.050 m 기준 AprilTag 검출
 - depth 영상 중앙 20×20 영역의 거리 CSV 저장
+- COCO person 다중 검출, 좌우 frame-local 번호와 `/leader/survivor/debug_image` 구현
+  (`IMPLEMENTED - HARDWARE VERIFICATION REQUIRED`)
 
 ### 팔로워
 
@@ -77,7 +79,7 @@ AprilTag software pipeline 후속 구현 상태는 아래 관련 행과 팔로�
 | --- | --- | --- |
 | 로봇 A 원격 직진·회전 | 확인 필요 | `/leader/cmd_vel`부터 STM32까지 실물 시험 |
 | 3차원 지도 5분 이상 생성 | 미구현 | Visual SLAM·nvblox rosbag 시험부터 수행 |
-| 사람과 AprilTag 검출 | 부분 완료 | AprilTag 완료, 사람 탐지 없음 |
+| 사람과 AprilTag 검출 | 부분 완료 | AprilTag 완료; 사람 탐지 software 구현, Jetson/D435 검증 필요 |
 | 규격 물품 수동 파지 | 확인 필요 | 그리퍼 시험 기록 필요 |
 | 가짜 노드로 임무 상태 전체 순환 | 미구현 | Mission Coordinator 상태·전이 정의 필요 |
 
