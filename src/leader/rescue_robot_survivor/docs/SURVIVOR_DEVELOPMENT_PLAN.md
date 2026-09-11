@@ -2,8 +2,8 @@
 
 ## 상태와 최종 흐름
 
-현재 상태는 **Stage 1 IMPLEMENTED - HARDWARE VERIFICATION REQUIRED**다. 실제 D435
-화면에서 사용자가 YOLO 결과를 확인한 뒤에만 `VERIFIED`로 변경한다.
+현재 상태는 **Stage 1 VERIFIED (2026-09-11)**다. 실제 D435 화면에서 1명, 2명, 3명
+사람 검출과 bounding box, confidence, 좌→우 `person1..N` numbering을 확인했다.
 
 ```text
 D435 RGB → YOLO person bbox ─┐
@@ -21,8 +21,9 @@ CameraInfo ──────────────────┘            
 - Output: `/leader/survivor/debug_image`, 원본 header 유지.
 - Completion: 0/1/다중 person 결과를 rqt에서 확인하고 비-person이 표시되지 않는다.
 - Current: software/build/test, survivor 전용 Docker의 Jetson GPU 추론, 다중-person sample 및
-  D435 빈 장면 확인. Host global Python에는 AI package를 설치하지 않으며, 실제 D435
-  사람/마네킹 사용자 검증만 남아 있다. Stage 2 이후도 같은 image와 model cache를 재사용한다.
+  D435 실제 1명/2명/3명 검출을 확인했다. bounding box, confidence, 좌→우 frame-local
+  numbering과 `/leader/survivor/debug_image`를 rqt에서 검증했다. Stage 2 이후도 같은
+  image와 model cache를 재사용한다.
 
 ## Stage 2 — Bounding box + aligned depth → distance
 
@@ -84,5 +85,6 @@ CameraInfo ──────────────────┘            
 - CameraInfo: `/leader/camera/color/camera_info`
 - 실제 resolution, encoding과 timestamp 일치는 매 실행에서 재검증한다.
 
-Stage 2의 다음 작업은 bbox 중심 주변 ROI → 유효 depth 추출 → zero/invalid 제거 → median
-→ person distance[m]이며, 이 문서의 뒤 단계를 동시에 구현하지 않는다.
+Stage 2의 다음 작업은 YOLO bounding box + aligned depth → 사람 영역의 유효 depth 추출
+→ zero/invalid 제거 → median depth → person distance[m]이며, 이 문서의 뒤 단계를 동시에
+구현하지 않는다.

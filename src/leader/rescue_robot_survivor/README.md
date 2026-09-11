@@ -7,12 +7,13 @@
 이 패키지는 생존자 인식을 담당하므로 모델 의존성, 실행 주기와 이후 depth 처리를 서로
 섞지 않도록 별도 패키지로 분리했다.
 
-**현재 상태: IMPLEMENTED - HARDWARE VERIFICATION REQUIRED**
+**현재 상태: VERIFIED (2026-09-11)**
 
-코드, package build와 자동 테스트를 완료했다. 격리된 Jetson runtime에서 YOLO11n GPU
-추론, 공개 다중-person 이미지의 `person1..4` 표시, 실제 D435 빈 장면의 debug 발행도
-확인했다. 다만 host Python에는 PyTorch, torchvision과 Ultralytics가 아직 없고 실제 사람을
-D435 앞에 둔 사용자 검증은 남아 있으므로 `VERIFIED`가 아니다.
+코드, package build와 자동 테스트를 완료했다. survivor 전용 Jetson Docker GPU runtime에서
+YOLO11n 추론을 수행하고 실제 D435 화면에서 1명, 2명, 3명 검출을 확인했다. 각 사람의
+bounding box와 confidence, 왼쪽에서 오른쪽 순서의 `person1..N` 표시 및
+`/leader/survivor/debug_image`를 rqt_image_view에서 확인했다. `personN`은 persistent
+tracking ID가 아닌 현재 프레임의 표시 번호다.
 
 ## Jetson GPU runtime
 
@@ -60,6 +61,10 @@ ByteTrack, BoT-SORT, DeepSORT, re-identification과 persistent ID는 구현하�
 이번 Stage에는 사람 거리, bounding box depth median, Camera XYZ, TF2 map 변환, RViz
 위치 marker, 중복 제거, survivor confirmation, Mission Coordinator, custom training과
 TensorRT 최적화가 포함되지 않는다.
+
+RGB, depth, aligned-depth를 포함한 D435 camera pipeline도 정상 기동 및 topic 발행을
+확인했다. Stage 2에서는 YOLO bounding box와 aligned depth를 결합해 사람 영역의 유효
+depth만 추출하고, zero/invalid 값을 제거한 median depth로 사람까지의 거리[m]를 계산한다.
 
 ## 구조
 
@@ -198,9 +203,9 @@ box와 `personN confidence`가 표시된다. 각 터미널에서 `Ctrl-C`로 det
 [Stage 1 validation](docs/STAGE1_PERSON_DETECTION_VALIDATION.md), 이후 전체 개발 순서는
 [survivor development plan](docs/SURVIVOR_DEVELOPMENT_PLAN.md)을 따른다.
 
-## Next Stage
+## Next Stage — Stage 2
 
-다음 단계는 YOLO bounding box와 RGB-aligned depth를 timestamp 기준으로 동기화하고,
-box 중심 주변 ROI에서 0/invalid 값을 제거한 median depth로 사람 거리[m]를 계산하는 것이다.
-필요한 전달 정보는 bbox 좌표, RGB/aligned-depth timestamp, aligned-depth 및 CameraInfo 토픽,
-resolution, frame ID와 encoding이다.
+YOLO bounding box + aligned depth를 timestamp 기준으로 결합하고, 사람 영역에서 유효
+depth를 추출한 뒤 zero/invalid 값을 제거한다. 이후 median depth로 사람까지의 거리[m]를
+계산한다. 필요한 전달 정보는 bbox 좌표, RGB/aligned-depth timestamp, aligned-depth 및
+CameraInfo 토픽, resolution, frame ID와 encoding이다.

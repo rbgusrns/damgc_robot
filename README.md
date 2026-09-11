@@ -18,7 +18,7 @@
   exact-stamp TF2 기반 `base_link` pose·metric·상태, raw approach controller와
   velocity guard를 통한 최종 software topic `/leader/cmd_vel`, 독립
   [`rescue_robot_survivor`](src/leader/rescue_robot_survivor/README.md) Stage 1 YOLO11n
-  person debug-image pipeline(실기 YOLO 검증 필요)
+  person debug-image pipeline(Stage 1 VERIFIED: 실제 D435에서 1/2/3명 검출 및 debug image 확인)
 - 팔로워: USB 카메라, AprilTag 검출, 기존 camera-frame 상태, exact-stamp TF2 기반
   `base_link` pose·metric·상태, raw approach controller, STOP/APPROACH/COOPERATION
   command selector, 최종 safety guard와 `/follower/safe_cmd_vel`
@@ -32,8 +32,8 @@
   정지 상태 dual EKF 안정화, Docker RViz의 카메라 및 3차원 mesh 표시
 - 진행 중: 저속 주행에서 EKF 안정성과 VSLAM tracking 장시간 검증
 - 아직 없음: depth 기반 생존자 위치, Nav2, 그리퍼 연동, Mission Coordinator, 실물
-  리더–팔로워 협동 운반. 사람 탐지는 구현됐으나 Jetson AI runtime 및 실제 D435 화면
-  검증이 남아 있음
+  리더–팔로워 협동 운반. Survivor Stage 1 사람 탐지는 실제 D435에서 검증됐으며, 다음은
+  bounding box와 aligned depth를 결합한 사람 거리 계산이다.
 
 Leader AprilTag pipeline은 guarded `/leader/cmd_vel`에서 I2C STM32 bridge와 motor까지
 통합되어 있습니다. Follower의 `/follower/safe_cmd_vel`은 아직 motor에 연결하지

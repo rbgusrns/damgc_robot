@@ -4,7 +4,8 @@
 
 이 문서는 [개발 계획서](Plan.md)를 실행 상태로 변환한 관리 문서다. 기준일은
 **2026년 7월 27일**이며, 일정상 3주차(7월 27일~8월 2일)의 첫날이다. 2026년 9월 11일
-AprilTag software pipeline과 Survivor Stage 1 구현 상태를 아래 관련 행에 추가 반영했다.
+AprilTag software pipeline과 Survivor Stage 1 구현 및 실제 hardware verification 상태를
+아래 관련 행에 추가 반영했다.
 
 상태 표시는 다음 기준을 사용한다.
 
@@ -20,7 +21,7 @@ AprilTag software pipeline과 Survivor Stage 1 구현 상태를 아래 관련 �
 | D435 실시간 3차원 지도 | 부분 완료 | RGB·depth 발행은 확인, Visual SLAM·nvblox 지도는 없음 |
 | Visual SLAM 위치·자세 추정 | 미구현 | 관련 패키지·launch·시험 기록 없음 |
 | BNO055와 wheel odometry 보정 | 미구현 | URDF의 `imu_link`만 있으며 실제 데이터와 융합 없음 |
-| 카메라 기반 생존자 탐지 | 부분 완료 | YOLO11n person debug-image pipeline 구현; Jetson AI runtime 및 실제 D435 화면 검증 필요 |
+| 카메라 기반 생존자 탐지 | 완료 | survivor 전용 Docker GPU runtime과 YOLO11n pipeline 검증; 실제 D435에서 1/2/3명 검출, bbox/confidence, 좌→우 numbering 및 rqt debug image 확인 |
 | depth 기반 생존자 3차원 위치 | 미구현 | 중앙 depth CSV 도구는 있으나 사람 검출 결과와 결합되지 않음 |
 | Nav2 자율주행 | 미구현 | Nav2 구성·지도·주행 시험 없음 |
 | AprilTag 물품 인식·정밀 접근 | 부분 완료 | 양 로봇 camera/base alignment와 guarded software velocity 구현; 실제 접근·파지 검증 필요 |
@@ -38,8 +39,11 @@ AprilTag software pipeline과 Survivor Stage 1 구현 상태를 아래 관련 �
 - RGB 보정과 CameraInfo QoS 보조
 - `tag36h11`, ID 0, 0.050 m 기준 AprilTag 검출
 - depth 영상 중앙 20×20 영역의 거리 CSV 저장
-- COCO person 다중 검출, 좌우 frame-local 번호와 `/leader/survivor/debug_image` 구현
-  (`IMPLEMENTED - HARDWARE VERIFICATION REQUIRED`)
+- COCO person 다중 검출, 좌우 frame-local 번호와 `/leader/survivor/debug_image` 구현 및
+  실제 D435 1/2/3명 hardware verification 완료 (`VERIFIED`, 2026-09-11)
+
+Stage 1 다음 작업은 YOLO bounding box + aligned depth에서 사람 영역의 유효 depth를
+추출하고 zero/invalid 값을 제거한 median depth로 사람까지의 거리[m]를 계산하는 Stage 2다.
 
 ### 팔로워
 

@@ -2,9 +2,9 @@
 
 ## 판정 기준
 
-현재 코드는 **IMPLEMENTED - HARDWARE VERIFICATION REQUIRED**다. 아래 절차로 실제 사람
-bounding box를 사용자가 확인하기 전까지 `VERIFIED`로 기록하지 않는다. 각 터미널은 새
-shell이며 공통으로 ROS와 workspace overlay를 source한다.
+현재 상태는 **VERIFIED (2026-09-11)**다. 실제 D435 화면에서 1명, 2명, 3명 사람 검출과
+bounding box, confidence, 좌→우 `person1..N` numbering을 확인했다. 각 터미널은 새 shell이며
+공통으로 ROS와 workspace overlay를 source한다.
 
 ## Survivor Docker runtime check
 
@@ -36,13 +36,16 @@ docker run --rm --runtime=nvidia --network host --ipc host \
 - 격리 runtime의 Ultralytics 8.4.147에서 CPU/GPU NMS와 YOLO11n GPU 추론 성공.
 - 공개 bus sample에서 person 4명을 검출하고 왼쪽부터 `person1`, `person2`, `person3`,
   `person4`와 confidence/bounding box가 그려진 ROS debug image를 확인했다.
+- 실제 D435에서 사람 1명, 2명, 3명을 각각 검출하고 각 bounding box와 confidence를
+  확인했다. numbering은 화면 좌측에서 우측 순서이며 persistent tracking ID가 아니다.
 - 실제 D435 빈 장면에서는 예상대로 box가 없었고 debug image가 약 14 Hz로 발행됐다.
 - 실제 D435 입력 55개와 debug 출력 50개를 5초간 수집했으며 48개 output stamp가 입력과
   정확히 일치했다. frame은 `camera_color_optical_frame`, 출력 encoding은 `bgr8`이었다.
 - 같은 실행에서 raw depth는 약 27 Hz, aligned depth는 약 29 Hz로 확인됐다.
 
-위 기록은 코드와 장비 파이프라인 검증 근거지만 D435 앞의 실제 사람/마네킹 검증을
-대체하지 않는다. 따라서 상태는 계속 `IMPLEMENTED - HARDWARE VERIFICATION REQUIRED`다.
+위 기록으로 survivor Stage 1의 실제 RGB hardware verification을 완료했다. 실제 D435
+`/leader/survivor/debug_image`는 rqt_image_view에서 확인했으며, 상태는
+`VERIFIED`다. `personN`은 tracking ID가 아닌 frame-local 표시 번호다.
 
 ## 사전 점검 및 build
 
@@ -224,8 +227,9 @@ Failure symptoms/troubleshooting: blank 화면이면 Terminal 4의 rate를 먼�
 | H | 최종 시연 마네킹 | 성공/실패와 거리·조명·자세 기록 |
 
 여러 사람 중 일부가 누락되면 threshold, 조명, 사람 크기/가림과 입력 해상도를 기록한다.
-마네킹 실패는 COCO model의 known limitation으로 기록하며 Stage 1에서 custom training을
-시작하지 않는다. `personN`은 frame-local 번호이므로 프레임 간 동일 ID를 기대하지 않는다.
+실제 사람 A/B/C 장면에서 각각 1명/2명/3명 검출을 완료했다. 마네킹은 별도 시험 대상이며
+COCO model의 known limitation으로 기록한다. `personN`은 frame-local 번호이므로 프레임 간
+동일 ID를 기대하지 않는다.
 
 ## 종료
 
@@ -281,5 +285,6 @@ git status
 
 검증 기록에 bbox 좌표 기준, RGB와 aligned-depth timestamp, aligned-depth topic,
 `/leader/camera/color/camera_info`, 실제 resolution, frame ID와 encoding을 남긴다. 다음
-Stage는 bbox 중심 주변 ROI에서 유효 depth를 추출하고 zero/invalid 제거 후 median
-person distance[m]를 계산한다. Camera XYZ, TF, marker와 tracking은 그 이후 범위다.
+Stage 2는 YOLO bounding box와 aligned depth를 결합해 사람 영역의 유효 depth를 추출하고,
+zero/invalid 값을 제거한 median depth로 person distance[m]를 계산한다. Camera XYZ, TF,
+marker와 tracking은 그 이후 범위다.
