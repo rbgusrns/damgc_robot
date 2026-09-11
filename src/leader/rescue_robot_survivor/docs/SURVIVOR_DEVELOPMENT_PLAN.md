@@ -20,8 +20,9 @@ CameraInfo ──────────────────┘            
 - Processing: BGR 변환, class 0/threshold 필터, 중심 x 좌우 정렬, frame-local 번호와 box 표시.
 - Output: `/leader/survivor/debug_image`, 원본 header 유지.
 - Completion: 0/1/다중 person 결과를 rqt에서 확인하고 비-person이 표시되지 않는다.
-- Current: software/build/test, 격리 GPU 추론, 다중-person sample 및 D435 빈 장면 확인.
-  Host AI runtime 설치와 실제 D435 사람/마네킹 사용자 검증 필요.
+- Current: software/build/test, survivor 전용 Docker의 Jetson GPU 추론, 다중-person sample 및
+  D435 빈 장면 확인. Host global Python에는 AI package를 설치하지 않으며, 실제 D435
+  사람/마네킹 사용자 검증만 남아 있다. Stage 2 이후도 같은 image와 model cache를 재사용한다.
 
 ## Stage 2 — Bounding box + aligned depth → distance
 

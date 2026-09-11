@@ -6,6 +6,26 @@
 bounding box를 사용자가 확인하기 전까지 `VERIFIED`로 기록하지 않는다. 각 터미널은 새
 shell이며 공통으로 ROS와 workspace overlay를 source한다.
 
+## Survivor Docker runtime check
+
+Host Python에는 `torch`, `torchvision`, `ultralytics`를 설치하지 않는다. 먼저 전용 image를
+build하고 CUDA runtime을 확인한다.
+
+```bash
+cd ~/damgc_robot
+./scripts/build_survivor_runtime.sh
+docker run --rm --runtime=nvidia --network host --ipc host \
+  -e NVIDIA_VISIBLE_DEVICES=all \
+  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+  -e YOLO_CONFIG_DIR=/tmp \
+  -v ~/.cache/damgc-survivor-ultralytics:/root/.cache/ultralytics \
+  --workdir /root/.cache/ultralytics \
+  damgc-survivor-yolo:humble 'check_survivor_ai_runtime --static'
+```
+
+정상 결과에는 `CUDA: True`, `CUDA NMS: OK`, `YOLO load: OK`, `GPU inference: OK`와
+`rescue_robot_survivor person_detector_node`가 포함되어야 한다.
+
 ## 2026-09-11 개발 검증 기록
 
 - 신규 package 단독 build와 ROS package/executable/launch discovery 성공.
@@ -119,13 +139,11 @@ Failure symptoms/troubleshooting: aligned 토픽만 없으면 Terminal 1의 두 
 `ros2 launch ... --show-args`를 확인한다. RGB는 있는데 detector callback이 없다면 topic
 철자와 `ros2 topic info -v`의 endpoint/QoS를 비교한다.
 
-## Terminal 3 — Person detector
+## Terminal 3 — Container person detector
 
 ```bash
 cd ~/damgc_robot
-source /opt/ros/humble/setup.bash
-source install/local_setup.bash
-ros2 launch rescue_robot_survivor person_detector.launch.py
+./scripts/run_survivor_detector.sh
 ```
 
 Expected result: model, input/output topic, threshold와 selected device가 한 번씩 출력된다.

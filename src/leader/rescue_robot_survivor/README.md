@@ -14,6 +14,33 @@
 확인했다. 다만 host Python에는 PyTorch, torchvision과 Ultralytics가 아직 없고 실제 사람을
 D435 앞에 둔 사용자 검증은 남아 있으므로 `VERIFIED`가 아니다.
 
+## Jetson GPU runtime
+
+Host global Python에는 AI package를 설치하지 않는다. 재현 가능한 survivor 전용 image를
+사용한다.
+
+```bash
+cd ~/damgc_robot
+./scripts/build_survivor_runtime.sh
+./scripts/run_survivor_detector.sh
+```
+
+Runtime smoke test:
+
+```bash
+docker run --rm --runtime=nvidia --network host --ipc host \
+  -e NVIDIA_VISIBLE_DEVICES=all \
+  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+  -v ~/.cache/damgc-survivor-ultralytics:/root/.cache/ultralytics \
+  damgc-survivor-yolo:humble 'check_survivor_ai_runtime --static'
+```
+
+검증된 조합은 JetPack 6.2.3/L4T R36.5.2, Python 3.10, NVIDIA CUDA PyTorch
+`2.5.0a0+872d972e41.nv24.08`, CUDA-enabled source-built torchvision `0.20.0`,
+Ultralytics `8.4.147`이다. torchvision은 torch를 교체하지 않고 `FORCE_CUDA=1` 및
+Orin `sm_87` 대상으로 build한다. check script는 CUDA NMS와 YOLO11n GPU inference까지
+확인한다.
+
 ## Stage 1 기능과 범위
 
 현재 구현은 다음 기능만 지원한다.
@@ -99,31 +126,39 @@ JetPack 6 container를 선택한 뒤 사용자가 설치해야 한다.
 `yolo11n.pt`가 로컬에 없으면 Ultralytics가 최초 실행 시 다운로드할 수 있다. Jetson이
 오프라인이면 weight를 미리 복사하고 `model_name:=/absolute/path/yolo11n.pt`로 지정한다.
 
-## Build, 실행, 화면 확인과 종료
+## Host camera와 container detector 실행
 
 ```bash
-source /opt/ros/humble/setup.bash
 cd ~/damgc_robot
-colcon build --symlink-install --packages-select rescue_robot_survivor
-source install/local_setup.bash
+./scripts/build_survivor_runtime.sh
 ```
 
-기존 camera launch를 먼저 실행한 뒤 다른 터미널에서 detector를 실행한다.
+기존 camera launch는 host에서 먼저 실행한다. detector는 host global Python이 아니라 전용
+container에서 실행한다.
 
 ```bash
-ros2 launch rescue_robot_survivor person_detector.launch.py
+# Host terminal
+source /opt/ros/humble/setup.bash
+source ~/damgc_robot/install/local_setup.bash
+ros2 launch rescue_robot_bringup camera_apriltag.launch.py \
+  enable_depth:=true enable_sync:=true align_depth.enable:=true
+
+# Another terminal
+cd ~/damgc_robot
+./scripts/run_survivor_detector.sh
 ```
 
 파라미터 override 예시는 다음과 같다.
 
 ```bash
-ros2 launch rescue_robot_survivor person_detector.launch.py \
+./scripts/run_survivor_detector.sh \
   confidence_threshold:=0.6 device:=cpu
 ```
 
 화면은 다음 중 하나로 확인한다.
 
 ```bash
+source /opt/ros/humble/setup.bash
 ros2 run rqt_image_view rqt_image_view
 # GUI에서 /leader/survivor/debug_image 선택
 
@@ -141,8 +176,8 @@ box와 `personN confidence`가 표시된다. 각 터미널에서 `Ctrl-C`로 det
 - 마네킹 실패 시 Stage 1에서 custom training을 시작하지 않고 검증 결과에 기록한다.
 - GPU/CPU 성능, camera와 AprilTag의 동시 사용에 따라 debug FPS가 낮아질 수 있다.
 - Stage 1 node는 aligned depth를 구독하지 않는다.
-- host Python에는 AI runtime이 없다. 격리 runtime 검증과 별개로 일반 launch를 계속
-  사용하려면 JetPack 호환 runtime을 host 또는 운영 container에 준비해야 한다.
+- host Python에는 AI runtime이 없다. detector는 항상 survivor 전용 container에서 실행하고,
+  host는 camera, ROS graph 확인과 rqt에 사용한다.
 
 ## 빠른 문제 해결
 
