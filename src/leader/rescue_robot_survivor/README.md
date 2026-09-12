@@ -46,9 +46,9 @@ Ultralytics `8.4.147`이다. torchvision은 torch를 교체하지 않고 `FORCE_
 Orin `sm_87` 대상으로 build한다. check script는 CUDA NMS와 YOLO11n GPU inference까지
 확인한다.
 
-## Stage 1 기능과 범위
+## Stage 1 보호 기능과 Stage 2 범위
 
-현재 구현은 다음 기능만 지원한다.
+현재 구현은 다음 기능을 지원한다.
 
 - `/leader/camera/color/image_rect`를 sensor-data QoS로 구독
 - Ultralytics `yolo11n.pt` COCO pretrained detection 사용
@@ -62,9 +62,9 @@ Orin `sm_87` 대상으로 build한다. check script는 CUDA NMS와 YOLO11n GPU i
 움직이거나 서로 교차하거나 검출이 누락되면 다음 프레임에서 번호가 달라질 수 있다.
 ByteTrack, BoT-SORT, DeepSORT, re-identification과 persistent ID는 구현하지 않는다.
 
-이번 Stage에는 사람 거리, bounding box depth median, Camera XYZ, TF2 map 변환, RViz
-위치 marker, 중복 제거, survivor confirmation, Mission Coordinator, custom training과
-TensorRT 최적화가 포함되지 않는다.
+Stage 2 범위는 bounding box 중심 ROI의 median 거리까지다. Camera XYZ, TF2 map 변환,
+RViz 위치 marker, 중복 제거, survivor confirmation, Mission Coordinator, custom training과
+TensorRT 최적화는 포함되지 않는다.
 
 RGB, depth, aligned-depth를 포함한 D435 camera pipeline도 정상 기동 및 topic 발행을
 확인했다. Stage 2는 YOLO bounding box와 aligned depth를 결합해 중심 ROI의 유효 depth만
@@ -85,6 +85,7 @@ rescue_robot_survivor/
 ├── test/                        # 순수 로직과 launch/config 계약 테스트
 ├── docs/SURVIVOR_DEVELOPMENT_PLAN.md
 ├── docs/STAGE1_PERSON_DETECTION_VALIDATION.md
+├── docs/STAGE2_DEPTH_DISTANCE_VALIDATION.md
 ├── package.xml
 ├── setup.py
 └── setup.cfg
@@ -186,7 +187,8 @@ ros2 run rqt_image_view rqt_image_view /leader/survivor/debug_image
 ```
 
 정상 상태에서는 사람이 없을 때 원본 영상만 보이고, 사람이 있으면 각 사람 주위에 초록색
-box와 `personN confidence`가 표시된다. 각 터미널에서 `Ctrl-C`로 detector, rqt와 camera를
+box와 `personN confidence | distance m`가 표시된다. 사용할 수 있는 depth가 없으면
+`personN confidence | N/A`가 표시된다. 각 터미널에서 `Ctrl-C`로 detector, rqt와 camera를
 종료한다.
 
 ## Known limitations
@@ -195,7 +197,7 @@ box와 `personN confidence`가 표시된다. 각 터미널에서 `Ctrl-C`로 det
 - COCO pretrained 모델은 누운 사람, 심한 가림, 작은 사람 또는 마네킹을 놓칠 수 있다.
 - 마네킹 실패 시 Stage 1에서 custom training을 시작하지 않고 검증 결과에 기록한다.
 - GPU/CPU 성능, camera와 AprilTag의 동시 사용에 따라 debug FPS가 낮아질 수 있다.
-- Stage 1 node는 aligned depth를 구독하지 않는다.
+- Stage 2 node는 aligned depth를 구독하지만 실제 줄자 기반 거리 검증은 아직 남아 있다.
 - host Python에는 AI runtime이 없다. detector는 항상 survivor 전용 container에서 실행하고,
   host는 camera, ROS graph 확인과 rqt에 사용한다.
 
@@ -214,8 +216,8 @@ box와 `personN confidence`가 표시된다. 각 터미널에서 `Ctrl-C`로 det
   확인한다.
 - aligned depth 없음: camera를 `enable_sync:=true align_depth.enable:=true`로 재실행한다.
 
-명령별 상세 진단은
-[Stage 1 validation](docs/STAGE1_PERSON_DETECTION_VALIDATION.md), 이후 전체 개발 순서는
+명령별 상세 진단은 [Stage 1 validation](docs/STAGE1_PERSON_DETECTION_VALIDATION.md)과
+[Stage 2 validation](docs/STAGE2_DEPTH_DISTANCE_VALIDATION.md), 이후 전체 개발 순서는
 [survivor development plan](docs/SURVIVOR_DEVELOPMENT_PLAN.md)을 따른다.
 
 ## Stage 2 distance algorithm
@@ -229,7 +231,6 @@ depth가 없으면 `N/A`를 표시한다.
 
 ## Next Stage — Stage 3
 
-YOLO bounding box + aligned depth를 timestamp 기준으로 결합하고, 사람 영역에서 유효
-depth를 추출한 뒤 zero/invalid 값을 제거한다. 이후 median depth로 사람까지의 거리[m]를
-계산한다. 필요한 전달 정보는 bbox 좌표, RGB/aligned-depth timestamp, aligned-depth 및
-CameraInfo 토픽, resolution, frame ID와 encoding이다.
+Stage 2가 보존하는 bbox 중심 pixel `(u, v)`, 대표 depth Z, RGB timestamp와 frame ID에
+`/leader/camera/color/camera_info`의 intrinsics를 결합해 camera optical frame XYZ를
+계산한다. TF2, map 좌표와 RViz marker는 그 이후 단계다.

@@ -51,9 +51,10 @@ damgc_robot/
 ```
 
 Visual SLAM·nvblox와 STM32 bridge 기반 기능은 저장소에 추가됐지만 실제 장비별
-완료 여부는 별도 실행 기록을 따른다. 사람 탐지, Nav2, 그리퍼와 Mission Coordinator는
-아직 완료되지 않았다. 새 패키지를 추가할 때는 리더 전용, 팔로워 전용, 공통 인터페이스
-중 소유 범위를 먼저 정합니다.
+완료 여부는 별도 실행 기록을 따른다. 사람 탐지 Stage 1은 실제 D435에서 검증됐고,
+Stage 2 사람별 aligned-depth 거리는 구현됐으나 실제 거리 검증이 남아 있다. 생존자 XYZ,
+Nav2, 그리퍼와 Mission Coordinator는 아직 완료되지 않았다. 새 패키지를 추가할 때는
+리더 전용, 팔로워 전용, 공통 인터페이스 중 소유 범위를 먼저 정합니다.
 
 ## 패키지 역할
 
@@ -122,8 +123,10 @@ ros2 launch rescue_robot_bringup camera_apriltag.launch.py enable_depth:=false
 - Follower hybrid 안정화: `base_stable_time=0.30 s`, fresh confirmation 3회,
   FINAL_APPROACH/STABILIZING 0.30 s zero-command tag-loss grace, session별 ALIGNED reset
 - 부분 완료: AprilTag 기반 정밀 접근 software는 구현됐지만 실제 로봇 주행·파지 검증은 남음
-- 미구현/미완료: 사람 탐지와 3차원 위치, Nav2, 그리퍼, Mission Coordinator,
-  Orin 간 실물 협동 운반
+- 구현·검증: Survivor Stage 1 YOLO11n 사람 탐지와 frame-local 다중-person debug image
+- 구현·실기 검증 필요: Stage 2 bbox 중심 ROI 기반 aligned-depth median 거리
+- 미구현/미완료: 생존자 camera/map XYZ, Nav2, 그리퍼, Mission Coordinator와 Orin 간
+  실물 협동 운반
 - `target_distance=0.15 m` 등 접근 파라미터는 초기 시험값이며 실제 그리퍼/TCP 기준으로 재검증해야 합니다.
 
 리더의 주요 확인 토픽은 `/leader/camera/color/image_rect`,
@@ -140,7 +143,7 @@ ros2 launch rescue_robot_bringup camera_apriltag.launch.py enable_depth:=false
 1. 실제 센서 장착 기준 TF와 다중 로봇 frame 이름 고정
 2. wheel odometry·BNO055·`robot_localization` 연결
 3. 정적 지도 기반 리더 Nav2 목표점 이동
-4. 사람 검출 ROI와 aligned depth를 결합한 카메라 좌표 출력
+4. Stage 2 실제 거리 검증 후 CameraInfo 기반 생존자 camera XYZ 출력
 5. 팔로워 `/follower/cmd_vel`과 STM32 기본 구동
 6. 두 로봇 비상정지와 30분 전원·발열 시험
 

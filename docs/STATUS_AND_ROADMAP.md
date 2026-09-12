@@ -2,10 +2,10 @@
 
 ## 문서 목적
 
-이 문서는 [개발 계획서](Plan.md)를 실행 상태로 변환한 관리 문서다. 기준일은
-**2026년 7월 27일**이며, 일정상 3주차(7월 27일~8월 2일)의 첫날이다. 2026년 9월 11일
-AprilTag software pipeline과 Survivor Stage 1 구현 및 실제 hardware verification 상태를
-아래 관련 행에 추가 반영했다.
+이 문서는 [개발 계획서](Plan.md)를 실행 상태로 변환한 관리 문서다. 최초 기준일은
+**2026년 7월 27일**이며, 현재 상태는 2026년 9월 12일까지 반영한다. AprilTag software
+pipeline, Survivor Stage 1 hardware verification과 Stage 2 거리 계산 구현 상태를 아래
+관련 행에 반영했다.
 
 상태 표시는 다음 기준을 사용한다.
 
@@ -85,7 +85,7 @@ VERIFIED로 승격한다. 다음은 CameraInfo 기반 camera XYZ인 Stage 3다.
 | --- | --- | --- |
 | 로봇 A 원격 직진·회전 | 확인 필요 | `/leader/cmd_vel`부터 STM32까지 실물 시험 |
 | 3차원 지도 5분 이상 생성 | 미구현 | Visual SLAM·nvblox rosbag 시험부터 수행 |
-| 사람과 AprilTag 검출 | 부분 완료 | AprilTag 완료; 사람 탐지 software 구현, Jetson/D435 검증 필요 |
+| 사람과 AprilTag 검출 | 완료 | AprilTag와 Survivor Stage 1 완료; 사람 탐지는 실제 Jetson/D435에서 검증됨 |
 | 규격 물품 수동 파지 | 확인 필요 | 그리퍼 시험 기록 필요 |
 | 가짜 노드로 임무 상태 전체 순환 | 미구현 | Mission Coordinator 상태·전이 정의 필요 |
 
@@ -94,7 +94,7 @@ VERIFIED로 승격한다. 다음은 CameraInfo 기반 camera XYZ인 Stage 3다.
 | 종료 조건 | 상태 | 이번 주 산출물 |
 | --- | --- | --- |
 | 로봇 A 목표점 반복 이동 | 미구현 | 정적 지도 Nav2 최소 구성과 반복 시험 |
-| 사람 위치를 카메라 좌표로 출력 | 미구현 | 사람 검출 ROI와 aligned depth 결합 |
+| 사람 위치를 카메라 좌표로 출력 | 부분 완료 | Stage 2 거리 Z 구현; CameraInfo deprojection과 camera XYZ는 Stage 3에서 구현 |
 | 로봇 B 원격 속도 주행 | 미구현/확인 필요 | STM32 통신과 `/follower/cmd_vel` 연결 |
 | 두 로봇 긴급정지 | 미구현/확인 필요 | 하드웨어 E-stop과 소프트웨어 정지 경로 검증 |
 | 전원·발열 30분 시험 | 확인 필요 | 전압·온도·재부팅 여부 기록 |
@@ -113,7 +113,7 @@ VERIFIED로 승격한다. 다음은 CameraInfo 기반 camera XYZ인 Stage 3다.
 
 1. wheel odometry와 BNO055를 `robot_localization`에 연결
 2. 로봇 A의 정적 지도 기반 Nav2 목표점 반복 이동
-3. 사람 검출과 aligned depth를 결합한 카메라 좌표 출력
+3. Stage 2 실제 거리 검증 후 CameraInfo를 결합한 camera XYZ 출력
 4. 로봇 B의 `/follower/cmd_vel` 주행
 5. 두 로봇 E-stop과 전원·발열 30분 시험
 

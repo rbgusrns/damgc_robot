@@ -2,8 +2,10 @@
 
 ## 상태와 최종 흐름
 
-현재 상태는 **Stage 1 VERIFIED (2026-09-11)**다. 실제 D435 화면에서 1명, 2명, 3명
-사람 검출과 bounding box, confidence, 좌→우 `person1..N` numbering을 확인했다.
+현재 상태는 **Stage 1 VERIFIED (2026-09-11)** 및
+**Stage 2 IMPLEMENTED - HARDWARE VERIFICATION REQUIRED (2026-09-12)**다. 실제 D435
+화면에서 Stage 1의 1명, 2명, 3명 검출을 확인했고, Stage 2 코드는 build·자동시험·Docker
+실행과 aligned-depth 입력 확인을 마쳤으나 줄자 기반 거리 검증은 남아 있다.
 
 ```text
 D435 RGB → YOLO person bbox ─┐
@@ -78,11 +80,11 @@ CameraInfo ──────────────────┘            
 - Output: coordinator가 소비할 survivor event/target.
 - Completion: simulation과 실기에서 한 후보가 한 번만 임무로 전환되고 실패를 복구한다.
 
-## Stage 1에서 Stage 2로 전달할 계약
+## Stage 1에서 Stage 2로 전달된 계약
 
 - bbox coordinates: color image pixel 좌표
 - RGB timestamp/frame: 원본 `header.stamp`, `camera_color_optical_frame`
-- aligned depth: `/leader/camera/aligned_depth_to_color/image_raw`, 현재 검증 예상값 `16UC1`,
+- aligned depth: `/leader/camera/aligned_depth_to_color/image_raw`, 실제 확인값 `16UC1`,
   640×480, `camera_color_optical_frame`
 - raw depth 참고: `/leader/camera/depth/image_rect_raw`, `16UC1`, 640×480,
   `camera_depth_optical_frame`

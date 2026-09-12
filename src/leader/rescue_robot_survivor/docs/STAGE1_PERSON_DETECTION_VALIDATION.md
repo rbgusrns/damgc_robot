@@ -69,7 +69,7 @@ ros2 launch rescue_robot_survivor person_detector.launch.py --show-args
 ```
 
 Expected result: branch와 변경사항을 확인하고 세 AI import가 모두 성공하며, build가 성공하고
-`person_detector_node`와 5개 launch argument가 나타난다.
+`person_detector_node`와 Stage 1/2 launch argument가 나타난다.
 
 Failure symptoms/troubleshooting: import가 실패하면 detector는 실행할 수 없다. JetPack 6.2.3
 호환 NVIDIA PyTorch와 torchvision을 먼저 준비한다. `pip install --upgrade torch`,
@@ -207,7 +207,7 @@ ros2 run rqt_image_view rqt_image_view /leader/survivor/debug_image
 ```
 
 Expected result: 사람이 없으면 box 없는 color 영상, 사람이 있으면 각 사람에 초록색 box와
-`personN 0.xx`가 표시된다.
+`personN 0.xx | distance m` 또는 depth invalid 시 `personN 0.xx | N/A`가 표시된다.
 
 Failure symptoms/troubleshooting: blank 화면이면 Terminal 4의 rate를 먼저 확인하고 rqt topic을
 다시 선택한다. `ros2 topic info -v`에서 rqt subscriber가 생성됐는지 확인한다. remote desktop
@@ -281,10 +281,11 @@ git status
     - `ros2 launch rescue_robot_bringup camera_apriltag.launch.py --show-args`에서
       `align_depth.enable`, `enable_sync`를 확인하고 Terminal 1 명령으로 camera를 재시작한다.
 
-## Stage 2에 남길 결과
+## Stage 2로 전달한 결과와 현재 상태
 
-검증 기록에 bbox 좌표 기준, RGB와 aligned-depth timestamp, aligned-depth topic,
-`/leader/camera/color/camera_info`, 실제 resolution, frame ID와 encoding을 남긴다. 다음
-Stage 2는 YOLO bounding box와 aligned depth를 결합해 사람 영역의 유효 depth를 추출하고,
-zero/invalid 값을 제거한 median depth로 person distance[m]를 계산한다. Camera XYZ, TF,
-marker와 tracking은 그 이후 범위다.
+Stage 1이 남긴 bbox 좌표, RGB/aligned-depth timestamp, aligned-depth topic, resolution,
+frame ID와 encoding은 Stage 2 구현에 사용됐다. Stage 2는 bbox 중심 ROI의 유효 depth에서
+median person distance[m]를 계산하며 현재 상태는 `IMPLEMENTED - HARDWARE VERIFICATION
+REQUIRED`다. 실제 거리 검증 절차는
+[Stage 2 validation](STAGE2_DEPTH_DISTANCE_VALIDATION.md)을 따른다. CameraInfo deprojection,
+Camera XYZ, TF, marker와 tracking은 이후 범위다.
