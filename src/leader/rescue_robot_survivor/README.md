@@ -7,7 +7,7 @@
 이 패키지는 생존자 인식을 담당하므로 모델 의존성, 실행 주기와 이후 depth 처리를 서로
 섞지 않도록 별도 패키지로 분리했다.
 
-**현재 상태: Stage 1 VERIFIED / Stage 2·3 IMPLEMENTED - HARDWARE VERIFICATION
+**현재 상태: Stage 1·3 VERIFIED / Stage 2 IMPLEMENTED - HARDWARE VERIFICATION
 REQUIRED (2026-09-12)**
 
 코드, package build와 자동 테스트를 완료했다. survivor 전용 Jetson Docker GPU runtime에서
@@ -16,10 +16,11 @@ bounding box와 confidence, 왼쪽에서 오른쪽 순서의 `person1..N` 표시
 `/leader/survivor/debug_image`를 rqt_image_view에서 확인했다. `personN`은 persistent
 tracking ID가 아닌 현재 프레임의 표시 번호다.
 
-Stage 2의 aligned-depth 거리와 Stage 3의 camera optical XYZ 코드는 구현되었다. 실제 D435에서
-거리 표시 동작과 RGB/depth/CameraInfo geometry를 확인했지만, 줄자 기준 거리 및
-중앙·좌·우·다중 사람 XYZ 검증표를 완료하기 전이므로 두 단계는
-`IMPLEMENTED - HARDWARE VERIFICATION REQUIRED`이다. Stage 1의 `VERIFIED` 판정은 유지된다.
+Stage 2의 aligned-depth 거리 코드는 구현되었지만 정식 줄자 기준 거리표는 아직 남아 있어
+`IMPLEMENTED - HARDWARE VERIFICATION REQUIRED`다. Stage 3는 실제 Jetson + D435에서 사람의
+camera optical XYZ, 좌/우 X 부호, distance와 Z의 일치, debug overlay, 다중 사람별 XYZ와
+`/leader/survivor/camera_positions` PoseArray를 확인해 `VERIFIED`로 승격했다. Stage 1의
+`VERIFIED` 판정도 유지된다.
 
 ## Jetson GPU runtime
 
@@ -228,10 +229,11 @@ index가 debug image의 person 번호와 같지 않을 수 있다.
 - COCO pretrained 모델은 누운 사람, 심한 가림, 작은 사람 또는 마네킹을 놓칠 수 있다.
 - 마네킹 실패 시 Stage 1에서 custom training을 시작하지 않고 검증 결과에 기록한다.
 - GPU/CPU 성능, camera와 AprilTag의 동시 사용에 따라 debug FPS가 낮아질 수 있다.
-- Stage 2의 정식 줄자 기반 거리표와 Stage 3의 축 부호·다중 사람 실기 검증은 남아 있다.
+- Stage 2의 정식 줄자 기반 거리표는 남아 있다. Stage 3 camera XYZ 실기 검증은 완료했다.
 - ROI 중심 ray와 ROI median Z는 사람의 물리적 중심을 근사하며 같은 단일 pixel 측정은 아니다.
 - bbox 변화에 따라 XYZ가 흔들릴 수 있고 temporal smoothing은 아직 적용하지 않는다.
 - PoseArray는 confidence, bbox와 원래 person 번호를 포함하지 않는다.
+- COCO person detector는 사람처럼 보이는 의류를 false positive로 검출할 수 있다.
 - host Python에는 AI runtime이 없다. detector는 항상 survivor 전용 container에서 실행하고,
   host는 camera, ROS graph 확인과 rqt에 사용한다.
 
@@ -275,6 +277,7 @@ right/down/forward 축이다.
 
 ## Next Stage — Stage 4
 
-`/leader/survivor/camera_positions`의 원본 RGB timestamp와 실제 optical frame ID를 이용해
-TF2로 map frame XYZ를 계산한다. Stage 4 전까지 map 좌표나 RViz survivor marker를 이
+다음 개발 단계는 camera optical XYZ를 원본 RGB timestamp에서 TF2 변환해 map frame XYZ로
+만드는 Stage 4다. `/leader/survivor/camera_positions`의 실제 optical frame ID와 원본 RGB
+timestamp를 그대로 사용한다. Stage 4 전까지 map 좌표나 RViz survivor marker를 이
 패키지의 camera XYZ로 오해하지 않는다.

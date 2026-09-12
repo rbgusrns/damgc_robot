@@ -2,11 +2,11 @@
 
 ## 상태와 최종 흐름
 
-현재 상태는 **Stage 1 VERIFIED (2026-09-11)** 및
-**Stage 2·3 IMPLEMENTED - HARDWARE VERIFICATION REQUIRED (2026-09-12)**다. 실제 D435
-화면에서 Stage 1의 1명, 2명, 3명 검출을 확인했고 Stage 2 거리 표시도 동작했다. Stage 3
-코드·자동시험과 실제 RGB/depth/CameraInfo geometry 조사를 마쳤지만, 정식 줄자 거리표와
-camera XYZ 축 방향·다중 사람 시험 기록은 남아 있다.
+현재 상태는 **Stage 1 VERIFIED (2026-09-11)**,
+**Stage 2 IMPLEMENTED - HARDWARE VERIFICATION REQUIRED**, 그리고
+**Stage 3 VERIFIED (2026-09-12)**다. Stage 3는 실제 Jetson + D435에서 사람 XYZ, 좌/우 X
+부호, distance/Z 일치, debug overlay, 다중 사람과 PoseArray를 확인했다. Stage 2의 별도 정식
+줄자 거리표 상태는 임의로 변경하지 않는다.
 
 ```text
 D435 RGB → YOLO person bbox ─┐
@@ -43,7 +43,7 @@ CameraInfo ──────────────────┘            
 
 ## Stage 3 — Depth + CameraInfo → camera XYZ
 
-**현재 상태: IMPLEMENTED - HARDWARE VERIFICATION REQUIRED**
+**현재 상태: VERIFIED (2026-09-12)**
 
 - Purpose: 2D pixel과 depth를 camera optical frame의 3D 위치로 변환한다.
 - Input: Stage 2 중앙 ROI center `(u,v)`, median Z, rectified RGB CameraInfo.P.
@@ -52,8 +52,10 @@ CameraInfo ──────────────────┘            
 - Output: debug image의 XYZ와 `/leader/survivor/camera_positions` `PoseArray`. 원본 RGB
   timestamp와 실제 optical frame을 유지하고 valid XYZ만 좌→우 순서로 포함한다.
 - Dependency: Stage 1 frame-local detections, Stage 2 ROI/median Z, color CameraInfo.
-- Completion: unit test와 Docker runtime에 더해 실제 D435 중앙 `X≈0`, 좌/우 X 부호,
-  상/하 Y 부호, near/far Z, 다중 person과 positions topic을 기록해야 한다.
+- Completion: unit test와 Docker runtime, 실제 사람 XYZ, 좌/우 X 부호, distance/Z 일치,
+  debug overlay, 다중 person/pose, frame ID와 identity quaternion을 확인했다.
+- Verification: `/leader/survivor/camera_positions`의 여러 pose와 debug XYZ가 대응했으며
+  `header.frame_id=camera_color_optical_frame`임을 확인했다.
 
 ## Stage 4 — Camera XYZ + TF2 → map XYZ
 
@@ -134,5 +136,6 @@ Stage 2는 `depth_logic.py`, Stage 3는 `geometry_logic.py`에 ROS-independent �
 - orientation: identity quaternion
 - order: valid frame-local detections의 left-to-right 순서, persistent ID 아님
 
-Stage 4는 이 header를 사용해 측정 시점 TF2 변환을 수행한다. map TF가 없거나 timestamp에
+다음 개발 단계는 Stage 4다. 이 header를 사용해 camera optical XYZ를 측정 시점의
+exact-timestamp TF2 transform으로 map frame XYZ로 변환한다. map TF가 없거나 timestamp에
 맞는 transform이 없을 때 최신 transform이나 fake origin으로 대체하지 않는다.

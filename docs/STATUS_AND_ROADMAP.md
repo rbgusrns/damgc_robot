@@ -4,7 +4,7 @@
 
 이 문서는 [개발 계획서](Plan.md)를 실행 상태로 변환한 관리 문서다. 최초 기준일은
 **2026년 7월 27일**이며, 현재 상태는 2026년 9월 12일까지 반영한다. AprilTag software
-pipeline, Survivor Stage 1 hardware verification과 Stage 2·3 구현 상태를 아래
+pipeline, Survivor Stage 1·3 hardware verification과 Stage 2 구현 상태를 아래
 관련 행에 반영했다.
 
 상태 표시는 다음 기준을 사용한다.
@@ -22,7 +22,7 @@ pipeline, Survivor Stage 1 hardware verification과 Stage 2·3 구현 상태를 
 | Visual SLAM 위치·자세 추정 | 미구현 | 관련 패키지·launch·시험 기록 없음 |
 | BNO055와 wheel odometry 보정 | 미구현 | URDF의 `imu_link`만 있으며 실제 데이터와 융합 없음 |
 | 카메라 기반 생존자 탐지 | 완료 | survivor 전용 Docker GPU runtime과 YOLO11n pipeline 검증; 실제 D435에서 1/2/3명 검출, bbox/confidence, 좌→우 numbering 및 rqt debug image 확인 |
-| depth 기반 생존자 3차원 위치 | 부분 완료 | Stage 2 거리와 Stage 3 CameraInfo.P deprojection, debug XYZ 및 camera-frame PoseArray 구현; 실제 축 방향·다중 사람 검증과 map 변환은 남음 |
+| depth 기반 생존자 3차원 위치 | 부분 완료 | Stage 3 camera optical XYZ와 다중 PoseArray는 실제 D435 검증 완료; exact-timestamp TF2 map 변환은 남음 |
 | Nav2 자율주행 | 미구현 | Nav2 구성·지도·주행 시험 없음 |
 | AprilTag 물품 인식·정밀 접근 | 부분 완료 | 양 로봇 camera/base alignment와 guarded software velocity 구현; 실제 접근·파지 검증 필요 |
 | 그리퍼 물품 파지 | 확인 필요 | URDF 형상만 있고 제어 코드·실물 시험 근거 없음 |
@@ -44,9 +44,10 @@ pipeline, Survivor Stage 1 hardware verification과 Stage 2·3 구현 상태를 
 
 Stage 2는 YOLO bounding box + aligned depth의 중앙 ROI median 거리[m]를 계산한다. Stage
 3는 같은 ROI center와 median Z, rectified CameraInfo.P로 camera optical XYZ를 계산하고
-`/leader/survivor/camera_positions` PoseArray를 발행한다. 두 단계는
-`IMPLEMENTED - HARDWARE VERIFICATION REQUIRED`이며 정식 거리·축 부호·다중 사람 시험 후에만
-VERIFIED로 승격한다. 다음 구현 단계는 TF2 map 변환인 Stage 4다.
+`/leader/survivor/camera_positions` PoseArray를 발행한다. Stage 3는 실제 사람 좌/우 X 부호,
+distance/Z 일치, debug XYZ, 다중 사람 pose, `camera_color_optical_frame`과 identity quaternion을
+확인해 `VERIFIED (2026-09-12)`다. Stage 2의 별도 정식 줄자 거리표는 남아 있다. 다음 구현
+단계는 camera optical XYZ의 exact-timestamp TF2 map 변환인 Stage 4다.
 
 ### 팔로워
 
@@ -95,7 +96,7 @@ VERIFIED로 승격한다. 다음 구현 단계는 TF2 map 변환인 Stage 4다.
 | 종료 조건 | 상태 | 이번 주 산출물 |
 | --- | --- | --- |
 | 로봇 A 목표점 반복 이동 | 미구현 | 정적 지도 Nav2 최소 구성과 반복 시험 |
-| 사람 위치를 카메라 좌표로 출력 | 부분 완료 | Stage 3 CameraInfo.P deprojection, debug XYZ와 PoseArray 구현·자동시험 완료; 실제 D435 위치별 검증 필요 |
+| 사람 위치를 카메라 좌표로 출력 | 완료 | Stage 3 실제 D435 좌/우 부호, distance/Z, debug XYZ와 다중 PoseArray 검증 완료 |
 | 로봇 B 원격 속도 주행 | 미구현/확인 필요 | STM32 통신과 `/follower/cmd_vel` 연결 |
 | 두 로봇 긴급정지 | 미구현/확인 필요 | 하드웨어 E-stop과 소프트웨어 정지 경로 검증 |
 | 전원·발열 30분 시험 | 확인 필요 | 전압·온도·재부팅 여부 기록 |
@@ -114,7 +115,7 @@ VERIFIED로 승격한다. 다음 구현 단계는 TF2 map 변환인 Stage 4다.
 
 1. wheel odometry와 BNO055를 `robot_localization`에 연결
 2. 로봇 A의 정적 지도 기반 Nav2 목표점 반복 이동
-3. Stage 2 거리 및 Stage 3 camera XYZ 실기 검증 후 TF2 map 변환 구현
+3. 검증된 Stage 3 camera optical XYZ를 exact-timestamp TF2로 map frame XYZ에 변환
 4. 로봇 B의 `/follower/cmd_vel` 주행
 5. 두 로봇 E-stop과 전원·발열 30분 시험
 

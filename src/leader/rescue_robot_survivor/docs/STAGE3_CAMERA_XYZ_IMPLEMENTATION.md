@@ -2,10 +2,9 @@
 
 ## 1. 상태와 목적
 
-현재 상태는 **IMPLEMENTED - HARDWARE VERIFICATION REQUIRED (2026-09-12)**다.
-코드, package build와 synthetic unit test는 완료했지만, 사람을 중앙·좌·우에 배치한 실제
-D435 축 부호 시험과 다중 사람 topic 시험을 모두 기록하기 전에는 `VERIFIED`로 표시하지
-않는다.
+현재 상태는 **VERIFIED (2026-09-12)**다. 코드, package build와 synthetic unit test에 더해
+실제 Jetson + D435에서 사람의 camera optical XYZ, 좌/우 X 부호, distance와 Z의 일치,
+debug overlay, 다중 사람별 XYZ 및 PoseArray 발행을 확인했다.
 
 Stage 3는 Stage 2가 만든 사람별 대표 측정 `(u, v, Z)`를 RGB camera optical frame의
 metric 위치 `(X, Y, Z)`로 변환한다. TF2, `base_link`/`map` 변환, RViz marker, 중복 제거와
@@ -29,6 +28,23 @@ persistent tracking은 이 단계에 포함하지 않는다.
 
 Stage 2의 ROI와 median Z를 그대로 재사용한다. XYZ용으로 별도의 pixel이나 depth를 선택하지
 않으므로 거리 표시와 `PoseArray`의 Z가 서로 다른 측정 경로에서 나오지 않는다.
+
+## Hardware verification 결과
+
+2026-09-12 실제 Jetson + RealSense D435에서 다음을 확인했다.
+
+- 실제 사람의 camera optical XYZ 계산 및 debug image 표시 정상
+- 사람이 화면 왼쪽에 있을 때 `X<0`, 오른쪽에 있을 때 `X>0`
+- Stage 2 distance 표시와 Stage 3 XYZ의 Z가 정상적으로 일치
+- 여러 사람 동시 검출 시 각 사람의 XYZ가 독립적으로 계산됨
+- `/leader/survivor/camera_positions`에 다중 pose가 정상 발행됨
+- `header.frame_id=camera_color_optical_frame`
+- PoseArray XYZ와 같은 frame의 debug image XYZ가 대응됨
+- 모든 pose의 orientation이 identity quaternion(`w=1`)
+- `person1..N`이 frame-local left-to-right 번호이며 tracking ID가 아님
+
+실제 좌표 수치는 별도로 보존하지 않았으므로 이 문서는 검증된 부호·일치·발행 동작만
+기록하며 절대 위치 정확도를 과도하게 주장하지 않는다.
 
 ## 3. 실제 geometry 조사 결과
 
@@ -220,8 +236,8 @@ volatile이었다. 실제 ROS graph에서 durability incompatibility warning을 
 
 ## 14. Stage 4로 전달하는 계약
 
-Stage 4는 `/leader/survivor/camera_positions`를 입력으로 받아 각 pose를
-`header.stamp` 시점에 `header.frame_id`에서 `map`으로 TF2 변환한다. Stage 3가 보장하는
+다음 개발 단계인 Stage 4는 `/leader/survivor/camera_positions`를 입력으로 받아 각 pose를
+`header.stamp` 시점에 `header.frame_id`에서 `map`으로 exact-timestamp TF2 변환한다. Stage 3가 보장하는
 계약은 metric XYZ, 유효한 optical frame ID, 원본 RGB timestamp, identity orientation과
 valid-only ordering이다. Stage 4는 원본 timestamp의 TF가 없을 때 최신 TF를 몰래 사용하거나
 stale map position을 발행하면 안 된다.

@@ -19,8 +19,9 @@
   velocity guard를 통한 최종 software topic `/leader/cmd_vel`, 독립
   [`rescue_robot_survivor`](src/leader/rescue_robot_survivor/README.md) Stage 1 YOLO11n
   person debug-image pipeline(Stage 1 VERIFIED: 실제 D435에서 1/2/3명 검출 및 debug image 확인),
-  Stage 2 사람별 aligned-depth 거리와 Stage 3 CameraInfo.P 기반 camera optical XYZ/debug
-  overlay/`PoseArray`(`IMPLEMENTED - HARDWARE VERIFICATION REQUIRED`)
+  Stage 2 사람별 aligned-depth 거리(`IMPLEMENTED - HARDWARE VERIFICATION REQUIRED`)와 Stage
+  3 CameraInfo.P 기반 camera optical XYZ/debug overlay/다중 `PoseArray`(실제 Jetson + D435
+  `VERIFIED`, 2026-09-12)
 - 팔로워: USB 카메라, AprilTag 검출, 기존 camera-frame 상태, exact-stamp TF2 기반
   `base_link` pose·metric·상태, raw approach controller, STOP/APPROACH/COOPERATION
   command selector, 최종 safety guard와 `/follower/safe_cmd_vel`
@@ -34,9 +35,10 @@
   정지 상태 dual EKF 안정화, Docker RViz의 카메라 및 3차원 mesh 표시
 - 진행 중: 저속 주행에서 EKF 안정성과 VSLAM tracking 장시간 검증
 - 아직 없음: 생존자 TF2 map XYZ, Nav2, 그리퍼 연동, Mission Coordinator, 실물
-  리더–팔로워 협동 운반. Survivor Stage 1 사람 탐지는 실제 D435에서 검증됐다. Stage 2
-  거리와 Stage 3 camera XYZ는 구현·자동시험까지 완료됐으나, 정식 줄자·축 방향·다중 사람
-  D435 검증이 남아 있다.
+  리더–팔로워 협동 운반. Survivor Stage 1 사람 탐지와 Stage 3 camera optical XYZ는 실제
+  D435에서 검증됐다. Stage 3에서는 좌/우 X 부호, distance/Z 일치, debug XYZ, 다중 사람
+  PoseArray, optical frame과 identity quaternion을 확인했다. Stage 2의 별도 정식 줄자 거리표는
+  남아 있다. 다음 survivor 개발 단계는 exact-timestamp TF2 기반 map frame XYZ인 Stage 4다.
 
 Leader AprilTag pipeline은 guarded `/leader/cmd_vel`에서 I2C STM32 bridge와 motor까지
 통합되어 있습니다. Follower의 `/follower/safe_cmd_vel`은 아직 motor에 연결하지

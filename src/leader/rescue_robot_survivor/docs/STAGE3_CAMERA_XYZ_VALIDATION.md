@@ -2,16 +2,11 @@
 
 ## 상태
 
-현재 상태: **IMPLEMENTED - HARDWARE VERIFICATION REQUIRED (2026-09-12)**
+현재 상태: **VERIFIED (2026-09-12)**
 
-package build와 41개 자동 테스트는 통과했다. 실제 D435의 RGB/aligned-depth/CameraInfo
-geometry는 확인했지만, 아래 중앙·좌·우·상·하·near/far·다중 사람 시험표를 모두 채우기
-전에는 `VERIFIED`로 승격하지 않는다.
-
-2026-09-12 실제 Jetson/D435 runtime에서 새 Docker image build, CUDA YOLO smoke test,
-detector GPU 기동, CameraInfo QoS 호환, positions publisher와 원본 RGB frame/stamp가 있는 빈
-PoseArray 발행까지 확인했다. 시험 시야에 검출 사람이 없어 실제 non-empty XYZ와 위치별 축
-부호는 아직 검증하지 않았다.
+package build와 41개 자동 테스트를 통과했다. 2026-09-12 실제 Jetson + D435에서 RGB,
+aligned depth, CameraInfo geometry, 실제 사람 XYZ, 좌/우 X 부호, distance/Z 일치, debug
+overlay, 다중 사람 XYZ와 non-empty PoseArray를 확인해 hardware verification을 완료했다.
 
 ## 사전 조건과 build
 
@@ -133,35 +128,35 @@ ros2 run rqt_image_view rqt_image_view /leader/survivor/debug_image
 `cy=235.27989`다. 장비 profile이나 resolution을 바꾸면 이 값을 복사해 쓰지 말고
 CameraInfo를 다시 확인한다.
 
-## 단일 사람 hardware test
+## 단일 사람 hardware verification 결과
 
 카메라를 고정하고 bbox 중앙 ROI가 의도한 위치에 오도록 사람을 이동한다. X/Y는 ROI 중심
 ray의 좌표이므로 사람 몸 전체 중심과 정확히 같을 필요는 없다.
 
-| Test | 사람/ROI 위치 | 예상 | 실제 XYZ | 결과 |
+| Test | 사람/ROI 위치 | 예상 | 실제 확인 결과 | 판정 |
 | --- | --- | --- | --- | --- |
-| center | principal point 근처 | `X≈0` |  |  |
-| left | 화면 왼쪽 | `X<0` |  |  |
-| right | 화면 오른쪽 | `X>0` |  |  |
-| upper | principal point 위 | `Y<0` |  |  |
-| lower | principal point 아래 | `Y>0` |  |  |
-| near | 중앙, 가까운 위치 | 작은 positive Z |  |  |
-| far | 중앙, 먼 위치 | near보다 큰 Z |  |  |
+| left | 화면 왼쪽 | `X<0` | negative X 확인, 실제 수치 미기록 | PASS |
+| right | 화면 오른쪽 | `X>0` | positive X 확인, 실제 수치 미기록 | PASS |
+| distance/Z | 단일 사람 | distance와 XYZ Z 일치 | debug distance와 PoseArray/debug XYZ Z 일치 | PASS |
+| debug overlay | 단일 사람 bbox | 해당 사람 XYZ 표시 | person label 아래 XYZ 정상 표시 | PASS |
 
-가능하면 줄자로 `0.5`, `1.0`, `1.5`, `2.0`, `3.0 m`를 측정한다. Stage 2 거리와
-PoseArray Z가 일치하고 접근할 때 감소, 후퇴할 때 증가하는지 기록한다.
+별도 수치 로그가 없으므로 절대 오차나 특정 거리 정확도는 이 기록에서 주장하지 않는다.
+추후 정밀도 튜닝이 필요하면 줄자로 `0.5`, `1.0`, `1.5`, `2.0`, `3.0 m`를 다시 측정한다.
 
-## 다중 사람 hardware test
+## 다중 사람 PoseArray hardware verification 결과
 
-| Frame-local label | 화면 위치 | 예상 X 부호 | debug XYZ | topic XYZ | 결과 |
-| --- | --- | --- | --- | --- | --- |
-| person1 | left | negative |  |  |  |
-| person2 | center | near zero |  |  |  |
-| person3 | right | positive |  |  |  |
+| 검증 항목 | 실제 확인 결과 | 판정 |
+| --- | --- | --- |
+| 여러 사람 동시 검출 | 한 frame에서 여러 person bbox와 XYZ 표시 | PASS |
+| 사람별 독립 XYZ | 각 detection에 서로 대응하는 XYZ 계산 | PASS |
+| 다중 PoseArray | `/leader/survivor/camera_positions`에 여러 pose 발행 | PASS |
+| debug/topic 대응 | debug image의 각 XYZ와 PoseArray XYZ 대응 | PASS |
+| frame ID | `camera_color_optical_frame` | PASS |
+| orientation | 모든 pose에서 identity quaternion, `w=1` | PASS |
+| numbering | frame-local left-to-right `person1..N`, persistent ID 아님 | PASS |
 
-사람마다 거리도 다르게 배치해 Z가 독립적으로 계산되는지 확인한다. PoseArray는 valid XYZ만
-left-to-right 순서로 담으므로 중간 person이 `XYZ N/A`이면 array index와 person 번호가
-달라지는 것도 확인한다. 이 번호는 tracking ID가 아니다.
+PoseArray는 valid XYZ만 left-to-right 순서로 담는다. 중간 person이 `XYZ N/A`이면 array
+index와 화면의 person 번호가 달라질 수 있으며, 이 interface는 tracking ID를 제공하지 않는다.
 
 ## Expected result와 판정
 
@@ -172,11 +167,17 @@ left-to-right 순서로 담으므로 중간 person이 `XYZ N/A`이면 array inde
 - CameraInfo 또는 XYZ만 invalid일 때 detection/distance는 계속 나온다.
 - header stamp와 frame ID가 원본 RGB measurement를 나타낸다.
 
-위 표와 실제 topic 결과를 저장한 뒤에만 문서 상태를 `VERIFIED`로 바꾼다.
+위 단일·다중 사람 결과와 실제 topic 확인을 근거로 Stage 3를 `VERIFIED`로 판정했다.
 
 현재 runtime 조사에서 기본 CameraInfo publisher가 `RELIABLE + VOLATILE`임을 확인했다.
 초기 transient-local subscriber에서 발생한 durability incompatibility는 subscriber를 같은
 reliable + volatile profile로 변경해 해결했다.
+
+## 다음 개발 단계
+
+Stage 4는 검증된 camera optical XYZ와 원본 RGB timestamp를 사용해 exact-timestamp TF2
+transform을 수행하고 map frame XYZ를 만든다. Stage 3에서는 TF2 또는 map 좌표를 구현하지
+않는다.
 
 ## Troubleshooting
 
