@@ -12,11 +12,11 @@
     max_linear_speed: 0.25
     max_angular_speed: 0.15
 
-    lookahead_distance: 0.25
+    lookahead_distance: 0.08
     path_point_spacing: 0.02
     goal_tolerance: 0.04
 
-    pose_timeout: 0.50
+    pose_timeout: 3.0
     leader_command_timeout: 0.50
     key_timeout: 0.25
 
