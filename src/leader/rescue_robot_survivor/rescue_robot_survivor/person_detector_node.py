@@ -2,9 +2,10 @@
 
 import threading
 from collections import deque
-from typing import Any, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from cv_bridge import CvBridge, CvBridgeError
+from geometry_msgs.msg import Pose, PoseArray
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import (
@@ -13,7 +14,7 @@ from rclpy.qos import (
     QoSProfile,
     ReliabilityPolicy,
 )
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CameraInfo, Image
 
 from rescue_robot_survivor.detection_logic import (
     Detection,
@@ -21,6 +22,13 @@ from rescue_robot_survivor.detection_logic import (
     prepare_person_detections,
 )
 from rescue_robot_survivor.depth_logic import estimate_person_distance
+from rescue_robot_survivor.geometry_logic import (
+    CameraIntrinsics,
+    CameraPoint,
+    deproject_pixel_to_camera_xyz,
+    get_rectified_intrinsics,
+    roi_center_pixel,
+)
 
 try:
     import torch
@@ -37,6 +45,20 @@ IMAGE_QOS = QoSProfile(
     history=HistoryPolicy.KEEP_LAST,
     depth=1,
     reliability=ReliabilityPolicy.BEST_EFFORT,
+    durability=DurabilityPolicy.VOLATILE,
+)
+
+CAMERA_INFO_QOS = QoSProfile(
+    history=HistoryPolicy.KEEP_LAST,
+    depth=1,
+    reliability=ReliabilityPolicy.RELIABLE,
+    durability=DurabilityPolicy.VOLATILE,
+)
+
+POSITION_QOS = QoSProfile(
+    history=HistoryPolicy.KEEP_LAST,
+    depth=1,
+    reliability=ReliabilityPolicy.RELIABLE,
     durability=DurabilityPolicy.VOLATILE,
 )
 
@@ -99,6 +121,20 @@ class PersonDetectorNode(Node):
         self._sync_queue_size = int(
             self.declare_parameter("sync_queue_size", 5).value
         )
+        self._camera_info_topic = str(
+            self.declare_parameter(
+                "camera_info_topic", "/leader/camera/color/camera_info"
+            ).value
+        )
+        self._camera_positions_topic = str(
+            self.declare_parameter(
+                "camera_positions_topic",
+                "/leader/survivor/camera_positions",
+            ).value
+        )
+        self._show_camera_xyz = bool(
+            self.declare_parameter("show_camera_xyz", True).value
+        )
 
         self._validate_parameters()
         if torch is None:
@@ -121,14 +157,26 @@ class PersonDetectorNode(Node):
         self._model = YOLO(self._model_name)
         self._depth_messages = deque(maxlen=self._sync_queue_size)
         self._depth_lock = threading.Lock()
+        self._camera_intrinsics: Optional[CameraIntrinsics] = None
+        self._camera_frame_id = ""
+        self._camera_info_lock = threading.Lock()
         self._publisher = self.create_publisher(
             Image, self._debug_image_topic, IMAGE_QOS
+        )
+        self._positions_publisher = self.create_publisher(
+            PoseArray, self._camera_positions_topic, POSITION_QOS
         )
         self._image_subscription = self.create_subscription(
             Image, self._image_topic, self._image_callback, IMAGE_QOS
         )
         self._depth_subscription = self.create_subscription(
             Image, self._aligned_depth_topic, self._depth_callback, IMAGE_QOS
+        )
+        self._camera_info_subscription = self.create_subscription(
+            CameraInfo,
+            self._camera_info_topic,
+            self._camera_info_callback,
+            CAMERA_INFO_QOS,
         )
 
         self.get_logger().info(f"Model: {self._model_name}")
@@ -139,6 +187,11 @@ class PersonDetectorNode(Node):
         self.get_logger().info(
             f"Aligned depth topic: {self._aligned_depth_topic}"
         )
+        self.get_logger().info(f"CameraInfo topic: {self._camera_info_topic}")
+        self.get_logger().info(
+            f"Camera positions topic: {self._camera_positions_topic}"
+        )
+        self.get_logger().info("Rectified projection source: CameraInfo.P")
         self.get_logger().info(
             f"Confidence threshold: {self._confidence_threshold:.3f}"
         )
@@ -173,6 +226,10 @@ class PersonDetectorNode(Node):
             raise ValueError("sync_slop_sec must be positive")
         if self._sync_queue_size <= 0:
             raise ValueError("sync_queue_size must be positive")
+        if not self._camera_info_topic:
+            raise ValueError("camera_info_topic must not be empty")
+        if not self._camera_positions_topic:
+            raise ValueError("camera_positions_topic must not be empty")
 
     @staticmethod
     def _select_device(requested_device: str) -> str:
@@ -238,6 +295,26 @@ class PersonDetectorNode(Node):
         with self._depth_lock:
             self._depth_messages.append(message)
 
+    def _camera_info_callback(self, message: CameraInfo) -> None:
+        """Cache valid rectified intrinsics from CameraInfo.P."""
+        intrinsics = get_rectified_intrinsics(
+            message.p,
+            message.width,
+            message.height,
+            message.width,
+            message.height,
+        )
+        if intrinsics is None or not message.header.frame_id:
+            self.get_logger().warning(
+                "CameraInfo has invalid P intrinsics, dimensions, or frame; "
+                "using XYZ N/A.",
+                throttle_duration_sec=5.0,
+            )
+            return
+        with self._camera_info_lock:
+            self._camera_intrinsics = intrinsics
+            self._camera_frame_id = message.header.frame_id
+
     def _get_matching_depth(self, rgb_message: Image):
         with self._depth_lock:
             depth_messages = tuple(self._depth_messages)
@@ -293,6 +370,18 @@ class PersonDetectorNode(Node):
                 throttle_duration_sec=5.0,
             )
             return distances, rois
+        if (
+            depth_message.header.frame_id
+            and rgb_message.header.frame_id
+            and depth_message.header.frame_id != rgb_message.header.frame_id
+        ):
+            self.get_logger().warning(
+                "RGB/aligned depth frame mismatch: "
+                f"{rgb_message.header.frame_id} vs "
+                f"{depth_message.header.frame_id}; using N/A.",
+                throttle_duration_sec=5.0,
+            )
+            return distances, rois
         for number, person in enumerate(people, start=1):
             try:
                 estimate, roi = estimate_person_distance(
@@ -317,7 +406,69 @@ class PersonDetectorNode(Node):
                 rois[number] = roi
         return distances, rois
 
+    def _estimate_camera_points(
+        self,
+        distances: Dict[int, Optional[float]],
+        rois: Dict[int, Tuple[int, int, int, int]],
+        rgb_message: Image,
+        rgb_shape,
+    ) -> Dict[int, Optional[CameraPoint]]:
+        points = {number: None for number in distances}
+        with self._camera_info_lock:
+            intrinsics = self._camera_intrinsics
+            camera_frame_id = self._camera_frame_id
+        if intrinsics is None:
+            return points
+        if (intrinsics.height, intrinsics.width) != rgb_shape[:2]:
+            self.get_logger().warning(
+                "RGB/CameraInfo resolution mismatch: RGB "
+                f"{rgb_shape[:2]}, CameraInfo "
+                f"{(intrinsics.height, intrinsics.width)}; using XYZ N/A.",
+                throttle_duration_sec=5.0,
+            )
+            return points
+        if not rgb_message.header.frame_id or (
+            camera_frame_id != rgb_message.header.frame_id
+        ):
+            self.get_logger().warning(
+                "RGB/CameraInfo frame mismatch or empty frame: "
+                f"{rgb_message.header.frame_id} vs {camera_frame_id}; "
+                "using XYZ N/A.",
+                throttle_duration_sec=5.0,
+            )
+            return points
+        for number, distance in distances.items():
+            if distance is None or number not in rois:
+                continue
+            pixel = roi_center_pixel(rois[number])
+            if pixel is None:
+                continue
+            points[number] = deproject_pixel_to_camera_xyz(
+                pixel[0], pixel[1], distance, intrinsics
+            )
+        return points
+
+    def _publish_positions(
+        self,
+        camera_points: Dict[int, Optional[CameraPoint]],
+        source_message: Image,
+    ) -> None:
+        positions = PoseArray()
+        positions.header = source_message.header
+        for number in sorted(camera_points):
+            point = camera_points[number]
+            if point is None:
+                continue
+            pose = Pose()
+            pose.position.x = point.x
+            pose.position.y = point.y
+            pose.position.z = point.z
+            pose.orientation.w = 1.0
+            positions.poses.append(pose)
+        self._positions_publisher.publish(positions)
+
     def _image_callback(self, message: Image) -> None:
+        camera_points: Dict[int, Optional[CameraPoint]] = {}
         try:
             image = self._bridge.imgmsg_to_cv2(
                 message, desired_encoding="bgr8"
@@ -341,18 +492,31 @@ class PersonDetectorNode(Node):
             # Depth is optional: RGB detection and debug output remain alive
             # while the aligned stream is absent or temporarily mismatched.
             distances, rois = self._estimate_distances(people, message, image.shape)
+            camera_points = self._estimate_camera_points(
+                distances, rois, message, image.shape
+            )
             draw_person_detections(
                 image,
                 people,
                 distances=distances,
+                camera_points={
+                    number: (
+                        (point.x, point.y, point.z)
+                        if point is not None
+                        else None
+                    )
+                    for number, point in camera_points.items()
+                },
                 rois=rois,
                 show_depth_roi=self._show_depth_roi,
+                show_camera_xyz=self._show_camera_xyz,
             )
         except Exception as error:
             self.get_logger().error(
-                f"YOLO inference failed: {error}",
+                f"Person frame processing failed: {error}",
                 throttle_duration_sec=5.0,
             )
+        self._publish_positions(camera_points, message)
         self._publish_image(image, message)
 
 

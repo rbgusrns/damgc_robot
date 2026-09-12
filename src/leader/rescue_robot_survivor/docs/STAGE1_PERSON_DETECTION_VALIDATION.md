@@ -287,5 +287,6 @@ Stage 1이 남긴 bbox 좌표, RGB/aligned-depth timestamp, aligned-depth topic,
 frame ID와 encoding은 Stage 2 구현에 사용됐다. Stage 2는 bbox 중심 ROI의 유효 depth에서
 median person distance[m]를 계산하며 현재 상태는 `IMPLEMENTED - HARDWARE VERIFICATION
 REQUIRED`다. 실제 거리 검증 절차는
-[Stage 2 validation](STAGE2_DEPTH_DISTANCE_VALIDATION.md)을 따른다. CameraInfo deprojection,
-Camera XYZ, TF, marker와 tracking은 이후 범위다.
+[Stage 2 validation](STAGE2_DEPTH_DISTANCE_VALIDATION.md)을 따른다. CameraInfo.P 기반 Camera
+XYZ도 Stage 3에서 구현되었으며 정식 실기 검증 전이다. TF, map marker와 tracking은 이후
+범위다.

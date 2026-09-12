@@ -23,7 +23,7 @@ setup(
     zip_safe=True,
     maintainer="maze",
     maintainer_email="maze@todo.todo",
-    description="Leader RGB person detection and aligned depth distances.",
+    description="Leader person detection, depth distance, and camera XYZ.",
     license="Apache-2.0",
     tests_require=["pytest"],
     entry_points={

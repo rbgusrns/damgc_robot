@@ -6,7 +6,7 @@
 ## 먼저 읽을 문서
 
 1. [개발 계획서](Plan.md) — 2026년 7월 13일~9월 14일의 목표, 역할, 9주 일정과 평가 기준
-2. [개발 현황 및 로드맵](STATUS_AND_ROADMAP.md) — 2026년 7월 27일 기준 구현 상태, 주차 게이트와 우선순위
+2. [개발 현황 및 로드맵](STATUS_AND_ROADMAP.md) — 2026년 9월 12일까지 반영한 구현 상태, 주차 게이트와 우선순위
 3. [Visual SLAM 준비 및 검증 절차](VISUAL_SLAM_SETUP.md) — 현재 입력·TF 점검, rosbag 기록과 SLAM 연동 순서
 4. [프로젝트 개요](PROJECT_OVERVIEW.md) — 현재 저장소 구조, 패키지 역할과 실행 방법
 5. [리더·팔로워 구조](LEADER_FOLLOWER_ARCHITECTURE.md) — 목표 아키텍처와 현재 연결 상태
@@ -19,6 +19,8 @@
 
 - [1차 구현·시험 기록](progress/week%201/README.md) — URDF, D435, AprilTag와 접근 상태 판정의 실행 근거
 - [GitHub 등록 및 운영 기록](GITHUB_SETUP.md) — 저장소 연결과 안전한 변경 등록 절차
+- [Survivor Stage 3 구현](../src/leader/rescue_robot_survivor/docs/STAGE3_CAMERA_XYZ_IMPLEMENTATION.md) — CameraInfo.P 기반 camera optical XYZ 설계와 interface
+- [Survivor Stage 3 검증](../src/leader/rescue_robot_survivor/docs/STAGE3_CAMERA_XYZ_VALIDATION.md) — Docker/D435 실행 명령과 hardware test 표
 
 팔로워의 AprilTag 접근 상태 노드 상세 명세와 시험 기록은
 `src/follower/follower_supply_perception/docs/`에서 관리합니다.

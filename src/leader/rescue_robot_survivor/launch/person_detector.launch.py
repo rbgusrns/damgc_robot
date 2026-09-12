@@ -23,7 +23,7 @@ def _configuration_defaults():
 
 
 def generate_launch_description() -> LaunchDescription:
-    """Expose every Stage 1 detector parameter as a launch argument."""
+    """Expose every survivor detector parameter as a launch argument."""
     defaults = _configuration_defaults()
     return LaunchDescription(
         [
@@ -81,6 +81,18 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "sync_slop_sec", default_value=str(defaults["sync_slop_sec"])
             ),
+            DeclareLaunchArgument(
+                "camera_info_topic",
+                default_value=str(defaults["camera_info_topic"]),
+            ),
+            DeclareLaunchArgument(
+                "camera_positions_topic",
+                default_value=str(defaults["camera_positions_topic"]),
+            ),
+            DeclareLaunchArgument(
+                "show_camera_xyz",
+                default_value=str(defaults["show_camera_xyz"]).lower(),
+            ),
             Node(
                 package="rescue_robot_survivor",
                 executable="person_detector_node",
@@ -134,6 +146,16 @@ def generate_launch_description() -> LaunchDescription:
                         "sync_slop_sec": ParameterValue(
                             LaunchConfiguration("sync_slop_sec"),
                             value_type=float,
+                        ),
+                        "camera_info_topic": LaunchConfiguration(
+                            "camera_info_topic"
+                        ),
+                        "camera_positions_topic": LaunchConfiguration(
+                            "camera_positions_topic"
+                        ),
+                        "show_camera_xyz": ParameterValue(
+                            LaunchConfiguration("show_camera_xyz"),
+                            value_type=bool,
                         ),
                     }
                 ],

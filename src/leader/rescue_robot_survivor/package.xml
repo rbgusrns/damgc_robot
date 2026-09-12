@@ -3,7 +3,7 @@
 <package format="3">
   <name>rescue_robot_survivor</name>
   <version>0.1.0</version>
-  <description>Leader RGB person detection and aligned depth distance publishing.</description>
+  <description>Leader RGB person detection, depth distance, and camera XYZ.</description>
   <maintainer email="maze@todo.todo">maze</maintainer>
   <license>Apache-2.0</license>
 
@@ -11,6 +11,7 @@
 
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>python3-numpy</exec_depend>

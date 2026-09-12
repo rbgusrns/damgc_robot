@@ -162,8 +162,11 @@ ros2 run rqt_image_view rqt_image_view /leader/survivor/debug_image
 
 결과 및 실패 조건: 
 
-## Next Stage
+## Stage 3 연계 상태
 
-Stage 3에서 bbox center `(u, v)`, depth Z, RGB CameraInfo의 `fx/fy/cx/cy`를 이용해 camera
-optical frame XYZ를 계산한다. Stage 2에서는 deprojection, TF2, map 좌표와 marker를 구현하지
-않는다.
+Stage 3 camera optical XYZ는 구현되었고 현재 상태는
+`IMPLEMENTED - HARDWARE VERIFICATION REQUIRED`다. Stage 2 중앙 ROI center `(u,v)`와 median
+Z, rectified RGB CameraInfo.P를 사용한다. 자세한 내용은
+[Stage 3 구현 문서](STAGE3_CAMERA_XYZ_IMPLEMENTATION.md)와
+[검증 가이드](STAGE3_CAMERA_XYZ_VALIDATION.md)를 따른다. TF2, map 좌표와 marker는 여전히
+Stage 2/3 범위 밖이다.

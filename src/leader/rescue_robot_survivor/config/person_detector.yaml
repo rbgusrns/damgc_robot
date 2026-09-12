@@ -15,3 +15,6 @@
     show_depth_roi: false
     sync_queue_size: 5
     sync_slop_sec: 0.12
+    camera_info_topic: /leader/camera/color/camera_info
+    camera_positions_topic: /leader/survivor/camera_positions
+    show_camera_xyz: true

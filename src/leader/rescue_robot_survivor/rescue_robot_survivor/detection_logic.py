@@ -95,10 +95,14 @@ def draw_person_detections(
     image: np.ndarray,
     people: Iterable[PersonDetection],
     distances: Optional[Mapping[int, Optional[float]]] = None,
+    camera_points: Optional[
+        Mapping[int, Optional[Tuple[float, float, float]]]
+    ] = None,
     rois: Optional[Mapping[int, Tuple[int, int, int, int]]] = None,
     show_depth_roi: bool = False,
+    show_camera_xyz: bool = False,
 ) -> np.ndarray:
-    """Draw boxes and frame-local person numbers on an image in place."""
+    """Draw frame-local person, distance, and optional camera XYZ labels."""
     if image.ndim != 3 or image.shape[2] != 3:
         raise ValueError("expected a three-channel BGR image")
 
@@ -111,7 +115,19 @@ def draw_person_detections(
     for number, person in enumerate(people, start=1):
         distance = distances.get(number) if distances is not None else None
         distance_label = f"{distance:.2f} m" if distance is not None else "N/A"
-        label = f"person{number} {person.confidence:.2f} | {distance_label}"
+        labels = [f"person{number} {person.confidence:.2f} | {distance_label}"]
+        if show_camera_xyz:
+            point = (
+                camera_points.get(number)
+                if camera_points is not None
+                else None
+            )
+            xyz_label = (
+                f"XYZ ({point[0]:.2f}, {point[1]:.2f}, {point[2]:.2f}) m"
+                if point is not None
+                else "XYZ N/A"
+            )
+            labels.append(xyz_label)
         cv2.rectangle(
             image,
             (person.x1, person.y1),
@@ -119,24 +135,39 @@ def draw_person_detections(
             color,
             thickness,
         )
-        (text_width, text_height), baseline = cv2.getTextSize(
-            label, font, font_scale, thickness
-        )
-        text_x = max(0, min(person.x1, max(0, width - text_width - 1)))
-        text_y = person.y1 - 6
-        if text_y - text_height < 0:
-            text_y = min(height - baseline - 1, person.y1 + text_height + 6)
-        cv2.putText(
-            image,
-            label,
-            (text_x, max(text_height, text_y)),
-            font,
-            font_scale,
-            color,
-            thickness,
-            cv2.LINE_AA,
-        )
+        text_sizes = [
+            cv2.getTextSize(label, font, font_scale, thickness)
+            for label in labels
+        ]
+        line_height = max(size[0][1] + size[1] + 4 for size in text_sizes)
+        block_height = line_height * len(labels)
+        if person.y1 - block_height - 6 >= 0:
+            first_baseline = person.y1 - 6 - line_height * (len(labels) - 1)
+        else:
+            first_baseline = person.y1 + text_sizes[0][0][1] + 6
+        for index, (label, ((text_width, text_height), baseline)) in enumerate(
+            zip(labels, text_sizes)
+        ):
+            text_x = max(0, min(person.x1, max(0, width - text_width - 1)))
+            text_y = first_baseline + index * line_height
+            text_y = max(text_height, min(text_y, height - baseline - 1))
+            cv2.putText(
+                image,
+                label,
+                (text_x, text_y),
+                font,
+                font_scale,
+                color,
+                thickness,
+                cv2.LINE_AA,
+            )
         if show_depth_roi and rois is not None and number in rois:
             roi = rois[number]
-            cv2.rectangle(image, (roi[0], roi[1]), (roi[2] - 1, roi[3] - 1), (255, 0, 0), 1)
+            cv2.rectangle(
+                image,
+                (roi[0], roi[1]),
+                (roi[2] - 1, roi[3] - 1),
+                (255, 0, 0),
+                1,
+            )
     return image

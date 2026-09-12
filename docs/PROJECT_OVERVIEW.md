@@ -25,8 +25,9 @@ Mission Coordinator → Nav2·정밀 접근 → 그리퍼
                     단독 운반 또는 리더–팔로워 협동 운반
 ```
 
-현재는 이 흐름 중 D435 입력, depth 중앙값 측정, 양 로봇 AprilTag 검출·base alignment,
-atomic approach command와 guarded software velocity 출력까지 구현되어 있습니다.
+현재는 이 흐름 중 D435 입력, 사람별 aligned-depth 중앙값과 camera optical XYZ,
+양 로봇 AprilTag 검출·base alignment, atomic approach command와 guarded software velocity
+출력까지 구현되어 있습니다.
 
 ## 디렉터리 구조
 
@@ -37,6 +38,7 @@ damgc_robot/
 │   │   ├── rescue_robot_description/   # URDF와 모델 표시 launch
 │   │   ├── rescue_robot_bringup/       # 리더 통합 실행 launch
 │   │   ├── rescue_robot_apriltag/      # CameraInfo QoS bridge, AprilTag 설정
+│   │   ├── rescue_robot_survivor/      # YOLO, 사람별 depth와 camera XYZ
 │   │   └── rescue_robot_tools/         # 센서 측정 도구
 │   ├── follower/
 │       ├── follower_alignment_msgs/    # atomic alignment command
@@ -52,8 +54,9 @@ damgc_robot/
 
 Visual SLAM·nvblox와 STM32 bridge 기반 기능은 저장소에 추가됐지만 실제 장비별
 완료 여부는 별도 실행 기록을 따른다. 사람 탐지 Stage 1은 실제 D435에서 검증됐고,
-Stage 2 사람별 aligned-depth 거리는 구현됐으나 실제 거리 검증이 남아 있다. 생존자 XYZ,
-Nav2, 그리퍼와 Mission Coordinator는 아직 완료되지 않았다. 새 패키지를 추가할 때는
+Stage 2 사람별 aligned-depth 거리와 Stage 3 camera optical XYZ는 구현됐으나 정식 실기
+검증이 남아 있다. 생존자 map XYZ, Nav2, 그리퍼와 Mission Coordinator는 아직 완료되지
+않았다. 새 패키지를 추가할 때는
 리더 전용, 팔로워 전용, 공통 인터페이스 중 소유 범위를 먼저 정합니다.
 
 ## 패키지 역할
@@ -63,6 +66,7 @@ Nav2, 그리퍼와 Mission Coordinator는 아직 완료되지 않았다. 새 패
 | `rescue_robot_description` | `ament_cmake` | URDF, robot state publisher, RViz 표시 |
 | `rescue_robot_bringup` | `ament_cmake` | RealSense·image_proc·AprilTag 통합 launch |
 | `rescue_robot_apriltag` | `ament_cmake` | 리더 CameraInfo QoS 연결 보조와 AprilTag 설정 |
+| `rescue_robot_survivor` | `ament_python` | YOLO person, aligned-depth 거리와 camera optical XYZ |
 | `rescue_robot_tools` | `ament_cmake` | Depth 영상을 CSV로 저장하는 측정 도구 |
 | `follower_alignment_msgs` | `ament_cmake` | Follower atomic pose/mode/state message |
 | `follower_supply_perception` | `ament_python` | 팔로워 AprilTag 상대 위치와 hybrid 접근 상태 판단 |
@@ -125,7 +129,9 @@ ros2 launch rescue_robot_bringup camera_apriltag.launch.py enable_depth:=false
 - 부분 완료: AprilTag 기반 정밀 접근 software는 구현됐지만 실제 로봇 주행·파지 검증은 남음
 - 구현·검증: Survivor Stage 1 YOLO11n 사람 탐지와 frame-local 다중-person debug image
 - 구현·실기 검증 필요: Stage 2 bbox 중심 ROI 기반 aligned-depth median 거리
-- 미구현/미완료: 생존자 camera/map XYZ, Nav2, 그리퍼, Mission Coordinator와 Orin 간
+- 구현·실기 검증 필요: Stage 3 CameraInfo.P 기반 camera optical XYZ, debug overlay와
+  `/leader/survivor/camera_positions` PoseArray
+- 미구현/미완료: 생존자 TF2 map XYZ, Nav2, 그리퍼, Mission Coordinator와 Orin 간
   실물 협동 운반
 - `target_distance=0.15 m` 등 접근 파라미터는 초기 시험값이며 실제 그리퍼/TCP 기준으로 재검증해야 합니다.
 
@@ -143,7 +149,7 @@ ros2 launch rescue_robot_bringup camera_apriltag.launch.py enable_depth:=false
 1. 실제 센서 장착 기준 TF와 다중 로봇 frame 이름 고정
 2. wheel odometry·BNO055·`robot_localization` 연결
 3. 정적 지도 기반 리더 Nav2 목표점 이동
-4. Stage 2 실제 거리 검증 후 CameraInfo 기반 생존자 camera XYZ 출력
+4. Stage 2 거리와 Stage 3 camera XYZ 실기 검증 후 TF2 기반 map XYZ 구현
 5. 팔로워 `/follower/cmd_vel`과 STM32 기본 구동
 6. 두 로봇 비상정지와 30분 전원·발열 시험
 

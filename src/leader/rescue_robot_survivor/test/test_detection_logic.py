@@ -96,6 +96,26 @@ def test_draws_each_person_and_leaves_empty_frame_unchanged():
     assert np.count_nonzero(annotated) > 0
 
 
+def test_draws_xyz_or_na_near_image_edges_without_failure():
+    image = np.zeros((120, 200, 3), dtype=np.uint8)
+    people = prepare_person_detections(
+        [Detection(0, 0, 40, 60, 0.9, 0), Detection(170, 70, 199, 119, 0.8, 0)],
+        0.5,
+        200,
+        120,
+    )
+
+    draw_person_detections(
+        image,
+        people,
+        distances={1: 1.5, 2: None},
+        camera_points={1: (-0.2, -0.1, 1.5), 2: None},
+        show_camera_xyz=True,
+    )
+
+    assert np.count_nonzero(image) > 0
+
+
 @pytest.mark.parametrize("threshold", [-0.01, 1.01])
 def test_rejects_invalid_threshold(threshold):
     with pytest.raises(ValueError):

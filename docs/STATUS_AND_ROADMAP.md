@@ -4,7 +4,7 @@
 
 이 문서는 [개발 계획서](Plan.md)를 실행 상태로 변환한 관리 문서다. 최초 기준일은
 **2026년 7월 27일**이며, 현재 상태는 2026년 9월 12일까지 반영한다. AprilTag software
-pipeline, Survivor Stage 1 hardware verification과 Stage 2 거리 계산 구현 상태를 아래
+pipeline, Survivor Stage 1 hardware verification과 Stage 2·3 구현 상태를 아래
 관련 행에 반영했다.
 
 상태 표시는 다음 기준을 사용한다.
@@ -22,7 +22,7 @@ pipeline, Survivor Stage 1 hardware verification과 Stage 2 거리 계산 구현
 | Visual SLAM 위치·자세 추정 | 미구현 | 관련 패키지·launch·시험 기록 없음 |
 | BNO055와 wheel odometry 보정 | 미구현 | URDF의 `imu_link`만 있으며 실제 데이터와 융합 없음 |
 | 카메라 기반 생존자 탐지 | 완료 | survivor 전용 Docker GPU runtime과 YOLO11n pipeline 검증; 실제 D435에서 1/2/3명 검출, bbox/confidence, 좌→우 numbering 및 rqt debug image 확인 |
-| depth 기반 생존자 3차원 위치 | 부분 완료 | Stage 2 사람별 aligned-depth 거리 구현; CameraInfo deprojection/XYZ는 미구현 |
+| depth 기반 생존자 3차원 위치 | 부분 완료 | Stage 2 거리와 Stage 3 CameraInfo.P deprojection, debug XYZ 및 camera-frame PoseArray 구현; 실제 축 방향·다중 사람 검증과 map 변환은 남음 |
 | Nav2 자율주행 | 미구현 | Nav2 구성·지도·주행 시험 없음 |
 | AprilTag 물품 인식·정밀 접근 | 부분 완료 | 양 로봇 camera/base alignment와 guarded software velocity 구현; 실제 접근·파지 검증 필요 |
 | 그리퍼 물품 파지 | 확인 필요 | URDF 형상만 있고 제어 코드·실물 시험 근거 없음 |
@@ -42,10 +42,11 @@ pipeline, Survivor Stage 1 hardware verification과 Stage 2 거리 계산 구현
 - COCO person 다중 검출, 좌우 frame-local 번호와 `/leader/survivor/debug_image` 구현 및
   실제 D435 1/2/3명 hardware verification 완료 (`VERIFIED`, 2026-09-11)
 
-Stage 2는 YOLO bounding box + aligned depth에서 사람 중심 ROI의 유효 depth를 추출하고
-zero/invalid 값을 제거한 median depth로 사람까지의 거리[m]를 계산한다. 코드는
-`IMPLEMENTED - HARDWARE VERIFICATION REQUIRED`이며 실제 거리·다중 사람·이동 시험 후에만
-VERIFIED로 승격한다. 다음은 CameraInfo 기반 camera XYZ인 Stage 3다.
+Stage 2는 YOLO bounding box + aligned depth의 중앙 ROI median 거리[m]를 계산한다. Stage
+3는 같은 ROI center와 median Z, rectified CameraInfo.P로 camera optical XYZ를 계산하고
+`/leader/survivor/camera_positions` PoseArray를 발행한다. 두 단계는
+`IMPLEMENTED - HARDWARE VERIFICATION REQUIRED`이며 정식 거리·축 부호·다중 사람 시험 후에만
+VERIFIED로 승격한다. 다음 구현 단계는 TF2 map 변환인 Stage 4다.
 
 ### 팔로워
 
@@ -94,7 +95,7 @@ VERIFIED로 승격한다. 다음은 CameraInfo 기반 camera XYZ인 Stage 3다.
 | 종료 조건 | 상태 | 이번 주 산출물 |
 | --- | --- | --- |
 | 로봇 A 목표점 반복 이동 | 미구현 | 정적 지도 Nav2 최소 구성과 반복 시험 |
-| 사람 위치를 카메라 좌표로 출력 | 부분 완료 | Stage 2 거리 Z 구현; CameraInfo deprojection과 camera XYZ는 Stage 3에서 구현 |
+| 사람 위치를 카메라 좌표로 출력 | 부분 완료 | Stage 3 CameraInfo.P deprojection, debug XYZ와 PoseArray 구현·자동시험 완료; 실제 D435 위치별 검증 필요 |
 | 로봇 B 원격 속도 주행 | 미구현/확인 필요 | STM32 통신과 `/follower/cmd_vel` 연결 |
 | 두 로봇 긴급정지 | 미구현/확인 필요 | 하드웨어 E-stop과 소프트웨어 정지 경로 검증 |
 | 전원·발열 30분 시험 | 확인 필요 | 전압·온도·재부팅 여부 기록 |
@@ -113,7 +114,7 @@ VERIFIED로 승격한다. 다음은 CameraInfo 기반 camera XYZ인 Stage 3다.
 
 1. wheel odometry와 BNO055를 `robot_localization`에 연결
 2. 로봇 A의 정적 지도 기반 Nav2 목표점 반복 이동
-3. Stage 2 실제 거리 검증 후 CameraInfo를 결합한 camera XYZ 출력
+3. Stage 2 거리 및 Stage 3 camera XYZ 실기 검증 후 TF2 map 변환 구현
 4. 로봇 B의 `/follower/cmd_vel` 주행
 5. 두 로봇 E-stop과 전원·발열 30분 시험
 

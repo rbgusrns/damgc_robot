@@ -62,5 +62,8 @@ def test_launch_is_importable_and_does_not_start_a_camera():
         "show_depth_roi",
         "sync_queue_size",
         "sync_slop_sec",
+        "camera_info_topic",
+        "camera_positions_topic",
+        "show_camera_xyz",
     ):
         assert f'"{name}"' in source

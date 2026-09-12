@@ -7,7 +7,8 @@
 이 패키지는 생존자 인식을 담당하므로 모델 의존성, 실행 주기와 이후 depth 처리를 서로
 섞지 않도록 별도 패키지로 분리했다.
 
-**현재 상태: VERIFIED (2026-09-11)**
+**현재 상태: Stage 1 VERIFIED / Stage 2·3 IMPLEMENTED - HARDWARE VERIFICATION
+REQUIRED (2026-09-12)**
 
 코드, package build와 자동 테스트를 완료했다. survivor 전용 Jetson Docker GPU runtime에서
 YOLO11n 추론을 수행하고 실제 D435 화면에서 1명, 2명, 3명 검출을 확인했다. 각 사람의
@@ -15,9 +16,10 @@ bounding box와 confidence, 왼쪽에서 오른쪽 순서의 `person1..N` 표시
 `/leader/survivor/debug_image`를 rqt_image_view에서 확인했다. `personN`은 persistent
 tracking ID가 아닌 현재 프레임의 표시 번호다.
 
-Stage 2 거리 계산 코드는 구현되었지만 실제 줄자 기준의 D435 거리 검증 전이므로 현재 상태는
-`IMPLEMENTED - HARDWARE VERIFICATION REQUIRED`이다. Stage 1의 `VERIFIED` 판정은 그대로
-유지된다.
+Stage 2의 aligned-depth 거리와 Stage 3의 camera optical XYZ 코드는 구현되었다. 실제 D435에서
+거리 표시 동작과 RGB/depth/CameraInfo geometry를 확인했지만, 줄자 기준 거리 및
+중앙·좌·우·다중 사람 XYZ 검증표를 완료하기 전이므로 두 단계는
+`IMPLEMENTED - HARDWARE VERIFICATION REQUIRED`이다. Stage 1의 `VERIFIED` 판정은 유지된다.
 
 ## Jetson GPU runtime
 
@@ -46,7 +48,7 @@ Ultralytics `8.4.147`이다. torchvision은 torch를 교체하지 않고 `FORCE_
 Orin `sm_87` 대상으로 build한다. check script는 CUDA NMS와 YOLO11n GPU inference까지
 확인한다.
 
-## Stage 1 보호 기능과 Stage 2 범위
+## Stage 1 보호 기능과 Stage 2/3 범위
 
 현재 구현은 다음 기능을 지원한다.
 
@@ -55,14 +57,17 @@ Orin `sm_87` 대상으로 build한다. check script는 CUDA NMS와 YOLO11n GPU i
 - COCO class 0인 `person`만 confidence threshold로 필터링
 - 한 프레임의 모든 사람을 중심 x 좌표 기준 왼쪽에서 오른쪽으로 정렬
 - `person1 0.94 | 1.24 m` 형식의 번호, confidence, bounding box와 거리 표시
+- `XYZ (-0.42, 0.08, 1.24) m` 형식의 camera optical position 표시
 - 원본 `header.stamp`와 `header.frame_id`를 유지한 debug image 발행
+- valid camera XYZ를 `/leader/survivor/camera_positions` `PoseArray`로 발행
 - CUDA 사용 가능 시 GPU 선택, 불가능하면 CPU 선택(`device=auto`)
 
 `person1`, `person2`는 **현재 프레임의 표시용 번호**다. tracking ID가 아니며 사람이
 움직이거나 서로 교차하거나 검출이 누락되면 다음 프레임에서 번호가 달라질 수 있다.
 ByteTrack, BoT-SORT, DeepSORT, re-identification과 persistent ID는 구현하지 않는다.
 
-Stage 2 범위는 bounding box 중심 ROI의 median 거리까지다. Camera XYZ, TF2 map 변환,
+Stage 2 범위는 bounding box 중심 ROI의 median 거리까지다. Stage 3는 같은 ROI 중심 pixel과
+median Z, rectified RGB CameraInfo.P를 결합해 camera optical XYZ를 계산한다. TF2 map 변환,
 RViz 위치 marker, 중복 제거, survivor confirmation, Mission Coordinator, custom training과
 TensorRT 최적화는 포함되지 않는다.
 
@@ -72,6 +77,11 @@ RGB, depth, aligned-depth를 포함한 D435 camera pipeline도 정상 기동 및
 aligned depth가 없거나 RGB와 timestamp 차이가 `sync_slop_sec`보다 크면 detection은 계속
 발행하고 거리만 `N/A`로 표시한다.
 
+Stage 3는 실제 확인된 rectified RGB, color-aligned depth와 CameraInfo가 모두 `640×480`,
+`camera_color_optical_frame` geometry를 공유하는 조건에서 동작한다. CameraInfo가 없거나 P,
+resolution 또는 frame ID가 유효하지 않으면 YOLO와 distance를 유지하고 `XYZ N/A` 및 빈
+PoseArray로 graceful degradation한다.
+
 ## 구조
 
 ```text
@@ -79,13 +89,16 @@ rescue_robot_survivor/
 ├── rescue_robot_survivor/
 │   ├── detection_logic.py       # person 필터, 좌표 보정, 정렬, drawing
 │   ├── depth_logic.py           # ROI, scale, filtering, median
-│   └── person_detector_node.py  # ROS 구독, YOLO/depth 처리, debug 발행
+│   ├── geometry_logic.py        # P 검증, ROI 중심, camera deprojection
+│   └── person_detector_node.py  # ROS 구독/cache, YOLO/depth/XYZ, output
 ├── launch/person_detector.launch.py
 ├── config/person_detector.yaml
 ├── test/                        # 순수 로직과 launch/config 계약 테스트
 ├── docs/SURVIVOR_DEVELOPMENT_PLAN.md
 ├── docs/STAGE1_PERSON_DETECTION_VALIDATION.md
 ├── docs/STAGE2_DEPTH_DISTANCE_VALIDATION.md
+├── docs/STAGE3_CAMERA_XYZ_IMPLEMENTATION.md
+├── docs/STAGE3_CAMERA_XYZ_VALIDATION.md
 ├── package.xml
 ├── setup.py
 └── setup.cfg
@@ -100,7 +113,10 @@ include하지 않는다. YAML 값은 launch argument의 기본값으로 읽히�
 | 구분 | 기본값 | 타입/설명 |
 | --- | --- | --- |
 | 입력 | `/leader/camera/color/image_rect` | `sensor_msgs/msg/Image`, 확인값 `rgb8` |
+| 입력 | `/leader/camera/aligned_depth_to_color/image_raw` | `Image`, 확인값 `16UC1` |
+| 입력 | `/leader/camera/color/camera_info` | `CameraInfo`, rectified P 사용 |
 | 출력 | `/leader/survivor/debug_image` | `sensor_msgs/msg/Image`, `bgr8` |
+| 출력 | `/leader/survivor/camera_positions` | `geometry_msgs/msg/PoseArray`, valid XYZ만 |
 | `image_topic` | 위 입력 | 다른 RGB 토픽으로 변경 |
 | `debug_image_topic` | 위 출력 | debug 영상 토픽 변경 |
 | `model_name` | `yolo11n.pt` | 모델 이름 또는 로컬 weight 경로 |
@@ -114,13 +130,17 @@ include하지 않는다. YAML 값은 launch argument의 기본값으로 읽히�
 | `show_depth_roi` | `false` | debug ROI 표시 |
 | `sync_queue_size` | `5` | 최근 depth cache 크기 |
 | `sync_slop_sec` | `0.12` | RGB/depth 허용 timestamp 차이 |
+| `camera_info_topic` | `/leader/camera/color/camera_info` | RGB CameraInfo 입력 |
+| `camera_positions_topic` | `/leader/survivor/camera_positions` | camera XYZ 출력 |
+| `show_camera_xyz` | `true` | debug image XYZ 둘째 줄 표시 |
 
-입출력은 `BEST_EFFORT`, `VOLATILE`, `KEEP_LAST(1)`을 사용한다. 느린 추론 중 오래된
-camera frame이 쌓이는 것을 줄이고 RealSense sensor publisher와 호환하기 위한 설정이다.
+image 입출력은 `BEST_EFFORT`, `VOLATILE`, `KEEP_LAST(1)`을 사용한다. CameraInfo는 실제
+RealSense publisher와 호환되는 `RELIABLE`, `VOLATILE`, `KEEP_LAST(1)`, PoseArray는
+`RELIABLE`, `VOLATILE`, `KEEP_LAST(1)`이다.
 
 ## Dependencies
 
-ROS 의존성은 `rclpy`, `sensor_msgs`, `cv_bridge`, `python3-opencv`, `python3-numpy`,
+ROS 의존성은 `rclpy`, `sensor_msgs`, `geometry_msgs`, `cv_bridge`, `python3-opencv`, `python3-numpy`,
 `launch`, `launch_ros`다. 추론에는 별도로 PyTorch, torchvision과 Ultralytics가 필요하다.
 
 Jetson에서는 일반 PyPI torch/torchvision으로 기존 NVIDIA build를 교체하면 안 된다.
@@ -187,9 +207,20 @@ ros2 run rqt_image_view rqt_image_view /leader/survivor/debug_image
 ```
 
 정상 상태에서는 사람이 없을 때 원본 영상만 보이고, 사람이 있으면 각 사람 주위에 초록색
-box와 `personN confidence | distance m`가 표시된다. 사용할 수 있는 depth가 없으면
-`personN confidence | N/A`가 표시된다. 각 터미널에서 `Ctrl-C`로 detector, rqt와 camera를
-종료한다.
+box, `personN confidence | distance m`와 `XYZ (x, y, z) m`가 표시된다. 사용할 수 있는
+depth가 없으면 distance와 XYZ가 `N/A`, CameraInfo만 유효하지 않으면 distance는 유지되고
+`XYZ N/A`가 표시된다.
+
+camera position은 다음과 같이 확인한다.
+
+```bash
+ros2 topic info -v /leader/survivor/camera_positions
+ros2 topic echo /leader/survivor/camera_positions
+```
+
+PoseArray header는 원본 RGB stamp와 optical frame을 유지하고 orientation은 identity
+quaternion이다. valid XYZ만 왼쪽→오른쪽 순서로 포함하므로 중간 person이 invalid이면 array
+index가 debug image의 person 번호와 같지 않을 수 있다.
 
 ## Known limitations
 
@@ -197,7 +228,10 @@ box와 `personN confidence | distance m`가 표시된다. 사용할 수 있는 d
 - COCO pretrained 모델은 누운 사람, 심한 가림, 작은 사람 또는 마네킹을 놓칠 수 있다.
 - 마네킹 실패 시 Stage 1에서 custom training을 시작하지 않고 검증 결과에 기록한다.
 - GPU/CPU 성능, camera와 AprilTag의 동시 사용에 따라 debug FPS가 낮아질 수 있다.
-- Stage 2 node는 aligned depth를 구독하지만 실제 줄자 기반 거리 검증은 아직 남아 있다.
+- Stage 2의 정식 줄자 기반 거리표와 Stage 3의 축 부호·다중 사람 실기 검증은 남아 있다.
+- ROI 중심 ray와 ROI median Z는 사람의 물리적 중심을 근사하며 같은 단일 pixel 측정은 아니다.
+- bbox 변화에 따라 XYZ가 흔들릴 수 있고 temporal smoothing은 아직 적용하지 않는다.
+- PoseArray는 confidence, bbox와 원래 person 번호를 포함하지 않는다.
 - host Python에는 AI runtime이 없다. detector는 항상 survivor 전용 container에서 실행하고,
   host는 camera, ROS graph 확인과 rqt에 사용한다.
 
@@ -215,9 +249,12 @@ box와 `personN confidence | distance m`가 표시된다. 사용할 수 있는 d
 - 낮은 FPS/일부 사람 누락: 입력·출력 hz, GPU 사용 여부, 조명·거리·가림과 threshold를
   확인한다.
 - aligned depth 없음: camera를 `enable_sync:=true align_depth.enable:=true`로 재실행한다.
+- XYZ만 N/A: CameraInfo.P, RGB와 CameraInfo의 resolution/frame ID를 확인한다.
 
 명령별 상세 진단은 [Stage 1 validation](docs/STAGE1_PERSON_DETECTION_VALIDATION.md)과
-[Stage 2 validation](docs/STAGE2_DEPTH_DISTANCE_VALIDATION.md), 이후 전체 개발 순서는
+[Stage 2 validation](docs/STAGE2_DEPTH_DISTANCE_VALIDATION.md),
+[Stage 3 implementation](docs/STAGE3_CAMERA_XYZ_IMPLEMENTATION.md),
+[Stage 3 validation](docs/STAGE3_CAMERA_XYZ_VALIDATION.md), 이후 전체 개발 순서는
 [survivor development plan](docs/SURVIVOR_DEVELOPMENT_PLAN.md)을 따른다.
 
 ## Stage 2 distance algorithm
@@ -229,8 +266,15 @@ RGB callback은 YOLO inference를 계속 수행하고, depth callback은 최근 
 중심 ROI에서 유효 pixel을 추출하고 NumPy median을 계산한다. 유효 pixel이 20개 미만이거나
 depth가 없으면 `N/A`를 표시한다.
 
-## Next Stage — Stage 3
+## Stage 3 camera XYZ algorithm
 
-Stage 2가 보존하는 bbox 중심 pixel `(u, v)`, 대표 depth Z, RGB timestamp와 frame ID에
-`/leader/camera/color/camera_info`의 intrinsics를 결합해 camera optical frame XYZ를
-계산한다. TF2, map 좌표와 RViz marker는 그 이후 단계다.
+Stage 2 ROI의 실제 pixel 범위 중심을 `(u,v)`로 사용하고 같은 ROI의 median distance를 Z로
+사용한다. rectified RGB이므로 CameraInfo의 `P[0], P[5], P[2], P[6]`에서
+`fx,fy,cx,cy`를 얻어 `X=(u-cx)Z/fx`, `Y=(v-cy)Z/fy`를 계산한다. optical frame은
+right/down/forward 축이다.
+
+## Next Stage — Stage 4
+
+`/leader/survivor/camera_positions`의 원본 RGB timestamp와 실제 optical frame ID를 이용해
+TF2로 map frame XYZ를 계산한다. Stage 4 전까지 map 좌표나 RViz survivor marker를 이
+패키지의 camera XYZ로 오해하지 않는다.
