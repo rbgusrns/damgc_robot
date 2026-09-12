@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 import math
-from typing import Iterable, List
+from typing import Iterable, List, Mapping, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -92,7 +92,11 @@ def prepare_person_detections(
 
 
 def draw_person_detections(
-    image: np.ndarray, people: Iterable[PersonDetection]
+    image: np.ndarray,
+    people: Iterable[PersonDetection],
+    distances: Optional[Mapping[int, Optional[float]]] = None,
+    rois: Optional[Mapping[int, Tuple[int, int, int, int]]] = None,
+    show_depth_roi: bool = False,
 ) -> np.ndarray:
     """Draw boxes and frame-local person numbers on an image in place."""
     if image.ndim != 3 or image.shape[2] != 3:
@@ -105,7 +109,9 @@ def draw_person_detections(
     thickness = 2
 
     for number, person in enumerate(people, start=1):
-        label = f"person{number} {person.confidence:.2f}"
+        distance = distances.get(number) if distances is not None else None
+        distance_label = f"{distance:.2f} m" if distance is not None else "N/A"
+        label = f"person{number} {person.confidence:.2f} | {distance_label}"
         cv2.rectangle(
             image,
             (person.x1, person.y1),
@@ -130,4 +136,7 @@ def draw_person_detections(
             thickness,
             cv2.LINE_AA,
         )
+        if show_depth_roi and rois is not None and number in rois:
+            roi = rois[number]
+            cv2.rectangle(image, (roi[0], roi[1]), (roi[2] - 1, roi[3] - 1), (255, 0, 0), 1)
     return image

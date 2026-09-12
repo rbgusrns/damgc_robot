@@ -12,6 +12,8 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 def generate_launch_description():
     depth_enabled = LaunchConfiguration("enable_depth")
+    sync_enabled = LaunchConfiguration("enable_sync")
+    aligned_depth_enabled = LaunchConfiguration("align_depth.enable")
     infra_enabled = LaunchConfiguration("enable_infra")
     imu_enabled = LaunchConfiguration("enable_imu")
     approach_enabled = LaunchConfiguration("enable_approach")
@@ -28,6 +30,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument("enable_depth", default_value="true"),
+        DeclareLaunchArgument("enable_sync", default_value="true"),
+        DeclareLaunchArgument("align_depth.enable", default_value="true"),
         DeclareLaunchArgument("enable_infra", default_value="false"),
         DeclareLaunchArgument("enable_imu", default_value="false"),
         DeclareLaunchArgument("enable_approach", default_value="false"),
@@ -47,6 +51,8 @@ def generate_launch_description():
                 "camera_name": "camera",
                 "enable_color": "true",
                 "enable_depth": depth_enabled,
+                "enable_sync": sync_enabled,
+                "align_depth.enable": aligned_depth_enabled,
                 "enable_infra": infra_enabled,
                 "enable_infra1": infra_enabled,
                 "enable_infra2": infra_enabled,

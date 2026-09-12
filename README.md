@@ -18,7 +18,8 @@
   exact-stamp TF2 기반 `base_link` pose·metric·상태, raw approach controller와
   velocity guard를 통한 최종 software topic `/leader/cmd_vel`, 독립
   [`rescue_robot_survivor`](src/leader/rescue_robot_survivor/README.md) Stage 1 YOLO11n
-  person debug-image pipeline(Stage 1 VERIFIED: 실제 D435에서 1/2/3명 검출 및 debug image 확인)
+  person debug-image pipeline(Stage 1 VERIFIED: 실제 D435에서 1/2/3명 검출 및 debug image 확인),
+  Stage 2 사람별 aligned-depth 거리 코드(실제 줄자 검증 전)
 - 팔로워: USB 카메라, AprilTag 검출, 기존 camera-frame 상태, exact-stamp TF2 기반
   `base_link` pose·metric·상태, raw approach controller, STOP/APPROACH/COOPERATION
   command selector, 최종 safety guard와 `/follower/safe_cmd_vel`

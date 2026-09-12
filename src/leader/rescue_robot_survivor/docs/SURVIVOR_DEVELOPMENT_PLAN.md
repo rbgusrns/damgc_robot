@@ -27,12 +27,16 @@ CameraInfo ──────────────────┘            
 
 ## Stage 2 — Bounding box + aligned depth → distance
 
+**현재 상태: IMPLEMENTED - HARDWARE VERIFICATION REQUIRED**
+
 - Purpose: 각 검출 사람까지의 강건한 대표 거리를 계산한다.
 - Input: Stage 1 bbox, `/leader/camera/aligned_depth_to_color/image_raw`, RGB/depth stamp.
-- Processing: timestamp 동기화, bbox 중심 주변 ROI, 0/non-finite/invalid 제거, median depth와
-  유효 pixel 수 계산.
-- Output: frame-local person별 거리[m]와 원본 bbox/stamp.
-- Completion: 알려진 거리의 사람에 대해 유효 거리와 invalid-depth 처리가 재현된다.
+- Processing: 최근 aligned depth cache에서 RGB와 가장 가까운 stamp를 찾아 `sync_slop_sec` 이내인지 검사하고,
+  bbox 중심 ROI에서 0/non-finite/range 밖 값을 제거한 뒤 median을 계산한다.
+- Output: frame-local person별 거리[m]를 debug image에 표시한다. depth가 없거나 불일치하면
+  YOLO 결과를 유지하고 `N/A`를 표시한다.
+- Completion: 자동 테스트, Docker 실행, 실제 D435의 알려진 거리·다중 인원·이동 시험이 모두
+  기록되어야 한다. synthetic test만으로 VERIFIED로 승격하지 않는다.
 
 ## Stage 3 — Depth + CameraInfo → camera XYZ
 
@@ -78,13 +82,13 @@ CameraInfo ──────────────────┘            
 
 - bbox coordinates: color image pixel 좌표
 - RGB timestamp/frame: 원본 `header.stamp`, `camera_color_optical_frame`
-- aligned depth: `/leader/camera/aligned_depth_to_color/image_raw`, `16UC1`, 640×480,
-  `camera_color_optical_frame`
+- aligned depth: `/leader/camera/aligned_depth_to_color/image_raw`, 현재 검증 예상값 `16UC1`,
+  640×480, `camera_color_optical_frame`
 - raw depth 참고: `/leader/camera/depth/image_rect_raw`, `16UC1`, 640×480,
   `camera_depth_optical_frame`
 - CameraInfo: `/leader/camera/color/camera_info`
 - 실제 resolution, encoding과 timestamp 일치는 매 실행에서 재검증한다.
 
-Stage 2의 다음 작업은 YOLO bounding box + aligned depth → 사람 영역의 유효 depth 추출
-→ zero/invalid 제거 → median depth → person distance[m]이며, 이 문서의 뒤 단계를 동시에
-구현하지 않는다.
+Stage 2 구현은 `depth_logic.py`의 ROS-independent ROI/scale/filter/median 함수와
+`person_detector_node.py`의 RGB callback + timestamp-gated depth cache로 구성한다. Stage 3의
+CameraInfo deprojection, camera XYZ, TF2, map 좌표와 marker는 구현하지 않는다.

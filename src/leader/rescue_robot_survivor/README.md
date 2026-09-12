@@ -15,6 +15,10 @@ bounding box와 confidence, 왼쪽에서 오른쪽 순서의 `person1..N` 표시
 `/leader/survivor/debug_image`를 rqt_image_view에서 확인했다. `personN`은 persistent
 tracking ID가 아닌 현재 프레임의 표시 번호다.
 
+Stage 2 거리 계산 코드는 구현되었지만 실제 줄자 기준의 D435 거리 검증 전이므로 현재 상태는
+`IMPLEMENTED - HARDWARE VERIFICATION REQUIRED`이다. Stage 1의 `VERIFIED` 판정은 그대로
+유지된다.
+
 ## Jetson GPU runtime
 
 Host global Python에는 AI package를 설치하지 않는다. 재현 가능한 survivor 전용 image를
@@ -50,7 +54,7 @@ Orin `sm_87` 대상으로 build한다. check script는 CUDA NMS와 YOLO11n GPU i
 - Ultralytics `yolo11n.pt` COCO pretrained detection 사용
 - COCO class 0인 `person`만 confidence threshold로 필터링
 - 한 프레임의 모든 사람을 중심 x 좌표 기준 왼쪽에서 오른쪽으로 정렬
-- `person1 0.94` 형식의 번호, confidence와 bounding box 표시
+- `person1 0.94 | 1.24 m` 형식의 번호, confidence, bounding box와 거리 표시
 - 원본 `header.stamp`와 `header.frame_id`를 유지한 debug image 발행
 - CUDA 사용 가능 시 GPU 선택, 불가능하면 CPU 선택(`device=auto`)
 
@@ -63,8 +67,10 @@ ByteTrack, BoT-SORT, DeepSORT, re-identification과 persistent ID는 구현하�
 TensorRT 최적화가 포함되지 않는다.
 
 RGB, depth, aligned-depth를 포함한 D435 camera pipeline도 정상 기동 및 topic 발행을
-확인했다. Stage 2에서는 YOLO bounding box와 aligned depth를 결합해 사람 영역의 유효
-depth만 추출하고, zero/invalid 값을 제거한 median depth로 사람까지의 거리[m]를 계산한다.
+확인했다. Stage 2는 YOLO bounding box와 aligned depth를 결합해 중심 ROI의 유효 depth만
+추출하고, zero/NaN/Inf/range 밖 값을 제거한 median depth로 사람까지의 거리[m]를 계산한다.
+aligned depth가 없거나 RGB와 timestamp 차이가 `sync_slop_sec`보다 크면 detection은 계속
+발행하고 거리만 `N/A`로 표시한다.
 
 ## 구조
 
@@ -72,7 +78,8 @@ depth만 추출하고, zero/invalid 값을 제거한 median depth로 사람까�
 rescue_robot_survivor/
 ├── rescue_robot_survivor/
 │   ├── detection_logic.py       # person 필터, 좌표 보정, 정렬, drawing
-│   └── person_detector_node.py  # ROS 구독, YOLO 추론, debug 발행
+│   ├── depth_logic.py           # ROI, scale, filtering, median
+│   └── person_detector_node.py  # ROS 구독, YOLO/depth 처리, debug 발행
 ├── launch/person_detector.launch.py
 ├── config/person_detector.yaml
 ├── test/                        # 순수 로직과 launch/config 계약 테스트
@@ -98,6 +105,14 @@ include하지 않는다. YAML 값은 launch argument의 기본값으로 읽히�
 | `model_name` | `yolo11n.pt` | 모델 이름 또는 로컬 weight 경로 |
 | `confidence_threshold` | `0.5` | 0.0–1.0 |
 | `device` | `auto` | `auto`, `cpu`, `0` 등 |
+| `aligned_depth_topic` | `/leader/camera/aligned_depth_to_color/image_raw` | RGB 정렬 depth |
+| `depth_roi_width_ratio` / `height_ratio` | `0.25` / `0.25` | bbox 중심 ROI 비율 |
+| `min_depth_m` / `max_depth_m` | `0.2` / `6.0` | 유효 거리 범위 |
+| `min_valid_depth_pixels` | `20` | 최소 유효 pixel 수 |
+| `depth_scale_m_per_unit` | `0.001` | integer depth raw 단위 변환값 |
+| `show_depth_roi` | `false` | debug ROI 표시 |
+| `sync_queue_size` | `5` | 최근 depth cache 크기 |
+| `sync_slop_sec` | `0.12` | RGB/depth 허용 timestamp 차이 |
 
 입출력은 `BEST_EFFORT`, `VOLATILE`, `KEEP_LAST(1)`을 사용한다. 느린 추론 중 오래된
 camera frame이 쌓이는 것을 줄이고 RealSense sensor publisher와 호환하기 위한 설정이다.
@@ -203,7 +218,16 @@ box와 `personN confidence`가 표시된다. 각 터미널에서 `Ctrl-C`로 det
 [Stage 1 validation](docs/STAGE1_PERSON_DETECTION_VALIDATION.md), 이후 전체 개발 순서는
 [survivor development plan](docs/SURVIVOR_DEVELOPMENT_PLAN.md)을 따른다.
 
-## Next Stage — Stage 2
+## Stage 2 distance algorithm
+
+RGB callback은 YOLO inference를 계속 수행하고, depth callback은 최근 aligned depth message를
+`sync_queue_size`개 보관한다. RGB timestamp에 가장 가까운 depth와의 차이가 `sync_slop_sec`
+이내일 때만 depth를 사용한다.
+`16UC1`/`MONO16`은 `depth_scale_m_per_unit`을 곱하고 `32FC1`은 meter로 처리한다. bbox
+중심 ROI에서 유효 pixel을 추출하고 NumPy median을 계산한다. 유효 pixel이 20개 미만이거나
+depth가 없으면 `N/A`를 표시한다.
+
+## Next Stage — Stage 3
 
 YOLO bounding box + aligned depth를 timestamp 기준으로 결합하고, 사람 영역에서 유효
 depth를 추출한 뒤 zero/invalid 값을 제거한다. 이후 median depth로 사람까지의 거리[m]를

@@ -26,13 +26,13 @@ def _load_launch_module():
 def test_yaml_has_required_defaults():
     config = yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8"))
     parameters = config["/leader/person_detector"]["ros__parameters"]
-    assert parameters == {
+    assert {
         "image_topic": "/leader/camera/color/image_rect",
         "debug_image_topic": "/leader/survivor/debug_image",
         "model_name": "yolo11n.pt",
         "confidence_threshold": 0.5,
         "device": "auto",
-    }
+    }.items() <= parameters.items()
 
 
 def test_launch_is_importable_and_does_not_start_a_camera():
@@ -52,5 +52,15 @@ def test_launch_is_importable_and_does_not_start_a_camera():
         "model_name",
         "confidence_threshold",
         "device",
+        "aligned_depth_topic",
+        "depth_roi_width_ratio",
+        "depth_roi_height_ratio",
+        "min_depth_m",
+        "max_depth_m",
+        "min_valid_depth_pixels",
+        "depth_scale_m_per_unit",
+        "show_depth_roi",
+        "sync_queue_size",
+        "sync_slop_sec",
     ):
         assert f'"{name}"' in source

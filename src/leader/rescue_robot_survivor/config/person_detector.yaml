@@ -5,3 +5,13 @@
     model_name: yolo11n.pt
     confidence_threshold: 0.5
     device: auto
+    aligned_depth_topic: /leader/camera/aligned_depth_to_color/image_raw
+    depth_roi_width_ratio: 0.25
+    depth_roi_height_ratio: 0.25
+    min_depth_m: 0.2
+    max_depth_m: 6.0
+    min_valid_depth_pixels: 20
+    depth_scale_m_per_unit: 0.001
+    show_depth_roi: false
+    sync_queue_size: 5
+    sync_slop_sec: 0.12

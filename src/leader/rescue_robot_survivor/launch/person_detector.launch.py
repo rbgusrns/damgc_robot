@@ -44,6 +44,43 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "device", default_value=str(defaults["device"])
             ),
+            DeclareLaunchArgument(
+                "aligned_depth_topic",
+                default_value=str(defaults["aligned_depth_topic"]),
+            ),
+            DeclareLaunchArgument(
+                "depth_roi_width_ratio",
+                default_value=str(defaults["depth_roi_width_ratio"]),
+            ),
+            DeclareLaunchArgument(
+                "depth_roi_height_ratio",
+                default_value=str(defaults["depth_roi_height_ratio"]),
+            ),
+            DeclareLaunchArgument(
+                "min_depth_m", default_value=str(defaults["min_depth_m"])
+            ),
+            DeclareLaunchArgument(
+                "max_depth_m", default_value=str(defaults["max_depth_m"])
+            ),
+            DeclareLaunchArgument(
+                "min_valid_depth_pixels",
+                default_value=str(defaults["min_valid_depth_pixels"]),
+            ),
+            DeclareLaunchArgument(
+                "depth_scale_m_per_unit",
+                default_value=str(defaults["depth_scale_m_per_unit"]),
+            ),
+            DeclareLaunchArgument(
+                "show_depth_roi",
+                default_value=str(defaults["show_depth_roi"]).lower(),
+            ),
+            DeclareLaunchArgument(
+                "sync_queue_size",
+                default_value=str(defaults["sync_queue_size"]),
+            ),
+            DeclareLaunchArgument(
+                "sync_slop_sec", default_value=str(defaults["sync_slop_sec"])
+            ),
             Node(
                 package="rescue_robot_survivor",
                 executable="person_detector_node",
@@ -61,6 +98,43 @@ def generate_launch_description() -> LaunchDescription:
                             value_type=float,
                         ),
                         "device": LaunchConfiguration("device"),
+                        "aligned_depth_topic": LaunchConfiguration(
+                            "aligned_depth_topic"
+                        ),
+                        "depth_roi_width_ratio": ParameterValue(
+                            LaunchConfiguration("depth_roi_width_ratio"),
+                            value_type=float,
+                        ),
+                        "depth_roi_height_ratio": ParameterValue(
+                            LaunchConfiguration("depth_roi_height_ratio"),
+                            value_type=float,
+                        ),
+                        "min_depth_m": ParameterValue(
+                            LaunchConfiguration("min_depth_m"), value_type=float
+                        ),
+                        "max_depth_m": ParameterValue(
+                            LaunchConfiguration("max_depth_m"), value_type=float
+                        ),
+                        "min_valid_depth_pixels": ParameterValue(
+                            LaunchConfiguration("min_valid_depth_pixels"),
+                            value_type=int,
+                        ),
+                        "depth_scale_m_per_unit": ParameterValue(
+                            LaunchConfiguration("depth_scale_m_per_unit"),
+                            value_type=float,
+                        ),
+                        "show_depth_roi": ParameterValue(
+                            LaunchConfiguration("show_depth_roi"),
+                            value_type=bool,
+                        ),
+                        "sync_queue_size": ParameterValue(
+                            LaunchConfiguration("sync_queue_size"),
+                            value_type=int,
+                        ),
+                        "sync_slop_sec": ParameterValue(
+                            LaunchConfiguration("sync_slop_sec"),
+                            value_type=float,
+                        ),
                     }
                 ],
                 output="screen",

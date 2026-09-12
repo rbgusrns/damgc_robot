@@ -3,7 +3,7 @@
 <package format="3">
   <name>rescue_robot_survivor</name>
   <version>0.1.0</version>
-  <description>Leader RGB person detection and annotated debug image publishing.</description>
+  <description>Leader RGB person detection and aligned depth distance publishing.</description>
   <maintainer email="maze@todo.todo">maze</maintainer>
   <license>Apache-2.0</license>
 

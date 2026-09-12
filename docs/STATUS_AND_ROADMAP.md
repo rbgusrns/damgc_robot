@@ -22,7 +22,7 @@ AprilTag software pipeline과 Survivor Stage 1 구현 및 실제 hardware verifi
 | Visual SLAM 위치·자세 추정 | 미구현 | 관련 패키지·launch·시험 기록 없음 |
 | BNO055와 wheel odometry 보정 | 미구현 | URDF의 `imu_link`만 있으며 실제 데이터와 융합 없음 |
 | 카메라 기반 생존자 탐지 | 완료 | survivor 전용 Docker GPU runtime과 YOLO11n pipeline 검증; 실제 D435에서 1/2/3명 검출, bbox/confidence, 좌→우 numbering 및 rqt debug image 확인 |
-| depth 기반 생존자 3차원 위치 | 미구현 | 중앙 depth CSV 도구는 있으나 사람 검출 결과와 결합되지 않음 |
+| depth 기반 생존자 3차원 위치 | 부분 완료 | Stage 2 사람별 aligned-depth 거리 구현; CameraInfo deprojection/XYZ는 미구현 |
 | Nav2 자율주행 | 미구현 | Nav2 구성·지도·주행 시험 없음 |
 | AprilTag 물품 인식·정밀 접근 | 부분 완료 | 양 로봇 camera/base alignment와 guarded software velocity 구현; 실제 접근·파지 검증 필요 |
 | 그리퍼 물품 파지 | 확인 필요 | URDF 형상만 있고 제어 코드·실물 시험 근거 없음 |
@@ -42,8 +42,10 @@ AprilTag software pipeline과 Survivor Stage 1 구현 및 실제 hardware verifi
 - COCO person 다중 검출, 좌우 frame-local 번호와 `/leader/survivor/debug_image` 구현 및
   실제 D435 1/2/3명 hardware verification 완료 (`VERIFIED`, 2026-09-11)
 
-Stage 1 다음 작업은 YOLO bounding box + aligned depth에서 사람 영역의 유효 depth를
-추출하고 zero/invalid 값을 제거한 median depth로 사람까지의 거리[m]를 계산하는 Stage 2다.
+Stage 2는 YOLO bounding box + aligned depth에서 사람 중심 ROI의 유효 depth를 추출하고
+zero/invalid 값을 제거한 median depth로 사람까지의 거리[m]를 계산한다. 코드는
+`IMPLEMENTED - HARDWARE VERIFICATION REQUIRED`이며 실제 거리·다중 사람·이동 시험 후에만
+VERIFIED로 승격한다. 다음은 CameraInfo 기반 camera XYZ인 Stage 3다.
 
 ### 팔로워
 
