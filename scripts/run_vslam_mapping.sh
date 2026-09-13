@@ -251,10 +251,12 @@ setsid bash -lc "
   export RMW_IMPLEMENTATION='${RMW_IMPLEMENTATION}'
   export FASTDDS_BUILTIN_TRANSPORTS='${FASTDDS_BUILTIN_TRANSPORTS}'
   source /opt/ros/humble/setup.bash
+  # single shared D435 source for VSLAM and future survivor pipeline.
   exec ros2 launch realsense2_camera rs_launch.py \\
     camera_namespace:=leader camera_name:=camera \\
     enable_color:=true enable_depth:=true \\
     enable_infra:=true enable_infra1:=true enable_infra2:=true \\
+    enable_sync:=true align_depth.enable:=true \\
     enable_gyro:=false enable_accel:=false \\
     publish_tf:=true tf_publish_rate:=30.0
 " >"${LOG_DIR}/realsense.log" 2>&1 &
