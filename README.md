@@ -12,7 +12,7 @@
 
 ## 현재 구현 상태
 
-2026년 9월 12일 기준으로 저장소에서 확인되는 구현은 다음과 같습니다.
+2026년 9월 14일 기준으로 저장소와 실제 Jetson + D435 실행에서 확인되는 구현은 다음과 같습니다.
 
 - 리더: URDF/RViz 모델, D435 RGB·depth, RGB 보정, AprilTag 검출, 중앙 depth CSV 측정,
   exact-stamp TF2 기반 `base_link` pose·metric·상태, raw approach controller와
@@ -32,13 +32,16 @@
   전달, wheel odometry 원시 계산, 엔코더·IMU/VSLAM dual EKF 융합 설정, 모터
   속도 PID와 watchdog
 - 확인됨: STM32 wheel/IMU 수신, dual EKF·Visual SLAM·nvblox 동시 실행,
-  정지 상태 dual EKF 안정화, Docker RViz의 카메라 및 3차원 mesh 표시
+  정지·저속 이동 상태 dual EKF/VSLAM 안정성, Docker RViz의 카메라 및 3차원 mesh 표시
+- Survivor Stage 4 완료: exact detection timestamp TF2를 사용하는
+  `survivor_map_transform_node`, `/leader/survivor/map_positions`, `map` frame 출력,
+  TF 실패 시 skip 정책, 정지 및 실제 A→B 이동 검증 완료
 - 진행 중: 저속 주행에서 EKF 안정성과 VSLAM tracking 장시간 검증
-- 아직 없음: 생존자 TF2 map XYZ, Nav2, 그리퍼 연동, Mission Coordinator, 실물
-  리더–팔로워 협동 운반. Survivor Stage 1 사람 탐지와 Stage 3 camera optical XYZ는 실제
-  D435에서 검증됐다. Stage 3에서는 좌/우 X 부호, distance/Z 일치, debug XYZ, 다중 사람
-  PoseArray, optical frame과 identity quaternion을 확인했다. Stage 2의 별도 정식 줄자 거리표는
-  남아 있다. 다음 survivor 개발 단계는 exact-timestamp TF2 기반 map frame XYZ인 Stage 4다.
+- 아직 없음: Nav2, 그리퍼 연동, Mission Coordinator, 실물 리더–팔로워 협동 운반,
+  RViz Survivor Marker, ID tracking, 중복 제거와 map 위치 filtering. Survivor Stage 1~4는
+  실제 D435/Jetson에서 검증했으며, Stage 4 raw map stability에는 약 0.115 m의 A→B
+  변화가 있어 정밀 절대 위치 보장은 하지 않는다. 다음 survivor 개발 단계는 Stage 5
+  RViz Marker 및 map-coordinate visualization이다.
 
 Leader AprilTag pipeline은 guarded `/leader/cmd_vel`에서 I2C STM32 bridge와 motor까지
 통합되어 있습니다. Follower의 `/follower/safe_cmd_vel`은 아직 motor에 연결하지

@@ -236,8 +236,11 @@ volatile이었다. 실제 ROS graph에서 durability incompatibility warning을 
 
 ## 14. Stage 4로 전달하는 계약
 
-다음 개발 단계인 Stage 4는 `/leader/survivor/camera_positions`를 입력으로 받아 각 pose를
-`header.stamp` 시점에 `header.frame_id`에서 `map`으로 exact-timestamp TF2 변환한다. Stage 3가 보장하는
-계약은 metric XYZ, 유효한 optical frame ID, 원본 RGB timestamp, identity orientation과
-valid-only ordering이다. Stage 4는 원본 timestamp의 TF가 없을 때 최신 TF를 몰래 사용하거나
-stale map position을 발행하면 안 된다.
+Stage 3가 전달한 metric XYZ, 유효한 optical frame ID, 원본 RGB timestamp, identity
+orientation과 valid-only ordering은 Stage 4에서 그대로 사용됐다. Stage 4는
+`/leader/survivor/camera_positions`를 입력으로 받아 각 pose를 `header.stamp` 시점에
+`header.frame_id`에서 `map`으로 exact-timestamp TF2 변환하고
+`/leader/survivor/map_positions`로 발행한다. 원본 timestamp의 TF가 없을 때 최신 TF를
+몰래 사용하거나 stale map position을 발행하지 않으며, 이 동작은 실제 Jetson + D435에서
+검증됐다. 상세 결과는 [`Stage 4 validation`](../../../../docs/SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE4_MAP_TRANSFORM_VALIDATION.md)에
+기록되어 있다.

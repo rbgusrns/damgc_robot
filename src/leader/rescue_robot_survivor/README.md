@@ -7,8 +7,8 @@
 이 패키지는 생존자 인식을 담당하므로 모델 의존성, 실행 주기와 이후 depth 처리를 서로
 섞지 않도록 별도 패키지로 분리했다.
 
-**현재 상태: Stage 1·3 VERIFIED / Stage 2 IMPLEMENTED - HARDWARE VERIFICATION
-REQUIRED (2026-09-12)**
+**현재 상태: Stage 1·3 VERIFIED / Stage 4 PASS with raw-coordinate caveat
+(2026-09-14)**
 
 코드, package build와 자동 테스트를 완료했다. survivor 전용 Jetson Docker GPU runtime에서
 YOLO11n 추론을 수행하고 실제 D435 화면에서 1명, 2명, 3명 검출을 확인했다. 각 사람의
@@ -21,6 +21,12 @@ Stage 2의 aligned-depth 거리 코드는 구현되었지만 정식 줄자 기�
 camera optical XYZ, 좌/우 X 부호, distance와 Z의 일치, debug overlay, 다중 사람별 XYZ와
 `/leader/survivor/camera_positions` PoseArray를 확인해 `VERIFIED`로 승격했다. Stage 1의
 `VERIFIED` 판정도 유지된다.
+
+Stage 4는 `survivor_map_transform_node`에서 원본 detection timestamp의 TF2를 조회해
+`/leader/survivor/map_positions` (`PoseArray`, `header.frame_id=map`)를 발행한다. TF lookup가
+실패하면 최신 TF로 대체하지 않고 해당 메시지를 skip한다. 실제 Jetson + D435에서 정지
+상태와 고정된 사람의 A→B 저속 이동을 검증했다. Camera XYZ는 크게 변했고 map XYZ는
+같은 사람 주변에 유지됐지만 raw A→B map 평균 차이는 약 0.115 m였다.
 
 ## Jetson GPU runtime
 
@@ -93,6 +99,7 @@ rescue_robot_survivor/
 │   ├── geometry_logic.py        # P 검증, ROI 중심, camera deprojection
 │   └── person_detector_node.py  # ROS 구독/cache, YOLO/depth/XYZ, output
 ├── launch/person_detector.launch.py
+├── launch/survivor_map_transform.launch.py
 ├── config/person_detector.yaml
 ├── test/                        # 순수 로직과 launch/config 계약 테스트
 ├── docs/SURVIVOR_DEVELOPMENT_PLAN.md
@@ -118,6 +125,7 @@ include하지 않는다. YAML 값은 launch argument의 기본값으로 읽히�
 | 입력 | `/leader/camera/color/camera_info` | `CameraInfo`, rectified P 사용 |
 | 출력 | `/leader/survivor/debug_image` | `sensor_msgs/msg/Image`, `bgr8` |
 | 출력 | `/leader/survivor/camera_positions` | `geometry_msgs/msg/PoseArray`, valid XYZ만 |
+| 출력 | `/leader/survivor/map_positions` | `geometry_msgs/msg/PoseArray`, map frame, exact input stamp |
 | `image_topic` | 위 입력 | 다른 RGB 토픽으로 변경 |
 | `debug_image_topic` | 위 출력 | debug 영상 토픽 변경 |
 | `model_name` | `yolo11n.pt` | 모델 이름 또는 로컬 weight 경로 |
@@ -133,6 +141,10 @@ include하지 않는다. YAML 값은 launch argument의 기본값으로 읽히�
 | `sync_slop_sec` | `0.12` | RGB/depth 허용 timestamp 차이 |
 | `camera_info_topic` | `/leader/camera/color/camera_info` | RGB CameraInfo 입력 |
 | `camera_positions_topic` | `/leader/survivor/camera_positions` | camera XYZ 출력 |
+| `map_transform.input_topic` | `/leader/survivor/camera_positions` | Stage 4 input |
+| `map_transform.output_topic` | `/leader/survivor/map_positions` | Stage 4 output |
+| `map_transform.target_frame` | `map` | map target frame |
+| `map_transform.tf_timeout_sec` | `0.2` | exact-time lookup timeout; fallback 없음 |
 | `show_camera_xyz` | `true` | debug image XYZ 둘째 줄 표시 |
 
 image 입출력은 `BEST_EFFORT`, `VOLATILE`, `KEEP_LAST(1)`을 사용한다. CameraInfo는 실제
@@ -275,9 +287,32 @@ Stage 2 ROI의 실제 pixel 범위 중심을 `(u,v)`로 사용하고 같은 ROI�
 `fx,fy,cx,cy`를 얻어 `X=(u-cx)Z/fx`, `Y=(v-cy)Z/fy`를 계산한다. optical frame은
 right/down/forward 축이다.
 
-## Next Stage — Stage 4
+## Stage 4 — Camera XYZ → exact timestamp TF2 → map XYZ
 
-다음 개발 단계는 camera optical XYZ를 원본 RGB timestamp에서 TF2 변환해 map frame XYZ로
-만드는 Stage 4다. `/leader/survivor/camera_positions`의 실제 optical frame ID와 원본 RGB
-timestamp를 그대로 사용한다. Stage 4 전까지 map 좌표나 RViz survivor marker를 이
-패키지의 camera XYZ로 오해하지 않는다.
+실행 명령:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/damgc_robot/install/local_setup.bash
+ros2 launch rescue_robot_survivor survivor_map_transform.launch.py
+```
+
+입력은 `/leader/survivor/camera_positions`의 `header.frame_id`와 원본 RGB
+`header.stamp`를 그대로 사용한다. node는 `target_frame=map`,
+`source_frame=msg.header.frame_id`, `time=Time.from_msg(msg.header.stamp)`로
+exact-time TF를 조회한다. PoseArray마다 lookup는 한 번만 수행하고 모든 position에
+적용한다.
+
+출력은 `/leader/survivor/map_positions`이며 `header.frame_id=map`, timestamp는 입력
+stamp를 유지하고 orientation은 identity quaternion이다. 빈 frame/stamp, NaN/Inf,
+TF lookup 실패·timeout·extrapolation·connectivity failure에서는 publish하지 않는다.
+
+Stage 4는 완료됐으며 구현·실행·A/B 이동 검증 결과는
+[`Stage 4 validation`](../../../docs/SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE4_MAP_TRANSFORM_VALIDATION.md)에
+기록되어 있다.
+
+## Next Stage — Stage 5
+
+다음 단계는 map-frame survivor 후보의 RViz Marker 및 map-coordinate visualization이다.
+이번 Stage에는 marker, ID tracking, 중복 제거, averaging/filtering, registry를 포함하지
+않았다.

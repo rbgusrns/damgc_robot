@@ -3,8 +3,8 @@
 ## 문서 목적
 
 이 문서는 [개발 계획서](Plan.md)를 실행 상태로 변환한 관리 문서다. 최초 기준일은
-**2026년 7월 27일**이며, 현재 상태는 2026년 9월 12일까지 반영한다. AprilTag software
-pipeline, Survivor Stage 1·3 hardware verification과 Stage 2 구현 상태를 아래
+**2026년 7월 27일**이며, 현재 상태는 2026년 9월 14일까지 반영한다. AprilTag software
+pipeline, Survivor Stage 1~4 hardware verification과 Stage 2 구현 상태를 아래
 관련 행에 반영했다.
 
 상태 표시는 다음 기준을 사용한다.
@@ -18,17 +18,17 @@ pipeline, Survivor Stage 1·3 hardware verification과 Stage 2 구현 상태를 
 
 | 계획의 세부 목표 | 상태 | 현재 근거 또는 부족한 조건 |
 | --- | --- | --- |
-| D435 실시간 3차원 지도 | 부분 완료 | RGB·depth 발행은 확인, Visual SLAM·nvblox 지도는 없음 |
-| Visual SLAM 위치·자세 추정 | 미구현 | 관련 패키지·launch·시험 기록 없음 |
-| BNO055와 wheel odometry 보정 | 미구현 | URDF의 `imu_link`만 있으며 실제 데이터와 융합 없음 |
+| D435 실시간 3차원 지도 | 완료(범위 내) | single-owner D435, VSLAM, dual EKF, nvblox mesh/3D ESDF와 RViz를 Jetson에서 동시 검증; 장기 주행 안정성은 계속 관찰 |
+| Visual SLAM 위치·자세 추정 | 완료(범위 내) | infra1/infra2, `/visual_slam/tracking/odometry`, status Success와 저속 A→B 이동 검증 |
+| BNO055와 wheel odometry 보정 | 부분 완료 | 현재 장비는 STM32 IMU/wheel odometry와 dual EKF를 검증; BNO055 기반 계획 항목은 별도 미완료 |
 | 카메라 기반 생존자 탐지 | 완료 | survivor 전용 Docker GPU runtime과 YOLO11n pipeline 검증; 실제 D435에서 1/2/3명 검출, bbox/confidence, 좌→우 numbering 및 rqt debug image 확인 |
-| depth 기반 생존자 3차원 위치 | 부분 완료 | Stage 3 camera optical XYZ와 다중 PoseArray는 실제 D435 검증 완료; exact-timestamp TF2 map 변환은 남음 |
+| depth 기반 생존자 3차원 위치 | 완료(범위 내) | Stage 3 camera optical XYZ와 Stage 4 exact-timestamp TF2 map XYZ, `/leader/survivor/map_positions`를 실제 D435에서 검증 |
 | Nav2 자율주행 | 미구현 | Nav2 구성·지도·주행 시험 없음 |
 | AprilTag 물품 인식·정밀 접근 | 부분 완료 | 양 로봇 camera/base alignment와 guarded software velocity 구현; 실제 접근·파지 검증 필요 |
 | 그리퍼 물품 파지 | 확인 필요 | URDF 형상만 있고 제어 코드·실물 시험 근거 없음 |
 | 경량 물품 단독 운반 | 미구현 | 접근·파지·주행 연결 없음 |
 | 중량 물품 협동 운반 | 부분 완료 | 리더 DDS 상태·속도 게이트 구현, 팔로워 heartbeat/하드웨어 주행 시험 필요 |
-| 지도·생존자·로봇 상태 시각화 | 부분 완료 | URDF/RViz와 카메라 확인만 가능, 통합 화면 없음 |
+| 지도·생존자·로봇 상태 시각화 | 부분 완료 | RViz 3D map은 검증; Survivor Marker와 map-coordinate visualization은 Stage 5 |
 
 ## 현재 저장소에서 재현 가능한 범위
 
@@ -46,8 +46,12 @@ Stage 2는 YOLO bounding box + aligned depth의 중앙 ROI median 거리[m]를 �
 3는 같은 ROI center와 median Z, rectified CameraInfo.P로 camera optical XYZ를 계산하고
 `/leader/survivor/camera_positions` PoseArray를 발행한다. Stage 3는 실제 사람 좌/우 X 부호,
 distance/Z 일치, debug XYZ, 다중 사람 pose, `camera_color_optical_frame`과 identity quaternion을
-확인해 `VERIFIED (2026-09-12)`다. Stage 2의 별도 정식 줄자 거리표는 남아 있다. 다음 구현
-단계는 camera optical XYZ의 exact-timestamp TF2 map 변환인 Stage 4다.
+확인해 `VERIFIED (2026-09-12)`다. Stage 4는 `survivor_map_transform_node`에서
+`Time.from_msg(msg.header.stamp)`를 사용해 `/leader/survivor/map_positions`를 생성하고,
+TF lookup 실패 시 발행하지 않는 정책까지 실제 검증했다. 정지 255 valid pairs와 A→B
+약 0.351 m 이동에서 camera XYZ 변화 및 map XYZ의 생존자 주변 유지가 확인됐다. Stage 2의
+별도 정식 줄자 거리표와 Stage 4 raw map의 약 0.115 m A→B 변화는 제한사항으로 남아 있다.
+다음 survivor 단계는 Stage 5 RViz Marker와 map-coordinate visualization이다.
 
 ### 팔로워
 
@@ -73,8 +77,8 @@ distance/Z 일치, debug XYZ, 다중 사람 pose, `camera_color_optical_frame`�
 | --- | --- | --- |
 | 두 Orin에서 같은 workspace 빌드 | 확인 필요 | 두 장비의 커밋·의존성·빌드 결과 기록 |
 | `/leader`, `/follower` namespace 통신 | 부분 완료 | 개별 토픽은 사용, 두 Orin 네트워크 시험 필요 |
-| 차체–카메라–IMU TF 확인 | 부분 완료 | 리더 URDF는 있음; 실제 센서 optical frame 연결과 팔로워 차체 TF 필요 |
-| RGB-D, IMU, 모터 데이터 확인 | 부분 완료 | RGB-D만 확인됨 |
+| 차체–카메라–IMU TF 확인 | 부분 완료 | 리더 `map → odom → base_link → camera_color_optical_frame`과 IMU/wheel 경로는 검증; 팔로워 차체 TF는 별도 |
+| RGB-D, IMU, 모터 데이터 확인 | 부분 완료 | 리더 RGB-D, STM32 IMU/wheel 데이터는 검증; 양 로봇 전체 시험은 별도 |
 | STM32 패킷·시간 동기화·Mission 상태도 | 미구현 | 공통 인터페이스 문서와 가짜 노드 필요 |
 | 차체·그리퍼·부품 확정 | 확인 필요 | 기구/BOM 담당 기록 연결 필요 |
 
@@ -86,7 +90,7 @@ distance/Z 일치, debug XYZ, 다중 사람 pose, `camera_color_optical_frame`�
 | 종료 조건 | 상태 | 조치 |
 | --- | --- | --- |
 | 로봇 A 원격 직진·회전 | 확인 필요 | `/leader/cmd_vel`부터 STM32까지 실물 시험 |
-| 3차원 지도 5분 이상 생성 | 미구현 | Visual SLAM·nvblox rosbag 시험부터 수행 |
+| 3차원 지도 5분 이상 생성 | 완료(범위 내) | 469.0초 rosbag에서 VSLAM, nvblox mesh/3D ESDF, RViz를 동시 검증 |
 | 사람과 AprilTag 검출 | 완료 | AprilTag와 Survivor Stage 1 완료; 사람 탐지는 실제 Jetson/D435에서 검증됨 |
 | 규격 물품 수동 파지 | 확인 필요 | 그리퍼 시험 기록 필요 |
 | 가짜 노드로 임무 상태 전체 순환 | 미구현 | Mission Coordinator 상태·전이 정의 필요 |
@@ -96,7 +100,7 @@ distance/Z 일치, debug XYZ, 다중 사람 pose, `camera_color_optical_frame`�
 | 종료 조건 | 상태 | 이번 주 산출물 |
 | --- | --- | --- |
 | 로봇 A 목표점 반복 이동 | 미구현 | 정적 지도 Nav2 최소 구성과 반복 시험 |
-| 사람 위치를 카메라 좌표로 출력 | 완료 | Stage 3 실제 D435 좌/우 부호, distance/Z, debug XYZ와 다중 PoseArray 검증 완료 |
+| 사람 위치를 카메라·map 좌표로 출력 | 완료(범위 내) | Stage 3 camera XYZ와 Stage 4 exact-timestamp `map_positions`, A→B 이동 검증 완료 |
 | 로봇 B 원격 속도 주행 | 미구현/확인 필요 | STM32 통신과 `/follower/cmd_vel` 연결 |
 | 두 로봇 긴급정지 | 미구현/확인 필요 | 하드웨어 E-stop과 소프트웨어 정지 경로 검증 |
 | 전원·발열 30분 시험 | 확인 필요 | 전압·온도·재부팅 여부 기록 |
@@ -115,7 +119,7 @@ distance/Z 일치, debug XYZ, 다중 사람 pose, `camera_color_optical_frame`�
 
 1. wheel odometry와 BNO055를 `robot_localization`에 연결
 2. 로봇 A의 정적 지도 기반 Nav2 목표점 반복 이동
-3. 검증된 Stage 3 camera optical XYZ를 exact-timestamp TF2로 map frame XYZ에 변환
+3. Stage 4에서 검증된 exact-timestamp TF2 map XYZ를 기반으로 RViz Marker를 구현
 4. 로봇 B의 `/follower/cmd_vel` 주행
 5. 두 로봇 E-stop과 전원·발열 30분 시험
 

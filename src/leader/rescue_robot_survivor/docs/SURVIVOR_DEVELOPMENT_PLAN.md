@@ -3,8 +3,8 @@
 ## 상태와 최종 흐름
 
 현재 상태는 **Stage 1 VERIFIED (2026-09-11)**,
-**Stage 2 IMPLEMENTED - HARDWARE VERIFICATION REQUIRED**, 그리고
-**Stage 3 VERIFIED (2026-09-12)**다. Stage 3는 실제 Jetson + D435에서 사람 XYZ, 좌/우 X
+**Stage 2 IMPLEMENTED - HARDWARE VERIFICATION REQUIRED**, **Stage 3 VERIFIED
+(2026-09-12)**, **Stage 4 PASS (2026-09-14, raw-coordinate caveat)**다. Stage 3는 실제 Jetson + D435에서 사람 XYZ, 좌/우 X
 부호, distance/Z 일치, debug overlay, 다중 사람과 PoseArray를 확인했다. Stage 2의 별도 정식
 줄자 거리표 상태는 임의로 변경하지 않는다.
 
@@ -57,16 +57,22 @@ CameraInfo ──────────────────┘            
 - Verification: `/leader/survivor/camera_positions`의 여러 pose와 debug XYZ가 대응했으며
   `header.frame_id=camera_color_optical_frame`임을 확인했다.
 
-## Stage 4 — Camera XYZ + TF2 → map XYZ
+## Stage 4 — Camera XYZ + exact timestamp TF2 → map XYZ
 
-**현재 상태: NOT IMPLEMENTED**
+**현재 상태: PASS (2026-09-14, raw-coordinate caveat)**
 
 - Purpose: 측정 시점의 생존자 후보를 전역 map 좌표로 변환한다.
-- Input: stamped camera point, camera↔base 및 map TF.
-- Processing: 원본 timestamp의 TF2 lookup/transform, timeout과 unavailable 처리.
-- Output: `map` frame의 stamped survivor 후보 좌표.
+- Input: `/leader/survivor/camera_positions`, `geometry_msgs/msg/PoseArray`.
+- Processing: `Time.from_msg(msg.header.stamp)`를 사용한 원본 timestamp TF2 lookup/transform,
+  timeout과 unavailable 처리. PoseArray마다 lookup는 한 번만 수행한다.
+- Output: `/leader/survivor/map_positions`, `map` frame의 stamped survivor 후보 좌표.
+- Parameters: `input_topic`, `output_topic`, `target_frame=map`, `tf_timeout_sec=0.2`.
+- Failure policy: 빈 frame/stamp, NaN/Inf, lookup/connectivity/extrapolation/timeout 실패 시
+  latest TF fallback 없이 메시지 전체를 skip한다.
 - Dependency: Stage 3 PoseArray의 correct frame ID와 original RGB timestamp, 유효 TF tree.
-- Completion: TF가 있을 때 좌표가 일관되고 누락/지연 TF에서 stale 좌표를 발행하지 않는다.
+- Completion: 정지 255 valid pairs, A/B 이동 129/135 valid pairs, map frame 및 동일 stamp,
+  VSLAM/EKF/nvblox 회귀를 실제 Jetson + D435에서 확인했다. A→B raw map 평균 변화 약
+  0.115 m는 제한사항이며 이번 Stage에서 filtering하지 않았다.
 
 ## Stage 5 — RViz marker + duplicate suppression
 
@@ -136,6 +142,7 @@ Stage 2는 `depth_logic.py`, Stage 3는 `geometry_logic.py`에 ROS-independent �
 - orientation: identity quaternion
 - order: valid frame-local detections의 left-to-right 순서, persistent ID 아님
 
-다음 개발 단계는 Stage 4다. 이 header를 사용해 camera optical XYZ를 측정 시점의
-exact-timestamp TF2 transform으로 map frame XYZ로 변환한다. map TF가 없거나 timestamp에
-맞는 transform이 없을 때 최신 transform이나 fake origin으로 대체하지 않는다.
+Stage 4는 이 header를 사용해 camera optical XYZ를 측정 시점의 exact-timestamp TF2
+transform으로 map frame XYZ로 변환한다. map TF가 없거나 timestamp에 맞는 transform이
+없을 때 최신 transform이나 fake origin으로 대체하지 않는다. 다음 단계는 Stage 5
+RViz Marker와 map-coordinate visualization이다.

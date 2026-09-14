@@ -175,9 +175,10 @@ reliable + volatile profile로 변경해 해결했다.
 
 ## 다음 개발 단계
 
-Stage 4는 검증된 camera optical XYZ와 원본 RGB timestamp를 사용해 exact-timestamp TF2
-transform을 수행하고 map frame XYZ를 만든다. Stage 3에서는 TF2 또는 map 좌표를 구현하지
-않는다.
+Stage 3 검증 결과는 Stage 4의 입력 계약으로 인계됐다. Stage 4는 검증된 camera optical
+XYZ와 원본 RGB timestamp를 사용해 exact-timestamp TF2 transform을 수행하고 map frame
+XYZ를 만든다. 구현·정지·A→B 이동 결과는 [`Stage 4 validation`](../../../../docs/SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE4_MAP_TRANSFORM_VALIDATION.md)에
+기록되어 있다. Stage 3 문서의 나머지 내용은 당시의 camera XYZ 검증 기록으로 보존한다.
 
 ## Troubleshooting
 
