@@ -28,8 +28,6 @@ setup(
        "console_scripts": [
    	 "apriltag_approach_node = "
    	 "follower_supply_perception.apriltag_approach_node:main",
-   	 "leader_path_follower = "
-   	 "follower_supply_perception.leader_path_follower:main",
 	],
     },
 )
