@@ -4,16 +4,16 @@
 
 현재 상태는 **Stage 1 VERIFIED (2026-09-11)**,
 **Stage 2 IMPLEMENTED - HARDWARE VERIFICATION REQUIRED**, **Stage 3 VERIFIED
-(2026-09-12)**, **Stage 4 PASS (2026-09-14, raw-coordinate caveat)**다. Stage 3는 실제 Jetson + D435에서 사람 XYZ, 좌/우 X
+(2026-09-12)**, **Stage 4 PASS (2026-09-14, raw-coordinate caveat)**,
+**Stage 5 PASS (2026-09-18, RViz 수동 검증 완료)**다. Stage 3는 실제 Jetson + D435에서 사람 XYZ, 좌/우 X
 부호, distance/Z 일치, debug overlay, 다중 사람과 PoseArray를 확인했다. Stage 2의 별도 정식
 줄자 거리표 상태는 임의로 변경하지 않는다.
 
 ```text
 D435 RGB → YOLO person bbox ─┐
-D435 aligned depth ──────────┼→ distance → camera XYZ → map XYZ
-CameraInfo ──────────────────┘              → marker/중복 제거
-                                             → confirmation
-                                             → Mission Coordinator
+D435 aligned depth ──────────┼→ distance → camera XYZ → map XYZ → RViz marker (Stage 5)
+CameraInfo ──────────────────┘                          → association/registry (Stage 6 계획)
+                                                        → confirmation/mission (후속 계획)
 ```
 
 ## Stage 1 — RGB YOLO person bounding box
@@ -74,37 +74,41 @@ CameraInfo ──────────────────┘            
   VSLAM/EKF/nvblox 회귀를 실제 Jetson + D435에서 확인했다. A→B raw map 평균 변화 약
   0.115 m는 제한사항이며 이번 Stage에서 filtering하지 않았다.
 
-## Stage 5 — RViz marker + duplicate suppression
+## Stage 5 — RViz survivor visualization
+
+**현재 상태: PASS (2026-09-18, 수동 검증 완료)**
+
+- Purpose: 현재 map-frame 후보를 RViz의 nvblox 3D map 위에 표시한다.
+- Input: `/leader/survivor/map_positions` `PoseArray`.
+- Processing: 후보별 sphere/text, finite lifetime, 후보 수 감소 시 DELETE.
+- Output: `/leader/survivor/map_markers` `MarkerArray` 및 RViz `Survivors` display.
+- Completion: 한 사람/다중 후보, FOV 이탈·재진입, 통제된 2명→1명 감소,
+  VSLAM·dual EKF·nvblox 동시 실행을 실제 수동 검증했다.
+- Limit: `Survivor candidate N`은 frame-local 인덱스이며 영구 ID가 아니다.
+  공간 association, 중복 제거, 위치 평균/필터, registry와 저장은 미구현이다.
+
+## Stage 6 — Persistent Survivor ID + Spatial Deduplication + Position Stabilization
 
 **현재 상태: NOT IMPLEMENTED**
 
-- Purpose: map에서 후보를 표시하고 같은 생존자의 반복 관측을 병합한다.
-- Input: map-frame 후보 좌표와 confidence/관측 metadata.
-- Processing: 공간 gate 기반 association, 관측 누적, marker lifetime 관리.
-- Output: RViz Marker와 중복이 제거된 survivor candidate 목록.
-- Dependency: Stage 4 map XYZ와 association 정책.
-- Completion: 정지 생존자의 반복 관측이 한 후보로 유지되고 떨어진 사람은 분리된다.
-
-## Stage 6 — Confirmation and stabilization
-
-**현재 상태: NOT IMPLEMENTED**
-
-- Purpose: 일시적 오검출을 줄이고 안정된 후보만 confirmed 상태로 승격한다.
-- Input: 시간에 따른 survivor candidates.
-- Processing: 최소 관측 수/시간, timeout, confidence 및 위치 안정성 조건.
-- Output: confirmed/lost 상태와 안정화된 위치.
-- Dependency: Stage 5 candidate identity/association 결과.
-- Completion: 단발 검출은 확정되지 않고 지속 관측은 정의된 지연 내 확정된다.
+- Purpose: 같은 사람의 반복 map 관측을 한 persistent ID에 연결하고 위치를 안정화한다.
+- Input: Stage 4의 raw map detections와 시각·좌표 metadata.
+- Processing: spatial association, 새 사람 ID 발급, 기존 사람 위치 averaging/filtering,
+  persistent survivor registry 정책 설계.
+- Output: ID와 안정화된 위치를 가진 중복 제거 survivor 후보 목록(계획).
+- Dependency: Stage 4 map XYZ. Stage 5의 frame-local candidate 번호를 ID로 재사용하지 않는다.
+- Completion: 동일 사람 반복 관측과 서로 다른 사람을 구분하는 정책 및 실물 검증이 필요하다.
+  persistent storage/CSV·JSON 저장과 장기 mission-level tracking도 아직 미구현이다.
 
 ## Stage 7 — Mission Coordinator integration
 
 **현재 상태: NOT IMPLEMENTED**
 
 - Purpose: confirmed survivor를 로봇 임무 판단과 구호물품 전달 흐름에 연결한다.
-- Input: confirmed survivor 위치/ID/상태와 coordinator 상태.
+- Input: 향후 confirmation을 거친 survivor 위치/ID/상태와 coordinator 상태.
 - Processing: 인터페이스 계약, 중복 임무 방지, 취소·복구와 안전 gate.
 - Output: coordinator가 소비할 survivor event/target.
-- Dependency: Stage 6 confirmed interface와 mission state contract.
+- Dependency: Stage 6 registry와 후속 confirmation 정책, mission state contract.
 - Completion: simulation과 실기에서 한 후보가 한 번만 임무로 전환되고 실패를 복구한다.
 
 ## Stage 1에서 Stage 2로 전달된 계약
@@ -144,5 +148,5 @@ Stage 2는 `depth_logic.py`, Stage 3는 `geometry_logic.py`에 ROS-independent �
 
 Stage 4는 이 header를 사용해 camera optical XYZ를 측정 시점의 exact-timestamp TF2
 transform으로 map frame XYZ로 변환한다. map TF가 없거나 timestamp에 맞는 transform이
-없을 때 최신 transform이나 fake origin으로 대체하지 않는다. 다음 단계는 Stage 5
-RViz Marker와 map-coordinate visualization이다.
+없을 때 최신 transform이나 fake origin으로 대체하지 않는다. Stage 5 RViz
+Marker와 map-coordinate visualization은 완료됐으며 다음 단계는 Stage 6이다.

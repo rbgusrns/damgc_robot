@@ -12,7 +12,7 @@
 
 ## 현재 구현 상태
 
-2026년 9월 14일 기준으로 저장소와 실제 Jetson + D435 실행에서 확인되는 구현은 다음과 같습니다.
+2026년 9월 18일 기준으로 저장소와 실제 Jetson + D435 실행에서 확인되는 구현은 다음과 같습니다.
 
 - 리더: URDF/RViz 모델, D435 RGB·depth, RGB 보정, AprilTag 검출, 중앙 depth CSV 측정,
   exact-stamp TF2 기반 `base_link` pose·metric·상태, raw approach controller와
@@ -33,20 +33,111 @@
   속도 PID와 watchdog
 - 확인됨: STM32 wheel/IMU 수신, dual EKF·Visual SLAM·nvblox 동시 실행,
   정지·저속 이동 상태 dual EKF/VSLAM 안정성, Docker RViz의 카메라 및 3차원 mesh 표시
-- Survivor Stage 4 완료: exact detection timestamp TF2를 사용하는
-  `survivor_map_transform_node`, `/leader/survivor/map_positions`, `map` frame 출력,
-  TF 실패 시 skip 정책, 정지 및 실제 A→B 이동 검증 완료
+- Survivor Stage 5 완료: YOLO person detection, aligned depth 거리,
+  camera optical XYZ와 `/leader/survivor/camera_positions`, 원본 촬영 시각의
+  camera→map TF2와 `/leader/survivor/map_positions`, sphere/text RViz 표시 및
+  `/leader/survivor/map_markers` 검증 완료. D435 공유 상태에서 VSLAM·dual EKF·
+  nvblox·Survivor 동시 실행과 nvblox 3D map/marker 동시 표시를 수동 확인했다.
 - 진행 중: 저속 주행에서 EKF 안정성과 VSLAM tracking 장시간 검증
 - 아직 없음: Nav2, 그리퍼 연동, Mission Coordinator, 실물 리더–팔로워 협동 운반,
-  RViz Survivor Marker, ID tracking, 중복 제거와 map 위치 filtering. Survivor Stage 1~4는
-  실제 D435/Jetson에서 검증했으며, Stage 4 raw map stability에는 약 0.115 m의 A→B
-  변화가 있어 정밀 절대 위치 보장은 하지 않는다. 다음 survivor 개발 단계는 Stage 5
-  RViz Marker 및 map-coordinate visualization이다.
+  persistent Survivor ID, spatial deduplication, position stabilization,
+  survivor registry 및 영속 저장. `Survivor candidate N`은 현재 PoseArray 인덱스에
+  따른 임시 번호다. Stage 4 raw map stability에는 약 0.115 m의 A→B 변화가 있어
+  정밀 절대 위치 보장은 하지 않는다. 다음 생존자 개발은 Stage 6이다.
 
 Leader AprilTag pipeline은 guarded `/leader/cmd_vel`에서 I2C STM32 bridge와 motor까지
 통합되어 있습니다. Follower의 `/follower/safe_cmd_vel`은 아직 motor에 연결하지
 않았습니다. 실제 이동 전에는 hardware E-stop과 bridge watchdog을 별도로 확인해야
 합니다.
+
+## 생존자 인식·지도·RViz 파이프라인 — Stage 5 PASS
+
+공유 D435의 RGB와 aligned depth에서 YOLO가 사람을 검출하고 camera optical XYZ를
+계산합니다. 검출 영상의 원본 timestamp로 TF2 camera→map 변환을 수행한 뒤,
+RViz에 현재 후보의 sphere와 좌표 text를 표시합니다. 같은 D435의 infra1/infra2는
+VSLAM에, RGB/depth는 nvblox 3D mapping에 사용됩니다. Wheel odometry와 IMU는
+dual EKF를 거쳐 `map → odom → base_link` TF를 제공합니다.
+
+```text
+RGB + aligned depth + CameraInfo → YOLO → camera optical XYZ
+  → /leader/survivor/camera_positions
+  → exact-timestamp TF2 camera → map
+  → /leader/survivor/map_positions
+  → Survivor map visualizer → /leader/survivor/map_markers
+  → RViz sphere + text, nvblox 3D map과 동시 표시
+```
+
+실제 Jetson + D435 수동 검증에서 단일·다중 후보와 text 표시, nvblox mesh와
+marker의 동시 표시, 같은 timestamp의 map pose와 sphere 좌표 일치를 확인했습니다.
+사람이 FOV 밖으로 나간 뒤 marker가 finite lifetime 이후 사라지고, 재진입하면
+다시 생성되는 것을 확인했습니다. 통제된 2명→1명 감소에서는 이전 후보의
+sphere/text 제거도 확인했습니다. VSLAM, local/global EKF, nvblox와 세 survivor
+topic이 동시에 동작했습니다. 저장소의 marker 기본 lifetime은 `2.0 s`이며
+text 표시 Z offset은 `0.30 m`입니다. offset은 원본 map XYZ를 바꾸지 않습니다.
+
+`Survivor candidate 1/2`는 현재 `PoseArray` 인덱스에 따른 임시 번호입니다.
+검출 순서가 바뀌면 같은 사람의 번호도 바뀔 수 있습니다. Persistent Survivor ID,
+spatial deduplication, position stabilization, survivor registry, 영속 저장 및
+CSV/JSON 목록은 아직 구현되지 않았습니다. 다음 개발 단계는 **Stage 6 —
+Persistent Survivor ID + Spatial Deduplication + Position Stabilization**입니다.
+Stage 2의 aligned-depth 거리는 실제 파이프라인에서 확인됐지만, 별도 줄자 기준
+거리표 검증은 완료되지 않았습니다.
+
+재현하려면 다음 명령을 각각 별도 터미널에서 순서대로 실행합니다. 첫 실행기가
+D435, VSLAM, nvblox와 RViz를 시작하므로 카메라 실행기를 중복 기동하지 않습니다.
+
+```bash
+# Terminal 1 — VSLAM + nvblox + RViz
+cd ~/damgc_robot
+./scripts/run_vslam_mapping.sh
+
+# Terminal 2 — camera preprocessing
+cd ~/damgc_robot
+source /opt/ros/humble/setup.bash
+source install/local_setup.bash
+ros2 launch rescue_robot_bringup survivor_camera_processing.launch.py
+
+# Terminal 3 — YOLO detector
+cd ~/damgc_robot
+./scripts/run_survivor_detector.sh
+
+# Terminal 4 — camera XYZ → map XYZ
+cd ~/damgc_robot
+source /opt/ros/humble/setup.bash
+source install/local_setup.bash
+ros2 launch rescue_robot_survivor survivor_map_transform.launch.py
+
+# Terminal 5 — map marker visualizer
+cd ~/damgc_robot
+source /opt/ros/humble/setup.bash
+source install/local_setup.bash
+ros2 launch rescue_robot_survivor survivor_map_visualizer.launch.py
+```
+
+별도 ROS 환경 터미널에서 확인합니다.
+
+```bash
+cd ~/damgc_robot
+source /opt/ros/humble/setup.bash
+source install/local_setup.bash
+ros2 topic echo --once /leader/survivor/camera_positions
+ros2 topic echo --once /leader/survivor/map_positions
+ros2 topic echo --once /leader/survivor/map_markers
+ros2 topic info -v /leader/survivor/map_markers
+ros2 topic hz /visual_slam/tracking/odometry
+ros2 topic hz /leader/odometry/local
+ros2 topic hz /leader/odometry/global
+ros2 run tf2_ros tf2_echo map base_link
+ros2 topic info -v /nvblox_node/mesh
+ros2 service list | rg /nvblox_node/get_esdf_and_gradient
+```
+
+사람이 움직일 때 좌표를 비교하려면 각 topic을 별도 `echo --once`로 읽은 값을
+서로 짝짓지 말고, 동일한 원본 timestamp의 map pose와 marker를 비교합니다.
+현재 3D ESDF mode에서는 `/nvblox_node/static_esdf_pointcloud` 무출력을 실패로
+판정하지 않습니다. nvblox mesh, ESDF service와 RViz 3D map을 확인합니다.
+측정값과 전체 수동 검증 절차는 [Stage 5 validation](docs/SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE5_RVIZ_VISUALIZATION_VALIDATION.md)에
+기록했습니다.
 
 ## 빌드
 

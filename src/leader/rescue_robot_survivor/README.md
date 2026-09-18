@@ -7,8 +7,8 @@
 이 패키지는 생존자 인식을 담당하므로 모델 의존성, 실행 주기와 이후 depth 처리를 서로
 섞지 않도록 별도 패키지로 분리했다.
 
-**현재 상태: Stage 1·3 VERIFIED / Stage 4 PASS with raw-coordinate caveat
-(2026-09-14)**
+**현재 상태: Stage 1 VERIFIED / Stage 3 Camera XYZ VERIFIED /
+Stage 4 Map XYZ VERIFIED / Stage 5 RViz Visualization VERIFIED (PASS)**
 
 코드, package build와 자동 테스트를 완료했다. survivor 전용 Jetson Docker GPU runtime에서
 YOLO11n 추론을 수행하고 실제 D435 화면에서 1명, 2명, 3명 검출을 확인했다. 각 사람의
@@ -27,6 +27,15 @@ Stage 4는 `survivor_map_transform_node`에서 원본 detection timestamp의 TF2
 실패하면 최신 TF로 대체하지 않고 해당 메시지를 skip한다. 실제 Jetson + D435에서 정지
 상태와 고정된 사람의 A→B 저속 이동을 검증했다. Camera XYZ는 크게 변했고 map XYZ는
 같은 사람 주변에 유지됐지만 raw A→B map 평균 차이는 약 0.115 m였다.
+
+Stage 5는 `survivor_map_visualizer_node`가 map 후보를 sphere/text로 표시하고
+`/leader/survivor/map_markers`를 발행한다. 실제 RViz에서 단일·다중 후보,
+nvblox 3D mesh 공존, FOV 이탈 후 lifetime 삭제와 재진입, 통제된 2명→1명
+old marker 제거를 수동 검증했다. VSLAM·local/global EKF·nvblox·Survivor
+동시 실행도 확인했다. 상세 결과는
+[Stage 5 validation](../../../docs/SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE5_RVIZ_VISUALIZATION_VALIDATION.md)에
+기록했다. `Survivor candidate N`은 현재 PoseArray 인덱스 기반 임시 번호다.
+사람이 위치를 바꾸거나 검출 순서가 변하면 번호가 달라질 수 있다.
 
 ## Jetson GPU runtime
 
@@ -74,9 +83,10 @@ Orin `sm_87` 대상으로 build한다. check script는 CUDA NMS와 YOLO11n GPU i
 ByteTrack, BoT-SORT, DeepSORT, re-identification과 persistent ID는 구현하지 않는다.
 
 Stage 2 범위는 bounding box 중심 ROI의 median 거리까지다. Stage 3는 같은 ROI 중심 pixel과
-median Z, rectified RGB CameraInfo.P를 결합해 camera optical XYZ를 계산한다. TF2 map 변환,
-RViz 위치 marker, 중복 제거, survivor confirmation, Mission Coordinator, custom training과
-TensorRT 최적화는 포함되지 않는다.
+median Z, rectified RGB CameraInfo.P를 결합해 camera optical XYZ를 계산한다.
+이 절의 Stage 2/3 처리와 별도로 Stage 4 TF2 map 변환과 Stage 5 RViz marker가
+완료됐다. 중복 제거, persistent ID, 위치 filtering, registry, survivor confirmation,
+Mission Coordinator, custom training과 TensorRT 최적화는 현재 구현 범위에 없다.
 
 RGB, depth, aligned-depth를 포함한 D435 camera pipeline도 정상 기동 및 topic 발행을
 확인했다. Stage 2는 YOLO bounding box와 aligned depth를 결합해 중심 ROI의 유효 depth만
@@ -97,9 +107,12 @@ rescue_robot_survivor/
 │   ├── detection_logic.py       # person 필터, 좌표 보정, 정렬, drawing
 │   ├── depth_logic.py           # ROI, scale, filtering, median
 │   ├── geometry_logic.py        # P 검증, ROI 중심, camera deprojection
-│   └── person_detector_node.py  # ROS 구독/cache, YOLO/depth/XYZ, output
+│   ├── person_detector_node.py  # ROS 구독/cache, YOLO/depth/XYZ, output
+│   ├── survivor_map_transform_node.py # exact-time camera → map
+│   └── survivor_map_visualizer_node.py # map pose → sphere/text MarkerArray
 ├── launch/person_detector.launch.py
 ├── launch/survivor_map_transform.launch.py
+├── launch/survivor_map_visualizer.launch.py
 ├── config/person_detector.yaml
 ├── test/                        # 순수 로직과 launch/config 계약 테스트
 ├── docs/SURVIVOR_DEVELOPMENT_PLAN.md
@@ -112,9 +125,9 @@ rescue_robot_survivor/
 └── setup.cfg
 ```
 
-launch는 detector만 실행한다. RealSense camera를 시작하거나 기존 AprilTag launch를
-include하지 않는다. YAML 값은 launch argument의 기본값으로 읽히므로 config 수정과 실행
-시 override를 모두 지원한다.
+각 launch는 detector, map transform, visualizer를 각각 실행한다. RealSense camera를
+시작하거나 기존 AprilTag launch를 include하지 않는다. Detector YAML 값은 launch
+argument의 기본값으로 읽히므로 config 수정과 실행 시 override를 모두 지원한다.
 
 ## ROS 인터페이스와 파라미터
 
@@ -126,6 +139,7 @@ include하지 않는다. YAML 값은 launch argument의 기본값으로 읽히�
 | 출력 | `/leader/survivor/debug_image` | `sensor_msgs/msg/Image`, `bgr8` |
 | 출력 | `/leader/survivor/camera_positions` | `geometry_msgs/msg/PoseArray`, valid XYZ만 |
 | 출력 | `/leader/survivor/map_positions` | `geometry_msgs/msg/PoseArray`, map frame, exact input stamp |
+| 출력 | `/leader/survivor/map_markers` | `visualization_msgs/msg/MarkerArray`, sphere/text 및 DELETE |
 | `image_topic` | 위 입력 | 다른 RGB 토픽으로 변경 |
 | `debug_image_topic` | 위 출력 | debug 영상 토픽 변경 |
 | `model_name` | `yolo11n.pt` | 모델 이름 또는 로컬 weight 경로 |
@@ -145,6 +159,8 @@ include하지 않는다. YAML 값은 launch argument의 기본값으로 읽히�
 | `map_transform.output_topic` | `/leader/survivor/map_positions` | Stage 4 output |
 | `map_transform.target_frame` | `map` | map target frame |
 | `map_transform.tf_timeout_sec` | `0.2` | exact-time lookup timeout; fallback 없음 |
+| `map_visualizer.marker_lifetime_sec` | `2.0` | finite lifetime; 무입력 시 RViz에서 만료 |
+| `map_visualizer.text_z_offset` | `0.30` | text 표시 Z에만 적용, map XYZ 불변 |
 | `show_camera_xyz` | `true` | debug image XYZ 둘째 줄 표시 |
 
 image 입출력은 `BEST_EFFORT`, `VOLATILE`, `KEEP_LAST(1)`을 사용한다. CameraInfo는 실제
@@ -153,7 +169,8 @@ RealSense publisher와 호환되는 `RELIABLE`, `VOLATILE`, `KEEP_LAST(1)`, Pose
 
 ## Dependencies
 
-ROS 의존성은 `rclpy`, `sensor_msgs`, `geometry_msgs`, `cv_bridge`, `python3-opencv`, `python3-numpy`,
+ROS 의존성은 `rclpy`, `sensor_msgs`, `geometry_msgs`, `visualization_msgs`,
+`tf2_ros`, `tf2_geometry_msgs`, `cv_bridge`, `python3-opencv`, `python3-numpy`,
 `launch`, `launch_ros`다. 추론에는 별도로 PyTorch, torchvision과 Ultralytics가 필요하다.
 
 Jetson에서는 일반 PyPI torch/torchvision으로 기존 NVIDIA build를 교체하면 안 된다.
@@ -166,10 +183,9 @@ python3 -c "import torchvision; print(torchvision.__version__)"
 python3 -c "import ultralytics; print(ultralytics.__version__)"
 ```
 
-현재 조사 결과는 Python 3.10.12, JetPack 6.2.3/CUDA 12.6이며 세 AI 패키지는 모두
-미설치다. JetPack 6.2.3에 맞는 NVIDIA PyTorch/torchvision 조합을 먼저 준비한 다음,
-Ultralytics 설치가 이를 교체하지 않는지 확인해야 한다. 이 패키지의 build 과정은 AI
-패키지를 자동 설치하지 않는다.
+초기 host 조사에서는 Python 3.10.12, JetPack 6.2.3/CUDA 12.6 환경에 AI 패키지가
+미설치였다. 이후 위 survivor 전용 container 조합을 구성·검증했다. 이 패키지의
+build 과정은 AI 패키지를 자동 설치하지 않는다.
 
 설치 기준은 [NVIDIA PyTorch for Jetson 설치 문서](https://docs.nvidia.com/deeplearning/frameworks/install-pytorch-jetson-platform/index.html)와
 [Ultralytics Jetson 가이드](https://docs.ultralytics.com/guides/nvidia-jetson/)다. 확인 시점의
@@ -311,8 +327,62 @@ Stage 4는 완료됐으며 구현·실행·A/B 이동 검증 결과는
 [`Stage 4 validation`](../../../docs/SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE4_MAP_TRANSFORM_VALIDATION.md)에
 기록되어 있다.
 
-## Next Stage — Stage 5
+## Stage 5 — Map XYZ → RViz visualization
 
-다음 단계는 map-frame survivor 후보의 RViz Marker 및 map-coordinate visualization이다.
-이번 Stage에는 marker, ID tracking, 중복 제거, averaging/filtering, registry를 포함하지
-않았다.
+**RViz Visualization VERIFIED (Stage 5: PASS).** 현재 topic flow:
+
+```text
+/leader/camera/color/image_rect
++ /leader/camera/aligned_depth_to_color/image_raw
++ /leader/camera/color/camera_info
+        ↓
+Person Detector (YOLO + aligned depth + camera optical XYZ)
+        ↓
+/leader/survivor/camera_positions
+        ↓
+Survivor Map Transform (exact timestamp TF2)
+        ↓
+/leader/survivor/map_positions
+        ↓
+Survivor Map Visualizer
+        ↓
+/leader/survivor/map_markers
+        ↓
+RViz Survivors display + nvblox 3D map
+```
+
+Visualizer는 유효 pose마다 `SPHERE`와 `TEXT_VIEW_FACING` marker를 만들며,
+후보 수가 줄면 사라진 인덱스의 sphere/text에 `DELETE`를 보낸다. 입력이
+끊기면 기본 `2.0 s` finite lifetime으로 기존 marker가 만료된다.
+기본 `text_z_offset=0.30 m`는 text 표시 위치에만 적용된다. 가까운
+label은 겹칠 수 있고 text가 mesh 뒤에 있으면 가려질 수 있다.
+이 제한은 map XYZ 변환 결과에 영향을 주지 않는다.
+
+재현 실행 순서, 실제 측정값 및 최종 수동 검증 체크리스트는 위
+[Stage 5 validation](../../../docs/SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE5_RVIZ_VISUALIZATION_VALIDATION.md)을
+따른다. Stage 2의 별도 정식 줄자 거리표는 아직 남아 있다.
+
+## Next Stage — Stage 6
+
+**Persistent Survivor ID + Spatial Deduplication + Position Stabilization**은
+아직 미구현이다. Raw map detections를 spatial association으로 연결해
+같은 사람은 기존 ID와 위치 평균을 갱신하고 새 사람은 새 ID를 만드는
+survivor registry가 다음 개발 방향이다.
+
+```text
+Raw map detections
+        ↓
+Spatial association
+   ┌────┴────┐
+same person  new person
+   ↓             ↓
+update       new persistent ID
+   ↓             │
+position averaging
+   └──────┬──────┘
+          ↓
+Persistent Survivor Registry
+```
+
+동일 생존자 중복 제거, 장기 mission-level tracking, persistent storage 및
+CSV/JSON survivor list 저장도 현재 Stage 5에서는 구현되지 않았다.

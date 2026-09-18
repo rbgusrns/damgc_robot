@@ -3,8 +3,8 @@
 ## 문서 목적
 
 이 문서는 [개발 계획서](Plan.md)를 실행 상태로 변환한 관리 문서다. 최초 기준일은
-**2026년 7월 27일**이며, 현재 상태는 2026년 9월 14일까지 반영한다. AprilTag software
-pipeline, Survivor Stage 1~4 hardware verification과 Stage 2 구현 상태를 아래
+**2026년 7월 27일**이며, 현재 상태는 2026년 9월 18일까지 반영한다. AprilTag software
+pipeline, Survivor Stage 1·3·4·5 실기 검증과 Stage 2 구현 상태를 아래
 관련 행에 반영했다.
 
 상태 표시는 다음 기준을 사용한다.
@@ -28,7 +28,7 @@ pipeline, Survivor Stage 1~4 hardware verification과 Stage 2 구현 상태를 �
 | 그리퍼 물품 파지 | 확인 필요 | URDF 형상만 있고 제어 코드·실물 시험 근거 없음 |
 | 경량 물품 단독 운반 | 미구현 | 접근·파지·주행 연결 없음 |
 | 중량 물품 협동 운반 | 부분 완료 | 리더 DDS 상태·속도 게이트 구현, 팔로워 heartbeat/하드웨어 주행 시험 필요 |
-| 지도·생존자·로봇 상태 시각화 | 부분 완료 | RViz 3D map은 검증; Survivor Marker와 map-coordinate visualization은 Stage 5 |
+| 지도·생존자·로봇 상태 시각화 | 부분 완료 | RViz 3D map과 Stage 5 Survivor sphere/text marker 동시 표시는 검증; mission-level persistent registry/상태 표시는 미구현 |
 
 ## 현재 저장소에서 재현 가능한 범위
 
@@ -51,7 +51,10 @@ distance/Z 일치, debug XYZ, 다중 사람 pose, `camera_color_optical_frame`�
 TF lookup 실패 시 발행하지 않는 정책까지 실제 검증했다. 정지 255 valid pairs와 A→B
 약 0.351 m 이동에서 camera XYZ 변화 및 map XYZ의 생존자 주변 유지가 확인됐다. Stage 2의
 별도 정식 줄자 거리표와 Stage 4 raw map의 약 0.115 m A→B 변화는 제한사항으로 남아 있다.
-다음 survivor 단계는 Stage 5 RViz Marker와 map-coordinate visualization이다.
+Stage 5의 `/leader/survivor/map_markers`와 RViz sphere/text, nvblox mesh 동시
+표시, 통제된 2명→1명 marker 제거까지 수동 검증했다. 후보 번호는 현재 배열
+인덱스일 뿐 persistent ID가 아니다. 다음 survivor 단계는 Stage 6 persistent
+Survivor ID, spatial deduplication, position stabilization이다.
 
 ### 팔로워
 

@@ -8,9 +8,69 @@ spatial association, 중복 제거, 위치 평균·filter, registry를 넣지 �
 
 이 문서는 Phase A 사전 조사부터 Phase D 실물 검증까지의 누적 기록이다.
 Visualizer, MarkerArray topic 및 RViz Survivor display는 Phase B에서
-구현했고, Phase C와 Phase D에서 실제 Jetson/D435로 검증했다. **최종 Stage 5
-판정은 문서 끝의 PASS/FAIL 표를 기준으로 한다.** Stage 4의 exact-timestamp
+구현했고, Phase C와 Phase D에서 실제 Jetson/D435로 검증했다. 이후 운영자의
+RViz text 및 통제된 2→1 감소 수동 검증도 완료했다. **최종 Stage 5
+판정은 아래 최종 상태와 문서 끝의 판정표를 기준으로 한다.** Stage 4의 exact-timestamp
 camera→map 변환을 비롯한 보호 대상은 변경하지 않았다.
+
+## Stage 5 Final Status
+
+**Stage 5: PASS.** 실제 RViz 수동 검증까지 완료했다. 기존 Phase A~D의
+중간 판정과 수동 후속 항목은 당시 시점의 기록이며, 최종 판정은 이 절과
+문서 끝의 판정표다.
+
+## Final validated pipeline
+
+```text
+D435 (single RealSense owner)
+  ├─ infra1/infra2 ──> VSLAM
+  ├─ RGB + aligned depth ──> YOLO person detection
+  │                            └─> camera optical XYZ
+  │                                 └─> /leader/survivor/camera_positions
+  │                                      └─> exact timestamp TF2 camera -> map
+  │                                           └─> /leader/survivor/map_positions
+  │                                                └─> Survivor map visualizer
+  │                                                     └─> /leader/survivor/map_markers
+  │                                                          └─> RViz sphere + text
+  └─ RGB/depth ──> nvblox 3D mesh + ESDF service ──> RViz 3D map
+
+Wheel odometry + IMU ──> dual EKF ──> map -> odom -> base_link
+RViz: nvblox map + robot display + Survivor sphere + Survivor text
+```
+
+완료 범위는 YOLO person detection, aligned depth 거리, camera optical XYZ,
+`camera_positions`, 원본 촬영 시각 TF2 변환, `map_positions`, visualizer와
+`map_markers`, sphere/text marker, finite lifetime, 후보 감소 시 `DELETE`,
+입력 중단 시 lifetime 만료, 다중 후보 표시, nvblox 3D map 동시 표시,
+VSLAM·dual EKF·nvblox·Survivor 동시 실행 및 실물 수동 검증이다.
+현재 미구현 범위는 persistent Survivor ID, 동일 생존자 중복 제거,
+spatial association, 위치 averaging/filtering, survivor registry,
+persistent storage, CSV/JSON survivor list 저장과 장기 mission-level
+tracking이다. `Survivor candidate N`은 현재 PoseArray 인덱스 기반 임시
+번호이므로 사람의 위치나 검출 순서가 바뀌면 번호도 바뀔 수 있다.
+
+## Final manual validation results
+
+다음 PASS 중 기존 Phase C/D의 수치가 있는 것은 아래 실측 기록을 따른다.
+새로 완료된 운영자 화면 확인에는 측정하지 않은 시간·좌표·rate를 부여하지 않는다.
+
+- [PASS] 실제 RViz의 한 사람 sphere 및 text marker 표시
+- [PASS] nvblox 3D mesh와 Survivor marker/text 동시 표시
+- [PASS] 같은 stamp의 `map_positions`와 sphere marker 좌표 일치
+- [PASS] 실제 사람의 FOV 이탈 후 lifetime에 따른 sphere/text 제거와 재진입 시 재생성
+- [PASS] 두 명 이상의 candidate와 sphere/text 동시 표시 (3인 독립 실물 검증은 아님)
+- [PASS] 후보 수 감소 시 이전 sphere/text marker 제거; 통제된 2명→1명 수동 화면 확인 완료
+- [PASS] 복수 text 동시 표시 수동 확인; 가까운 label의 겹침은 UI 제한으로 유지
+- [PASS] VSLAM, local EKF, global EKF, nvblox 동시 실행 회귀 확인
+- [PASS] `/leader/survivor/camera_positions`, `/leader/survivor/map_positions`, `/leader/survivor/map_markers` 정상 발행
+
+RViz의 `TEXT_VIEW_FACING`은 mesh 뒤에서 depth test로 가려질 수 있고 가까운
+label끼리는 겹칠 수 있다. 저장소의 node와 launch 기본 `text_z_offset`은
+`0.30 m`이며, 다른 override 값을 사용했다는 기록은 없다. 화면 시점·사람
+간격 또는 해당 launch parameter 조정은 가독성을 개선할 수 있다.
+`text_z_offset`은 text marker의 표시 Z에만 적용되며 원본 map XYZ나
+sphere 위치는 바꾸지 않는다. 복수 text의 pixel 단위 가독성이나 mesh를
+통한 항상 보이는 표시까지 보장하는 기능은 구현하지 않았다.
 
 ## Phase A — 시작 상태와 보호 대상
 
@@ -324,7 +384,8 @@ reliable/volatile/keep-last 1을 기본으로 한다.
 예상 파일은 `rescue_robot_survivor/survivor_map_visualizer_node.py`,
 `launch/survivor_map_visualizer.launch.py`, unit test, package `setup.py`와
 `package.xml`의 필요한 entry point/의존성, `rviz/vslam_nvblox.rviz`,
-그리고 이 문서다. README 상태 표기는 **Stage 5 최종 PASS 후**에만 갱신한다.
+그리고 이 문서다. README 상태 표기는 Stage 5 최종 PASS 후 갱신하기로 한
+당시 지침이며, 최종 PASS에 따라 갱신했다.
 
 ## Phase A 판정과 다음 단계
 
@@ -338,9 +399,9 @@ reliable/volatile/keep-last 1을 기본으로 한다.
 | finite lifetime 및 stale 전략 | PASS: 기본 2.0초, 감소 시 DELETE + 무발행 시 lifetime |
 | 수정 예정 파일 | PASS: 상기 파일로 확정 |
 
-**Stage 5 Phase A: PASS.** 다음 Phase B는 visualizer 구현과 자동 테스트,
-RViz 설정 변경이다. 이번 PASS는 Stage 5 전체 PASS나 marker의 실제 RViz
-표시 검증을 의미하지 않는다.
+**Stage 5 Phase A: PASS (당시 중간 판정).** 이어진 Phase B에서 visualizer,
+자동 테스트와 RViz 설정을 구현했다. Phase A 단독으로는 marker 실물 표시를
+검증하지 않았으며, 후속 Phase C/D와 운영자 수동 검증으로 최종 PASS했다.
 
 ## Phase B — Survivor Map Visualizer 구현
 
@@ -543,9 +604,9 @@ survivor preprocessing 및 기존 launch에 diff가 없었다. 자동 commit/pus
 | RViz config | PASS: Survivors display 추가, Fixed Frame map 유지 |
 | 보호 대상 변경 | 없음 |
 
-**Stage 5 Phase B: PASS. `/goal 3` 진행 가능: YES.** 이는 구현과 단독
-ROS smoke의 판정이다. Stage 5 최종 PASS는 실제 Jetson의 mesh·marker 동시
-표시, 사람 이동과 FOV 이탈 후 만료, 기존 시스템 회귀를 확인한 후에만 한다.
+**Stage 5 Phase B: PASS (당시 중간 판정).** 이는 구현과 단독 ROS smoke의
+판정이다. 이후 Phase C/D에서 Jetson의 mesh·marker 동시 표시, 사람 이동,
+FOV 이탈 후 만료와 기존 시스템 회귀를 확인했다.
 
 ## Phase C — 정지 상태 실제 통합 검증
 
@@ -678,8 +739,8 @@ RViz removed the sphere and text. The clean post-loss screen is
 a new ADD pair, confirming reappearance (`frame_id=map`, stamp
 `1789730732.078159180`, IDs 0 and 1, lifetime 2 s).
 
-The controlled loss passed stale cleanup. A physical person walking out of the
-D435 FOV remains a manual operator follow-up.
+The controlled loss passed stale cleanup. The physical D435 FOV exit was
+subsequently completed in Phase D below.
 
 ### Regression and load observations
 
@@ -707,13 +768,13 @@ This is qualitative, not a performance benchmark.
 | marker reappearance | PASS: detector restart produced a new ADD pair |
 | VSLAM / EKF / TF | PASS: status Success, short rates, map→base_link |
 | survivor detector / map transform | PASS: real person debug image, pose and marker pair |
-| physical person FOV exit | NOT RUN in unattended test; operator follow-up required |
+| physical person FOV exit | Phase C 단독 실행에서는 미수행; 아래 Phase D에서 PASS |
 
-**Stage 5 Phase C: PASS with a documented physical-FOV limitation.** Stationary
-integrated marker display and downstream stale cleanup passed. The next Phase
-is robot/person movement plus an operator-assisted physical FOV test.
+**Stage 5 Phase C: PASS (당시 중간 판정).** Stationary integrated marker
+display and downstream stale cleanup passed. 당시 남았던 physical FOV test는
+Phase D에서 완료했다.
 
-## Phase D — 실제 이동 검증 및 수동 후속 항목
+## Phase D — 실제 이동 및 수동 검증 기록
 
 ### 실행 세션과 위치 A
 
@@ -759,8 +820,9 @@ detector 중심점 변동 가능성을 제한사항으로 남긴다.
 detector, map transform, visualizer, RViz가 존재했다. `map_markers`는
 `MarkerArray` publisher 1개 및 RViz subscriber 1개(reliable/volatile)였다.
 `/visual_slam/status`는 `vo_state: 1`, ESDF service는
-`/nvblox_node/get_esdf_and_gradient`로 확인했다. 이동 후 최종 회귀
-측정과 물리 FOV·다중 사람 검증은 별도로 수행해야 한다.
+`/nvblox_node/get_esdf_and_gradient`로 확인했다. 이 시점에는 이동 후
+회귀 측정과 물리 FOV·다중 사람 검증을 아직 수행하지 않았고, 이어진
+Phase D 후반에 완료했다.
 
 운영자에게 안내한 수동 이동 명령은 다음과 같다. 실행기의 방향키 teleop은
 20 Hz로 `/leader/cmd_vel`을 발행하므로 동시에 두 개를 실행하지 않는다.
@@ -795,8 +857,8 @@ positions 80개(비어 있지 않은 것 69개), map positions 68개, marker
 arrays 69개를 얻었다. `/visual_slam/status`는 `vo_state: 1`이었다.
 이 값은 짧은 구간 관찰이며 전체 경로 안정성의 장시간 보증은 아니다.
 
-물리 FOV 이탈·재진입, 다중 사람, candidate 감소와 최종 회귀 검증이
-끝나기 전에는 Stage 5 전체 PASS로 판정하지 않는다.
+이 시점에는 물리 FOV 이탈·재진입, 다중 사람, candidate 감소와 최종 회귀
+검증이 남아 있었다. 아래 후속 절과 최종 수동 검증에서 완료했다.
 
 ### 물리 FOV 이탈과 재진입
 
@@ -860,9 +922,8 @@ source install/local_setup.bash
 colcon test --packages-select rescue_robot_survivor --event-handlers console_direct+
 ```
 
-결과는 **53/53 PASS**(visualizer 신규 테스트 7개 포함)였다. 실물 다중
-사람 및 candidate 감소가 완료되지 않았다면 자동 테스트 결과만으로
-Stage 5 최종 PASS를 선언하지 않는다.
+결과는 **53/53 PASS**(visualizer 신규 테스트 7개 포함)였다. 이 자동
+테스트와 별개로 실물 다중 사람 및 candidate 감소는 아래 절에서 검증했다.
 
 다중 사람 관찰 후 최종 10초 read-only sample에서는 infra1 80건
 (`8.0 Hz`), infra2 76건(`7.6 Hz`), VSLAM tracking odometry 23건
@@ -915,9 +976,11 @@ RViz 화면 `/tmp/stage5_phase_d_multi_rviz_try.png`에는 nvblox 3D mesh와
 MarkerArray 메시지의 각 label과 좌표는 정상이며, 화면 확대/시점 변경이나
 후속 label collision avoidance가 필요한 알려진 UI 제한으로 기록한다.
 
-### 운영자 수동 후속 검증 — 2명 유지 → 1명 퇴장
+### 운영자 수동 검증 절차와 완료 결과 — 2명 유지 → 1명 퇴장
 
-운영자 요청으로 여기서 사람 이동 실험을 멈췄다. 최종 수동 확인 시에는
+Phase D 기록 당시에는 운영자 요청으로 사람 이동 실험을 멈췄다. 이후
+운영자가 통제된 2명→1명 감소 상황과 RViz 표시·text를 수동 확인했다.
+다음은 그때 안내한 재현 절차다. 최종 수동 확인 시에는
 로봇을 안전하게 정지시키고 두 사람의 몸이 D435 영상에서 서로 및
 책상·의자에 가려지지 않도록 간격을 둔다. RViz의 Fixed Frame `map`,
 `NvbloxMesh`, `Survivors`를 켜고 두 sphere 및 두 text가 동시에 보이는
@@ -964,11 +1027,12 @@ rclpy.shutdown()
 PY
 ```
 
-두 사람 구간은 `MAP ... candidates 2`, `MARKERS ADD 4`가 반복되고,
-한 사람 퇴장 후에는 `MAP ... candidates 1`, `MARKERS ADD 2 DELETE IDs
-[2, 3]`가 나타나야 한다. 3개 이상 검출됐다가 1개로 줄면 추가 IDs도
-DELETE된다. ROS 로그와 RViz 화면을 같이 확인해야 하며, 메시지 수만으로
-글자 가독성을 PASS 처리하지 않는다.
+두 사람 구간의 `MAP ... candidates 2`, `MARKERS ADD 4`와 한 사람 퇴장
+후 `MAP ... candidates 1`, `MARKERS ADD 2 DELETE IDs [2, 3]`는 확인용
+패턴이다. 3개 이상 검출됐다가 1개로 줄면 추가 IDs도 DELETE된다.
+기존 Phase D probe의 DELETE IDs 2/3 기록과 별도로, 운영자가 통제된
+2명→1명 화면 감소를 수동 검증했다. 이번 후속 검증의 새 수치 로그는
+기록되지 않았으므로 삭제 시각이나 빈도를 추정하지 않는다.
 
 ## 전체 architecture 및 실행 순서
 
@@ -985,6 +1049,8 @@ D435 single RealSense owner
                      map visualizer → MarkerArray ─┘
 STM32 wheel odometry + IMU → dual EKF → map→odom→base_link TF
 ```
+
+### Manual Validation Quick Reference
 
 실제 실행은 각 명령을 **별도 터미널**에서 수행한다. mapping 실행기가
 방향키 teleop과 단일 D435 owner를 포함하므로 다시 실행하거나 별도 teleop을
@@ -1033,6 +1099,8 @@ timeout 10 ros2 topic hz /visual_slam/tracking/odometry
 timeout 10 ros2 topic hz /leader/odometry/local
 timeout 10 ros2 topic hz /leader/odometry/global
 timeout 6 ros2 run tf2_ros tf2_echo map base_link
+ros2 topic info -v /nvblox_node/mesh
+ros2 service list | rg /nvblox_node/get_esdf_and_gradient
 ```
 
 `map_positions`와 marker의 **동일 stamp**를 짝지어 좌표를 비교해야 한다.
@@ -1041,7 +1109,10 @@ timeout 6 ros2 run tf2_ros tf2_echo map base_link
 동시 rclpy 구독에서 stamp를 key로 사용해 얻었다. RViz에서는
 `Survivors` MarkerArray display와 `NvbloxMesh`를 함께 켜고 Fixed Frame이
 `map`인지 확인한다. `static_esdf_pointcloud`는 현재 3D ESDF mode의
-필수 성공 조건이 아니다.
+필수 성공 조건이 아니다. 실제 ESDF 결과는 위 Phase C/D에 기록된
+`/nvblox_node/get_esdf_and_gradient` service 응답, mesh vertex 수신,
+RViz 3D map으로 확인한다. `static_esdf_pointcloud` 무출력을 실패로
+판정하지 않는다.
 
 ## 문제, 제한 및 다음 단계
 
@@ -1064,6 +1135,29 @@ timeout 6 ros2 run tf2_ros tf2_echo map base_link
   안정 위치 추정 및 registry를 설계한다. 현재 `personN` 또는
   `Survivor candidate N`을 영구 ID로 저장하면 안 된다.
 
+### Next Stage — Stage 6
+
+**Persistent Survivor ID + Spatial Deduplication + Position Stabilization**.
+현재 미구현이며, map raw detections를 공간적으로 연관시켜 같은 사람은
+registry의 기존 후보를 갱신하고 새로운 사람은 새 ID를 부여하는 방향이다.
+위치 averaging/filtering과 survivor registry, 영속 저장 및 CSV/JSON
+목록도 Stage 5의 완료 범위에 들어 있지 않다.
+
+```text
+Raw map detections
+        ↓
+Spatial association
+   ┌────┴────┐
+same person  new person
+   ↓             ↓
+update       new persistent ID
+   ↓             │
+position averaging
+   └──────┬──────┘
+          ↓
+Persistent Survivor Registry
+```
+
 ## 안전한 rollback
 
 현재 실행 중 문제를 만나면 visualizer launch 터미널만 `Ctrl+C`로
@@ -1075,7 +1169,7 @@ RealSense/VSLAM/EKF/nvblox/transform 구성에 손대지 않는다. 작업 파�
 선택적으로 되돌린다. 이 문서의 검증 과정에서는 `git reset --hard`,
 `git restore .`, `git checkout .` 또는 자동 commit/push를 실행하지 않았다.
 
-## Stage 5 최종 판정 (운영자 수동 검증 대기)
+## Stage 5 최종 판정
 
 | 조건 | 현재 증거와 판정 |
 | --- | --- |
@@ -1086,16 +1180,16 @@ RealSense/VSLAM/EKF/nvblox/transform 구성에 손대지 않는다. 작업 파�
 | 실제 FOV 이탈 및 stale 제거 | PASS: camera empty, map/marker 무출력, 5.033초 무갱신 RViz 화면에서 사라짐 |
 | 재진입 후 복구 | PASS: camera/map/marker 갱신 62/56/60건 |
 | 2인 동시 출력 | PASS: 실물 배치 후 60초간 stamp-matched map/marker 306쌍, 2명당 ADD 4개 |
-| 2인 RViz text 가독성 | **MANUAL FOLLOW-UP:** 복수 text 동시 표시를 봤으나 현재 시점에서 일부 겹침; 운영자가 시점/간격을 조절해 최종 판정 |
-| 2→1 old marker 정리 | PASS for observed DELETE IDs 2/3; 한 사람만 물리적으로 퇴장시키는 통제 실험은 운영자 요청으로 수동 후속 검증 |
+| 2인 RViz text 표시 | PASS: 복수 text 동시 표시 운영자 수동 확인 완료; 가까운 label 겹침과 mesh에 의한 가림 가능성은 UI 제한 |
+| 2→1 old marker 정리 | PASS: 기존 DELETE IDs 2/3 관찰 및 통제된 2명→1명 RViz 수동 확인 완료; 후속 측정 수치 없음 |
 | VSLAM / EKF / TF | PASS for short live sample: odometry 흐름, `vo_state:1`, TF 조회; EKF update-rate 경고는 아래 제한 참고 |
 | nvblox mesh / ESDF / RViz | PASS: mesh stream, service success, 3D 화면 |
 | Survivor detector / map transform | PASS: 실제 camera/map positions 및 stamp-matched pairs |
 | D435 single owner | PASS: `/leader/camera` 한 노드; 중복 매핑 실행 없음 |
 | 자동 테스트 | PASS: 53/53 |
-| 최종 문서와 README | 검증 문서 완료; README의 VERIFIED 표기는 최종 PASS 뒤 업데이트 |
+| 최종 문서와 README | PASS: Stage 5 PASS/VERIFIED 상태로 갱신 |
 
-**Stage 5 전체: 아직 최종 PASS 아님.** 운영자 요청에 따라 추가적인
-실물 다중 사람 조작은 멈췄다. UI text 가독성 및 통제된 한 사람 퇴장
-실험을 수동 후속 검증으로 남긴다. 이 결과가 확인되기 전에는 README에
-`RViz visualization VERIFIED`를 기록하지 않는다.
+**Stage 5: PASS.** 실제 RViz marker/text, nvblox 3D map 공존,
+FOV 이탈·재진입, 다중 후보, 통제된 2명→1명 제거 및 VSLAM·dual EKF·nvblox
+동시 실행에 대한 수동 후속 검증이 완료됐다. 남은 persistent ID,
+중복 제거, 위치 안정화와 registry는 Stage 6 개발 범위다.

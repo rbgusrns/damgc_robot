@@ -40,7 +40,7 @@ damgc_robot/
 │   │   ├── rescue_robot_description/   # URDF와 모델 표시 launch
 │   │   ├── rescue_robot_bringup/       # 리더 통합 실행 launch
 │   │   ├── rescue_robot_apriltag/      # CameraInfo QoS bridge, AprilTag 설정
-│   │   ├── rescue_robot_survivor/      # YOLO, 사람별 depth와 camera XYZ
+│   │   ├── rescue_robot_survivor/      # YOLO, depth, camera/map XYZ, RViz marker
 │   │   └── rescue_robot_tools/         # 센서 측정 도구
 │   ├── follower/
 │       ├── follower_alignment_msgs/    # atomic alignment command
@@ -56,8 +56,9 @@ damgc_robot/
 
 Visual SLAM·dual EKF·nvblox·STM32 bridge와 single-owner RealSense 기반 통합은 실제
 Jetson 실행 기록으로 확인했다. 사람 탐지 Stage 1, camera XYZ Stage 3, exact-timestamp
-map XYZ Stage 4도 D435에서 검증됐다. Nav2, 그리퍼와 Mission Coordinator는 아직 완료되지
-않았고, Stage 5의 Survivor Marker/visualization도 남아 있다. 새 패키지를 추가할 때는
+map XYZ Stage 4와 Survivor RViz marker Stage 5도 D435에서 검증됐다. Nav2,
+그리퍼와 Mission Coordinator, persistent Survivor ID/중복 제거는 아직 완료되지
+않았다. 새 패키지를 추가할 때는
 리더 전용, 팔로워 전용, 공통 인터페이스 중 소유 범위를 먼저 정합니다.
 
 ## 패키지 역할
@@ -67,7 +68,7 @@ map XYZ Stage 4도 D435에서 검증됐다. Nav2, 그리퍼와 Mission Coordinat
 | `rescue_robot_description` | `ament_cmake` | URDF, robot state publisher, RViz 표시 |
 | `rescue_robot_bringup` | `ament_cmake` | RealSense·image_proc·AprilTag 통합 launch |
 | `rescue_robot_apriltag` | `ament_cmake` | 리더 CameraInfo QoS 연결 보조와 AprilTag 설정 |
-| `rescue_robot_survivor` | `ament_python` | YOLO person, camera optical XYZ와 exact-timestamp map XYZ |
+| `rescue_robot_survivor` | `ament_python` | YOLO person, camera optical/map XYZ와 RViz sphere/text marker |
 | `rescue_robot_tools` | `ament_cmake` | Depth 영상을 CSV로 저장하는 측정 도구 |
 | `follower_alignment_msgs` | `ament_cmake` | Follower atomic pose/mode/state message |
 | `follower_supply_perception` | `ament_python` | 팔로워 AprilTag 상대 위치와 hybrid 접근 상태 판단 |
@@ -134,7 +135,9 @@ ros2 launch rescue_robot_bringup camera_apriltag.launch.py enable_depth:=false
   `/leader/survivor/camera_positions` PoseArray
 - 완료(범위 내): Stage 4 exact timestamp TF2 변환과
   `/leader/survivor/map_positions` (`frame_id=map`)
-- 미구현/미완료: RViz Survivor Marker, ID tracking, 중복 제거/filtering, Nav2, 그리퍼,
+- 완료(범위 내): Stage 5 RViz Survivor sphere/text와 `/leader/survivor/map_markers`;
+  nvblox 3D map 동시 표시 및 수동 검증 완료
+- 미구현/미완료: persistent Survivor ID, 공간 중복 제거/위치 filtering, registry, Nav2, 그리퍼,
   Mission Coordinator와 Orin 간 실물 협동 운반
 - `target_distance=0.15 m` 등 접근 파라미터는 초기 시험값이며 실제 그리퍼/TCP 기준으로 재검증해야 합니다.
 
@@ -152,7 +155,7 @@ ros2 launch rescue_robot_bringup camera_apriltag.launch.py enable_depth:=false
 1. 실제 센서 장착 기준 TF와 다중 로봇 frame 이름 고정
 2. wheel odometry·BNO055·`robot_localization` 연결
 3. 정적 지도 기반 리더 Nav2 목표점 이동
-4. Stage 5 map-coordinate Survivor Marker 및 visualization 구현
+4. Stage 6 persistent Survivor ID, spatial deduplication 및 position stabilization
 5. 팔로워 `/follower/cmd_vel`과 STM32 기본 구동
 6. 두 로봇 비상정지와 30분 전원·발열 시험
 
