@@ -315,6 +315,19 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /nvblox_node/mesh
       Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Survivors
+      Namespaces:
+        survivor_current: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /leader/survivor/map_markers
+      Value: true
     - Class: rviz_default_plugins/Image
       Enabled: true
       Max Value: 1

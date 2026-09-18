@@ -32,6 +32,8 @@ setup(
             "rescue_robot_survivor.person_detector_node:main",
             "survivor_map_transform_node = "
             "rescue_robot_survivor.survivor_map_transform_node:main",
+            "survivor_map_visualizer_node = "
+            "rescue_robot_survivor.survivor_map_visualizer_node:main",
         ],
     },
 )
