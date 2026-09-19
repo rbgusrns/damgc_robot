@@ -8,7 +8,9 @@
 섞지 않도록 별도 패키지로 분리했다.
 
 **현재 상태: Stage 1 VERIFIED / Stage 3 Camera XYZ VERIFIED /
-Stage 4 Map XYZ VERIFIED / Stage 5 RViz Visualization VERIFIED (PASS)**
+Stage 4 Map XYZ VERIFIED / Stage 5 RViz Visualization VERIFIED (PASS) /
+Stage 6 Persistent Survivor Registry VERIFIED (single-person + robot-motion verified;
+two-person physical validation excluded by user scope)**
 
 코드, package build와 자동 테스트를 완료했다. survivor 전용 Jetson Docker GPU runtime에서
 YOLO11n 추론을 수행하고 실제 D435 화면에서 1명, 2명, 3명 검출을 확인했다. 각 사람의
@@ -80,13 +82,15 @@ Orin `sm_87` 대상으로 build한다. check script는 CUDA NMS와 YOLO11n GPU i
 
 `person1`, `person2`는 **현재 프레임의 표시용 번호**다. tracking ID가 아니며 사람이
 움직이거나 서로 교차하거나 검출이 누락되면 다음 프레임에서 번호가 달라질 수 있다.
-ByteTrack, BoT-SORT, DeepSORT, re-identification과 persistent ID는 구현하지 않는다.
+ByteTrack, BoT-SORT, DeepSORT와 appearance re-identification은 구현하지 않는다. Persistent
+mission-runtime ID는 별도 Registry node가 map 좌표 spatial association으로 관리한다.
 
 Stage 2 범위는 bounding box 중심 ROI의 median 거리까지다. Stage 3는 같은 ROI 중심 pixel과
 median Z, rectified RGB CameraInfo.P를 결합해 camera optical XYZ를 계산한다.
 이 절의 Stage 2/3 처리와 별도로 Stage 4 TF2 map 변환과 Stage 5 RViz marker가
-완료됐다. 중복 제거, persistent ID, 위치 filtering, registry, survivor confirmation,
-Mission Coordinator, custom training과 TensorRT 최적화는 현재 구현 범위에 없다.
+완료됐다. Stage 6에서 spatial association 기반 persistent ID, 위치 filtering, registry와
+survivor confirmation을 추가했다. Mission Coordinator, custom training과 TensorRT
+최적화, process/map-session 외부 ID 저장은 현재 구현 범위에 없다.
 
 RGB, depth, aligned-depth를 포함한 D435 camera pipeline도 정상 기동 및 topic 발행을
 확인했다. Stage 2는 YOLO bounding box와 aligned depth를 결합해 중심 ROI의 유효 depth만
@@ -109,11 +113,15 @@ rescue_robot_survivor/
 │   ├── geometry_logic.py        # P 검증, ROI 중심, camera deprojection
 │   ├── person_detector_node.py  # ROS 구독/cache, YOLO/depth/XYZ, output
 │   ├── survivor_map_transform_node.py # exact-time camera → map
-│   └── survivor_map_visualizer_node.py # map pose → sphere/text MarkerArray
+│   ├── survivor_map_visualizer_node.py # map pose → sphere/text MarkerArray
+│   ├── survivor_registry_core.py      # ROS-independent association/lifecycle core
+│   ├── survivor_registry_node.py      # map_positions → typed tracks + reset
+│   └── survivor_registry_visualizer_node.py # tracks → persistent MarkerArray
 ├── launch/person_detector.launch.py
 ├── launch/survivor_map_transform.launch.py
 ├── launch/survivor_map_visualizer.launch.py
 ├── config/person_detector.yaml
+├── config/survivor_registry.yaml
 ├── test/                        # 순수 로직과 launch/config 계약 테스트
 ├── docs/SURVIVOR_DEVELOPMENT_PLAN.md
 ├── docs/STAGE1_PERSON_DETECTION_VALIDATION.md
@@ -124,6 +132,9 @@ rescue_robot_survivor/
 ├── setup.py
 └── setup.cfg
 ```
+
+Typed interfaces are provided by the sibling `rescue_robot_interfaces` package:
+`SurvivorTrack.msg` and `SurvivorTrackArray.msg`.
 
 각 launch는 detector, map transform, visualizer를 각각 실행한다. RealSense camera를
 시작하거나 기존 AprilTag launch를 include하지 않는다. Detector YAML 값은 launch
@@ -362,12 +373,11 @@ label은 겹칠 수 있고 text가 mesh 뒤에 있으면 가려질 수 있다.
 [Stage 5 validation](../../../docs/SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE5_RVIZ_VISUALIZATION_VALIDATION.md)을
 따른다. Stage 2의 별도 정식 줄자 거리표는 아직 남아 있다.
 
-## Next Stage — Stage 6
+## Stage 6 — Persistent Survivor Registry
 
-**Persistent Survivor ID + Spatial Deduplication + Position Stabilization**은
-아직 미구현이다. Raw map detections를 spatial association으로 연결해
-같은 사람은 기존 ID와 위치 평균을 갱신하고 새 사람은 새 ID를 만드는
-survivor registry가 다음 개발 방향이다.
+**Persistent Survivor ID + Spatial Deduplication + Position Stabilization**을 구현했다.
+Raw map detections를 spatial association으로 연결해 같은 사람은 기존 ID와 위치를
+갱신하고, 새 후보는 tentative confirmation 후 새 ID를 부여한다.
 
 ```text
 Raw map detections
@@ -384,5 +394,18 @@ position averaging
 Persistent Survivor Registry
 ```
 
-동일 생존자 중복 제거, 장기 mission-level tracking, persistent storage 및
-CSV/JSON survivor list 저장도 현재 Stage 5에서는 구현되지 않았다.
+구현 topic과 service:
+
+- `/leader/survivor/tracks` — `rescue_robot_interfaces/msg/SurvivorTrackArray`
+- `/leader/survivor/registry_markers` — persistent VISIBLE/LAST SEEN markers
+- `/leader/survivor/registry/reset` — `std_srvs/srv/Trigger`
+
+실제 단일 인물 confirmation, visible movement, FOV→LOST, same-ID reassociation, reset과
+수동 로봇 이동을 검증했다. 두 사람 physical validation은 후속으로 남아 있으며,
+process restart/map session 외부 ID 복원과 CSV/JSON 저장은 구현하지 않는다.
+
+## Next Stage
+
+다음 단계는 실제 환경별 `association_radius_m`/`reassociation_radius_m` 정확도 tuning,
+장시간 안정성 및 다중 인물 교차 조건 평가다. Appearance Re-ID, disk persistence와
+mission coordinator는 별도 후속 범위다.

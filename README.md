@@ -38,19 +38,24 @@
   camera→map TF2와 `/leader/survivor/map_positions`, sphere/text RViz 표시 및
   `/leader/survivor/map_markers` 검증 완료. D435 공유 상태에서 VSLAM·dual EKF·
   nvblox·Survivor 동시 실행과 nvblox 3D map/marker 동시 표시를 수동 확인했다.
+- Survivor Stage 6 Persistent Survivor Registry — VERIFIED: typed `SurvivorTrack` interfaces, spatial one-to-one
+  association, tentative→confirmed lifecycle, mission-runtime persistent ID, LOST/
+  reassociation, EMA stabilization, reset service와 Registry RViz marker를 추가했다.
+  단일 인물 lifecycle과 수동 로봇 이동을 검증했다. 사용자 요청으로 제외한 두 사람
+  물리 검증은 후속이다.
 - 진행 중: 저속 주행에서 EKF 안정성과 VSLAM tracking 장시간 검증
 - 아직 없음: Nav2, 그리퍼 연동, Mission Coordinator, 실물 리더–팔로워 협동 운반,
-  persistent Survivor ID, spatial deduplication, position stabilization,
-  survivor registry 및 영속 저장. `Survivor candidate N`은 현재 PoseArray 인덱스에
+  process/map-session 외부 영속 저장. `Survivor candidate N`은 현재 PoseArray 인덱스에
   따른 임시 번호다. Stage 4 raw map stability에는 약 0.115 m의 A→B 변화가 있어
-  정밀 절대 위치 보장은 하지 않는다. 다음 생존자 개발은 Stage 6이다.
+  정밀 절대 위치 보장은 하지 않는다. 다음 생존자 개발은 association parameter 정확도
+  검증과 장시간 안정성 평가다.
 
 Leader AprilTag pipeline은 guarded `/leader/cmd_vel`에서 I2C STM32 bridge와 motor까지
 통합되어 있습니다. Follower의 `/follower/safe_cmd_vel`은 아직 motor에 연결하지
 않았습니다. 실제 이동 전에는 hardware E-stop과 bridge watchdog을 별도로 확인해야
 합니다.
 
-## 생존자 인식·지도·RViz 파이프라인 — Stage 5 PASS
+## 생존자 인식·지도·RViz 파이프라인 — Stage 5 PASS / Stage 6 Persistent Survivor Registry VERIFIED
 
 공유 D435의 RGB와 aligned depth에서 YOLO가 사람을 검출하고 camera optical XYZ를
 계산합니다. 검출 영상의 원본 timestamp로 TF2 camera→map 변환을 수행한 뒤,
@@ -76,10 +81,19 @@ topic이 동시에 동작했습니다. 저장소의 marker 기본 lifetime은 `2
 text 표시 Z offset은 `0.30 m`입니다. offset은 원본 map XYZ를 바꾸지 않습니다.
 
 `Survivor candidate 1/2`는 현재 `PoseArray` 인덱스에 따른 임시 번호입니다.
-검출 순서가 바뀌면 같은 사람의 번호도 바뀔 수 있습니다. Persistent Survivor ID,
-spatial deduplication, position stabilization, survivor registry, 영속 저장 및
-CSV/JSON 목록은 아직 구현되지 않았습니다. 다음 개발 단계는 **Stage 6 —
-Persistent Survivor ID + Spatial Deduplication + Position Stabilization**입니다.
+Persistent Registry는 이 raw branch와 분리되어 다음 topic을 제공합니다.
+
+```text
+/leader/survivor/map_positions
+        ↓ survivor_registry_node
+/leader/survivor/tracks
+        ↓ survivor_registry_visualizer_node
+/leader/survivor/registry_markers
+```
+
+Stage 6는 단일 인물 confirmation, 이동, FOV→LOST, same-ID 재진입, reset과 수동
+로봇 이동을 검증했다. 두 사람 physical validation은 후속이며 process/map-session
+외부 영속 저장과 CSV/JSON 저장은 구현하지 않는다.
 Stage 2의 aligned-depth 거리는 실제 파이프라인에서 확인됐지만, 별도 줄자 기준
 거리표 검증은 완료되지 않았습니다.
 
@@ -112,6 +126,12 @@ cd ~/damgc_robot
 source /opt/ros/humble/setup.bash
 source install/local_setup.bash
 ros2 launch rescue_robot_survivor survivor_map_visualizer.launch.py
+
+# Terminal 6 — persistent Registry + Registry markers
+cd ~/damgc_robot
+source /opt/ros/humble/setup.bash
+source install/local_setup.bash
+ros2 launch rescue_robot_survivor survivor_registry.launch.py
 ```
 
 별도 ROS 환경 터미널에서 확인합니다.
@@ -124,6 +144,10 @@ ros2 topic echo --once /leader/survivor/camera_positions
 ros2 topic echo --once /leader/survivor/map_positions
 ros2 topic echo --once /leader/survivor/map_markers
 ros2 topic info -v /leader/survivor/map_markers
+ros2 topic echo --once /leader/survivor/tracks --qos-durability transient_local
+ros2 topic info -v /leader/survivor/tracks
+ros2 topic echo --once /leader/survivor/registry_markers --qos-durability transient_local
+ros2 service call /leader/survivor/registry/reset std_srvs/srv/Trigger "{}"
 ros2 topic hz /visual_slam/tracking/odometry
 ros2 topic hz /leader/odometry/local
 ros2 topic hz /leader/odometry/global

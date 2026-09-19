@@ -34,6 +34,10 @@ setup(
             "rescue_robot_survivor.survivor_map_transform_node:main",
             "survivor_map_visualizer_node = "
             "rescue_robot_survivor.survivor_map_visualizer_node:main",
+            "survivor_registry_node = "
+            "rescue_robot_survivor.survivor_registry_node:main",
+            "survivor_registry_visualizer_node = "
+            "rescue_robot_survivor.survivor_registry_visualizer_node:main",
         ],
     },
 )

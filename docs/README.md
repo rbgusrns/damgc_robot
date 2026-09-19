@@ -15,6 +15,7 @@
 8. [VSLAM 키보드 매핑 진행 기록](VSLAM_MAPPING_PROGRESS_2026-08-28.md) — 원클릭 실행, 방향키 주행, 영구 Docker 이미지와 실제 통합 검증
 9. [협동 이동 실행 가이드](COOPERATIVE_TRANSPORT_RUN_GUIDE.md) — 역할별 원클릭 실행, DDS heartbeat 확인과 fail-closed 주행 절차
 10. [Survivor Stage 4 map transform 검증](SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE4_MAP_TRANSFORM_VALIDATION.md) — exact timestamp TF2, `map_positions`, 정지·이동 및 회귀 검증
+11. [Survivor Stage 6 persistent registry 검증](SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE6_PERSISTENT_REGISTRY_VALIDATION.md) — typed tracks, spatial association, LOST/reassociation, reset 및 수동 이동 결과
 
 ## 문서 목록
 
@@ -22,7 +23,7 @@
 - [GitHub 등록 및 운영 기록](GITHUB_SETUP.md) — 저장소 연결과 안전한 변경 등록 절차
 - [Survivor Stage 3 구현](../src/leader/rescue_robot_survivor/docs/STAGE3_CAMERA_XYZ_IMPLEMENTATION.md) — CameraInfo.P 기반 camera optical XYZ 설계와 interface
 - [Survivor Stage 3 검증](../src/leader/rescue_robot_survivor/docs/STAGE3_CAMERA_XYZ_VALIDATION.md) — Docker/D435 실행 명령과 hardware test 표
-- [Survivor package README](../src/leader/rescue_robot_survivor/README.md) — Stage 1~4 현재 interface와 실행 방법
+- [Survivor package README](../src/leader/rescue_robot_survivor/README.md) — Stage 1~6 현재 interface와 실행 방법
 
 팔로워의 AprilTag 접근 상태 노드 상세 명세와 시험 기록은
 `src/follower/follower_supply_perception/docs/`에서 관리합니다.

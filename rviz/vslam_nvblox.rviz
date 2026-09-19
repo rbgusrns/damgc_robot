@@ -317,7 +317,7 @@ Visualization Manager:
       Value: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
-      Name: Survivors
+      Name: Survivor Raw
       Namespaces:
         survivor_current: true
       Topic:
@@ -327,6 +327,19 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /leader/survivor/map_markers
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Survivor Registry
+      Namespaces:
+        survivor_registry: true
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /leader/survivor/registry_markers
       Value: true
     - Class: rviz_default_plugins/Image
       Enabled: true
