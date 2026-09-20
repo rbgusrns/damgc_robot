@@ -74,13 +74,14 @@ def test_build_track_array_populates_every_typed_field():
     assert (track.last_seen.sec, track.last_seen.nanosec) == (4, 5)
 
 
-def make_harness(confirm_hits=1):
+def make_harness(confirm_min_hits=1):
     """Create a callback harness without starting a ROS graph."""
     now = Time(nanoseconds=10_100_000_000)
     return SimpleNamespace(
         _map_frame="map",
         _registry=SurvivorRegistry(RegistryConfig(
-            confirm_hits=confirm_hits
+            confirm_min_duration_sec=0.0,
+            confirm_min_hits=confirm_min_hits,
         )),
         _registry_lock=threading.Lock(),
         _publisher=Mock(),
@@ -120,7 +121,7 @@ def test_callback_skips_non_finite_pose_and_publishes_valid_track():
 def test_timer_marks_lost_and_keeps_publishing_snapshot():
     harness = make_harness()
     harness._registry.update((position := Position3D(1.0, 0.0, 0.5),),
-                             7_000_000_000)
+                             6_000_000_000)
     assert position.x == 1.0
 
     SurvivorRegistryNode._timer_callback(harness)
@@ -129,6 +130,20 @@ def test_timer_marks_lost_and_keeps_publishing_snapshot():
     assert track.id == 1
     assert track.status == SurvivorTrack.STATUS_LOST
     assert not track.visible
+
+
+def test_timer_expires_tentative_without_an_input_callback():
+    harness = make_harness()
+    harness._registry = SurvivorRegistry(RegistryConfig())
+    harness._registry.update((Position3D(1.0, 0.0, 0.5),),
+                             9_000_000_000)
+    assert harness._registry.tentative_count == 1
+
+    SurvivorRegistryNode._timer_callback(harness)
+
+    assert harness._registry.tentative_count == 0
+    published = harness._publisher.publish.call_args.args[0]
+    assert published.tracks == []
 
 
 def test_reset_publishes_empty_snapshot_and_restarts_id():

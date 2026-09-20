@@ -33,9 +33,10 @@ def test_yaml_has_complete_registry_defaults():
         "map_frame": "map",
         "association_radius_m": 0.50,
         "reassociation_radius_m": 0.75,
-        "confirm_hits": 3,
-        "tentative_timeout_sec": 2.0,
-        "visible_timeout_sec": 2.0,
+        "confirm_min_duration_sec": 2.0,
+        "confirm_min_hits": 4,
+        "tentative_max_gap_sec": 0.8,
+        "visible_timeout_sec": 4.0,
         "position_ema_alpha": 0.50,
         "registry_publish_hz": 2.0,
     }

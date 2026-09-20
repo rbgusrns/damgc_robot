@@ -31,7 +31,8 @@ def generate_launch_description():
     float_parameters = {
         "association_radius_m",
         "reassociation_radius_m",
-        "tentative_timeout_sec",
+        "confirm_min_duration_sec",
+        "tentative_max_gap_sec",
         "visible_timeout_sec",
         "position_ema_alpha",
         "registry_publish_hz",
@@ -67,7 +68,7 @@ def generate_launch_description():
                 ParameterValue(LaunchConfiguration(name), value_type=float)
                 if name in float_parameters else
                 ParameterValue(LaunchConfiguration(name), value_type=int)
-                if name == "confirm_hits" else
+                if name == "confirm_min_hits" else
                 LaunchConfiguration(name)
             )
             for name in defaults

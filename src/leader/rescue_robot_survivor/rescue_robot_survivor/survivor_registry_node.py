@@ -92,14 +92,17 @@ class SurvivorRegistryNode(Node):
             reassociation_radius_m=float(self.declare_parameter(
                 "reassociation_radius_m", 0.75
             ).value),
-            confirm_hits=int(self.declare_parameter(
-                "confirm_hits", 3
+            confirm_min_duration_sec=float(self.declare_parameter(
+                "confirm_min_duration_sec", 2.0
             ).value),
-            tentative_timeout_sec=float(self.declare_parameter(
-                "tentative_timeout_sec", 2.0
+            confirm_min_hits=int(self.declare_parameter(
+                "confirm_min_hits", 4
+            ).value),
+            tentative_max_gap_sec=float(self.declare_parameter(
+                "tentative_max_gap_sec", 0.8
             ).value),
             visible_timeout_sec=float(self.declare_parameter(
-                "visible_timeout_sec", 2.0
+                "visible_timeout_sec", 4.0
             ).value),
             position_ema_alpha=float(self.declare_parameter(
                 "position_ema_alpha", 0.50

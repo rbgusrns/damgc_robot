@@ -33,9 +33,10 @@ class RegistryConfig:
 
     association_radius_m: float = 0.50
     reassociation_radius_m: float = 0.75
-    confirm_hits: int = 3
-    tentative_timeout_sec: float = 2.0
-    visible_timeout_sec: float = 2.0
+    confirm_min_duration_sec: float = 2.0
+    confirm_min_hits: int = 4
+    tentative_max_gap_sec: float = 0.8
+    visible_timeout_sec: float = 4.0
     position_ema_alpha: float = 0.50
 
     def __post_init__(self) -> None:
@@ -43,17 +44,24 @@ class RegistryConfig:
         for name, value in (
             ("association_radius_m", self.association_radius_m),
             ("reassociation_radius_m", self.reassociation_radius_m),
-            ("tentative_timeout_sec", self.tentative_timeout_sec),
+            ("tentative_max_gap_sec", self.tentative_max_gap_sec),
             ("visible_timeout_sec", self.visible_timeout_sec),
         ):
             if not isfinite(value) or value <= 0.0:
                 raise ValueError(f"{name} must be finite and positive")
         if (
-            not isinstance(self.confirm_hits, int)
-            or isinstance(self.confirm_hits, bool)
-            or self.confirm_hits < 1
+            not isfinite(self.confirm_min_duration_sec)
+            or self.confirm_min_duration_sec < 0.0
         ):
-            raise ValueError("confirm_hits must be a positive integer")
+            raise ValueError(
+                "confirm_min_duration_sec must be finite and non-negative"
+            )
+        if (
+            not isinstance(self.confirm_min_hits, int)
+            or isinstance(self.confirm_min_hits, bool)
+            or self.confirm_min_hits < 1
+        ):
+            raise ValueError("confirm_min_hits must be a positive integer")
         if (
             not isfinite(self.position_ema_alpha)
             or not 0.0 < self.position_ema_alpha <= 1.0
@@ -208,11 +216,11 @@ class SurvivorRegistry:
         if not self._valid_timestamp(timestamp_ns):
             return False
         changed = False
-        tentative_timeout_ns = self._seconds_to_ns(
-            self._config.tentative_timeout_sec
+        tentative_max_gap_ns = self._seconds_to_ns(
+            self._config.tentative_max_gap_sec
         )
         for internal_id, track in tuple(self._tentative_tracks.items()):
-            if timestamp_ns - track.first_seen_ns > tentative_timeout_ns:
+            if timestamp_ns - track.last_seen_ns > tentative_max_gap_ns:
                 del self._tentative_tracks[internal_id]
                 changed = True
 
@@ -346,10 +354,17 @@ class SurvivorRegistry:
         )
 
     def _promote_confirmed(self) -> None:
+        minimum_duration_ns = self._seconds_to_ns(
+            self._config.confirm_min_duration_sec
+        )
         ready = sorted(
             (
                 track for track in self._tentative_tracks.values()
-                if track.hit_count >= self._config.confirm_hits
+                if (
+                    track.hit_count >= self._config.confirm_min_hits
+                    and track.last_seen_ns - track.first_seen_ns
+                    >= minimum_duration_ns
+                )
             ),
             key=lambda track: track.internal_id,
         )
