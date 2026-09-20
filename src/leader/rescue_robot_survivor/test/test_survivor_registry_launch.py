@@ -49,7 +49,7 @@ def test_yaml_has_complete_registry_defaults():
         "marker_namespace": "survivor_registry",
         "marker_scale": 0.20,
         "text_height": 0.18,
-        "text_z_offset": 0.30,
+        "text_z_offset": 1.0,
     }
 
 

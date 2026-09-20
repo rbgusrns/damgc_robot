@@ -16,6 +16,7 @@
 9. [협동 이동 실행 가이드](COOPERATIVE_TRANSPORT_RUN_GUIDE.md) — 역할별 원클릭 실행, DDS heartbeat 확인과 fail-closed 주행 절차
 10. [Survivor Stage 4 map transform 검증](SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE4_MAP_TRANSFORM_VALIDATION.md) — exact timestamp TF2, `map_positions`, 정지·이동 및 회귀 검증
 11. [Survivor Stage 6 persistent registry 검증](SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE6_PERSISTENT_REGISTRY_VALIDATION.md) — typed tracks, spatial association, LOST/reassociation, reset 및 수동 이동 결과
+12. [Survivor Stage 6.1 Registry 가시성 개선](SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE6_1_REGISTRY_VISUALIZATION_IMPROVEMENT.md) — text Z offset, VISIBLE/LOST 색상, persistent marker 자동 검증과 수동 확인 절차
 
 ## 문서 목록
 

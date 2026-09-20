@@ -94,12 +94,12 @@ def build_registry_marker_array(
             sphere.color.r = 1.0
             sphere.color.g = 0.35
             sphere.color.b = 0.10
-            sphere.color.a = 0.95
+            sphere.color.a = 1.0
         else:
-            sphere.color.r = 0.55
-            sphere.color.g = 0.55
-            sphere.color.b = 0.55
-            sphere.color.a = 0.45
+            sphere.color.r = 1.0
+            sphere.color.g = 0.85
+            sphere.color.b = 0.0
+            sphere.color.a = 1.0
         sphere.lifetime = infinite_lifetime
         result.markers.append(sphere)
 
@@ -114,10 +114,10 @@ def build_registry_marker_array(
         label.pose.position.z = position.z + text_z_offset
         label.pose.orientation.w = 1.0
         label.scale.z = text_height
-        label.color.r = 1.0 if visible else 0.75
-        label.color.g = 1.0 if visible else 0.75
-        label.color.b = 1.0 if visible else 0.75
-        label.color.a = 1.0 if visible else 0.70
+        label.color.r = 1.0
+        label.color.g = 1.0
+        label.color.b = 1.0
+        label.color.a = 1.0
         label.lifetime = infinite_lifetime
         label.text = (
             f"Survivor #{track.id}\n"
@@ -164,7 +164,7 @@ class SurvivorRegistryVisualizerNode(Node):
             "text_height", 0.18
         ).value)
         self._text_z_offset = float(self.declare_parameter(
-            "text_z_offset", 0.30
+            "text_z_offset", 1.0
         ).value)
         self._validate_parameters()
 

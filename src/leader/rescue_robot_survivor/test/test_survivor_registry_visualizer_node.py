@@ -58,7 +58,7 @@ def build(message, previous_ids=frozenset()):
         "survivor_registry",
         0.20,
         0.18,
-        0.30,
+        1.0,
     )
 
 
@@ -87,18 +87,20 @@ def test_visible_track_uses_filtered_position_id_xyz_and_status_text():
     assert (sphere.pose.position.x, sphere.pose.position.y,
             sphere.pose.position.z) == (2.53, -0.06, 0.51)
     assert (label.pose.position.x, label.pose.position.y,
-            label.pose.position.z) == (2.53, -0.06, 0.81)
+            label.pose.position.z) == (2.53, -0.06, 1.51)
     assert label.text == (
         "Survivor #1\nX: 2.53\nY: -0.06\nZ: 0.51\nVISIBLE"
     )
     assert sphere.pose.position.x != message.tracks[0].raw_position.x
-    assert sphere.color.a == 0.95
-    assert label.color.a == 1.0
+    assert (sphere.color.r, sphere.color.g,
+            sphere.color.b, sphere.color.a) == (1.0, 0.35, 0.10, 1.0)
+    assert (label.color.r, label.color.g,
+            label.color.b, label.color.a) == (1.0, 1.0, 1.0, 1.0)
     assert all((marker.lifetime.sec, marker.lifetime.nanosec) == (0, 0)
                for marker in markers.markers)
 
 
-def test_lost_track_remains_as_last_seen_with_dimmed_style():
+def test_lost_track_uses_last_position_yellow_sphere_and_white_text():
     message = make_array([
         make_track(
             4,
@@ -114,10 +116,18 @@ def test_lost_track_remains_as_last_seen_with_dimmed_style():
     assert ids == {4}
     assert invalid == 0
     assert (sphere.id, label.id) == (8, 9)
+    assert (sphere.pose.position.x, sphere.pose.position.y,
+            sphere.pose.position.z) == (1.0, 2.0, 0.5)
+    assert (label.pose.position.x, label.pose.position.y,
+            label.pose.position.z) == (1.0, 2.0, 1.5)
     assert "Survivor #4" in label.text
     assert label.text.endswith("LAST SEEN")
-    assert sphere.color.a == 0.45
-    assert label.color.a == 0.70
+    assert (sphere.color.r, sphere.color.g,
+            sphere.color.b, sphere.color.a) == (1.0, 0.85, 0.0, 1.0)
+    assert (label.color.r, label.color.g,
+            label.color.b, label.color.a) == (1.0, 1.0, 1.0, 1.0)
+    assert all((marker.lifetime.sec, marker.lifetime.nanosec) == (0, 0)
+               for marker in markers.markers)
     assert all(marker.action == Marker.ADD for marker in markers.markers)
 
 
@@ -149,12 +159,22 @@ def test_removed_track_gets_deterministic_sphere_and_text_deletes():
 
 def test_multiple_tracks_and_reordered_array_keep_id_based_markers():
     first = make_array([
-        make_track(2, (2.0, 0.0, 0.5)),
+        make_track(
+            2,
+            (2.0, 0.0, 0.5),
+            visible=False,
+            status=SurvivorTrack.STATUS_LOST,
+        ),
         make_track(1, (1.0, 0.0, 0.5)),
     ])
     second = make_array([
         make_track(1, (1.1, 0.0, 0.5)),
-        make_track(2, (2.1, 0.0, 0.5)),
+        make_track(
+            2,
+            (2.1, 0.0, 0.5),
+            visible=False,
+            status=SurvivorTrack.STATUS_LOST,
+        ),
     ])
 
     first_markers, first_ids, _ = build(first)
@@ -165,6 +185,20 @@ def test_multiple_tracks_and_reordered_array_keep_id_based_markers():
     assert [marker.id for marker in second_markers.markers] == [2, 3, 4, 5]
     assert all(marker.action == Marker.ADD
                for marker in second_markers.markers)
+    visible_sphere, visible_text, lost_sphere, lost_text = (
+        second_markers.markers
+    )
+    assert (visible_sphere.color.r, visible_sphere.color.g,
+            visible_sphere.color.b, visible_sphere.color.a) == (
+                1.0, 0.35, 0.10, 1.0
+            )
+    assert (lost_sphere.color.r, lost_sphere.color.g,
+            lost_sphere.color.b, lost_sphere.color.a) == (
+                1.0, 0.85, 0.0, 1.0
+            )
+    for label in (visible_text, lost_text):
+        assert (label.color.r, label.color.g,
+                label.color.b, label.color.a) == (1.0, 1.0, 1.0, 1.0)
 
 
 def test_invalid_id_status_position_and_duplicate_are_skipped():
@@ -192,7 +226,7 @@ def test_callback_updates_active_ids_and_rejects_wrong_frame():
         _marker_namespace="survivor_registry",
         _marker_scale=0.20,
         _text_height=0.18,
-        _text_z_offset=0.30,
+        _text_z_offset=1.0,
         _publisher=Mock(),
         _warn=Mock(),
     )
@@ -232,7 +266,7 @@ def test_invalid_parameters_are_rejected():
         _marker_namespace="survivor_registry",
         _marker_scale=0.20,
         _text_height=0.18,
-        _text_z_offset=0.30,
+        _text_z_offset=1.0,
     )
     for field, value in (
         ("_input_topic", ""),
