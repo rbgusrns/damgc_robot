@@ -62,7 +62,7 @@ def generate_launch_description():
                 "publish_tf": "true",
                 "tf_publish_rate": "30.0",
                 "rgb_camera.color_profile": "640x480x30",
-                "depth_module.depth_profile": "640x480x30",
+                "depth_module.depth_profile": "424x240x15",
             }.items(),
         ),
         Node(
