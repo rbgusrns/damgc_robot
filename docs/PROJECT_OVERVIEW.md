@@ -57,8 +57,9 @@ damgc_robot/
 Visual SLAM·dual EKF·nvblox·STM32 bridge와 single-owner RealSense 기반 통합은 실제
 Jetson 실행 기록으로 확인했다. 사람 탐지 Stage 1, camera XYZ Stage 3, exact-timestamp
 map XYZ Stage 4와 Survivor RViz marker Stage 5도 D435에서 검증됐다. Nav2,
-그리퍼와 Mission Coordinator, persistent Survivor ID/중복 제거는 아직 완료되지
-않았다. 새 패키지를 추가할 때는
+그리퍼와 Mission Coordinator는 아직 완료되지 않았다. Persistent Survivor ID와
+spatial 중복 제거는 Stage 6.1에서 실제 multi-person physical validation까지 완료했다.
+새 패키지를 추가할 때는
 리더 전용, 팔로워 전용, 공통 인터페이스 중 소유 범위를 먼저 정합니다.
 
 ## 패키지 역할
@@ -137,8 +138,9 @@ ros2 launch rescue_robot_bringup camera_apriltag.launch.py enable_depth:=false
   `/leader/survivor/map_positions` (`frame_id=map`)
 - 완료(범위 내): Stage 5 RViz Survivor sphere/text와 `/leader/survivor/map_markers`;
   nvblox 3D map 동시 표시 및 수동 검증 완료
-- 미구현/미완료: persistent Survivor ID, 공간 중복 제거/위치 filtering, registry, Nav2, 그리퍼,
-  Mission Coordinator와 Orin 간 실물 협동 운반
+- 완료(범위 내): Stage 6.1 persistent Survivor ID, 공간 one-to-one association/위치 filtering,
+  Registry lifecycle과 RViz VISIBLE/LOST visualization
+- 미구현/미완료: Nav2, 그리퍼, Mission Coordinator와 Orin 간 실물 협동 운반
 - `target_distance=0.15 m` 등 접근 파라미터는 초기 시험값이며 실제 그리퍼/TCP 기준으로 재검증해야 합니다.
 
 리더의 주요 확인 토픽은 `/leader/camera/color/image_rect`,

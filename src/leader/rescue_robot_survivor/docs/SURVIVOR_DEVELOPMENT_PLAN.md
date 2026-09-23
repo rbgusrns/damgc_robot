@@ -5,15 +5,16 @@
 현재 상태는 **Stage 1 VERIFIED (2026-09-11)**,
 **Stage 2 IMPLEMENTED - HARDWARE VERIFICATION REQUIRED**, **Stage 3 VERIFIED
 (2026-09-12)**, **Stage 4 PASS (2026-09-14, raw-coordinate caveat)**,
-**Stage 5 PASS (2026-09-18, RViz 수동 검증 완료)**다. Stage 3는 실제 Jetson + D435에서 사람 XYZ, 좌/우 X
+**Stage 5 PASS (2026-09-18, RViz 수동 검증 완료), Stage 6.1 VERIFIED (실제 multi-person
+physical validation 및 Registry RViz 검증 완료)**다. Stage 3는 실제 Jetson + D435에서 사람 XYZ, 좌/우 X
 부호, distance/Z 일치, debug overlay, 다중 사람과 PoseArray를 확인했다. Stage 2의 별도 정식
 줄자 거리표 상태는 임의로 변경하지 않는다.
 
 ```text
 D435 RGB → YOLO person bbox ─┐
 D435 aligned depth ──────────┼→ distance → camera XYZ → map XYZ → RViz marker (Stage 5)
-CameraInfo ──────────────────┘                          → association/registry (Stage 6 계획)
-                                                        → confirmation/mission (후속 계획)
+CameraInfo ──────────────────┘                          → association/registry (Stage 6.1 VERIFIED)
+                                                        → confirmation/mission lifecycle (Stage 6.1 VERIFIED)
 ```
 
 ## Stage 1 — RGB YOLO person bounding box

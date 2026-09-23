@@ -41,8 +41,10 @@
 - Survivor Stage 6 Persistent Survivor Registry — VERIFIED: typed `SurvivorTrack` interfaces, spatial one-to-one
   association, tentative→confirmed lifecycle, mission-runtime persistent ID, LOST/
   reassociation, EMA stabilization, reset service와 Registry RViz marker를 추가했다.
-  단일 인물 lifecycle과 수동 로봇 이동을 검증했다. 사용자 요청으로 제외한 두 사람
-  물리 검증은 후속이다.
+-  Stage 6.1 실제 수동 검증에서 여러 사람 distinct persistent ID, moving person same ID,
+  FOV→LOST, same-ID reassociation, yellow LAST SEEN marker, white status text와
+  Registry text Z+1.0 m를 확인했다. VSLAM·dual EKF·nvblox 위 RViz 표시까지
+  **VERIFIED**다.
 - 진행 중: 저속 주행에서 EKF 안정성과 VSLAM tracking 장시간 검증
 - 아직 없음: Nav2, 그리퍼 연동, Mission Coordinator, 실물 리더–팔로워 협동 운반,
   process/map-session 외부 영속 저장. `Survivor candidate N`은 현재 PoseArray 인덱스에
@@ -74,11 +76,14 @@ RGB + aligned depth + CameraInfo → YOLO → camera optical XYZ
 
 실제 Jetson + D435 수동 검증에서 단일·다중 후보와 text 표시, nvblox mesh와
 marker의 동시 표시, 같은 timestamp의 map pose와 sphere 좌표 일치를 확인했습니다.
-사람이 FOV 밖으로 나간 뒤 marker가 finite lifetime 이후 사라지고, 재진입하면
+Stage 5 Raw Visualizer는 사람 후보가 FOV 밖으로 나간 뒤 marker가 finite lifetime 이후 사라지고, 재진입하면
 다시 생성되는 것을 확인했습니다. 통제된 2명→1명 감소에서는 이전 후보의
 sphere/text 제거도 확인했습니다. VSLAM, local/global EKF, nvblox와 세 survivor
 topic이 동시에 동작했습니다. 저장소의 marker 기본 lifetime은 `2.0 s`이며
-text 표시 Z offset은 `0.30 m`입니다. offset은 원본 map XYZ를 바꾸지 않습니다.
+Raw Visualizer의 text 표시 Z offset은 `0.30 m`입니다. offset은 원본 map XYZ를 바꾸지
+않습니다. Stage 6 Registry Visualizer는 sphere를 filtered map position에 유지하고
+Registry text만 `1.0 m` 위에 표시하며, LOST는 노란색 불투명 sphere와 흰색 LAST SEEN
+text로 표시합니다. 두 visualizer branch는 서로 독립적입니다.
 
 `Survivor candidate 1/2`는 현재 `PoseArray` 인덱스에 따른 임시 번호입니다.
 Persistent Registry는 이 raw branch와 분리되어 다음 topic을 제공합니다.
@@ -91,48 +96,36 @@ Persistent Registry는 이 raw branch와 분리되어 다음 topic을 제공합�
 /leader/survivor/registry_markers
 ```
 
-Stage 6는 단일 인물 confirmation, 이동, FOV→LOST, same-ID 재진입, reset과 수동
-로봇 이동을 검증했다. 두 사람 physical validation은 후속이며 process/map-session
-외부 영속 저장과 CSV/JSON 저장은 구현하지 않는다.
+Stage 6.1은 temporal confirmation, 다중 인물 distinct ID, 이동 중 same-ID, FOV→LOST,
+마지막 위치 유지, same-ID 재진입과 Registry visualization을 실제 환경에서 검증했다.
+process/map-session 외부 영속 저장과 CSV/JSON 저장은 구현하지 않는다.
 Stage 2의 aligned-depth 거리는 실제 파이프라인에서 확인됐지만, 별도 줄자 기준
 거리표 검증은 완료되지 않았습니다.
 
-재현하려면 다음 명령을 각각 별도 터미널에서 순서대로 실행합니다. 첫 실행기가
-D435, VSLAM, nvblox와 RViz를 시작하므로 카메라 실행기를 중복 기동하지 않습니다.
+현재 공식 실행은 다음 3 terminal입니다. 첫 실행기가 D435, VSLAM, nvblox와
+RViz를 시작하므로 카메라 실행기를 중복 기동하지 않습니다. 새 통합 launch의
+3-terminal 정지 상태 동시 실행과 종료 격리는 확인했습니다. 실제 사람 관측 기반
+Stage 6.1 회귀는 아직 별도 검증이 필요합니다.
 
 ```bash
 # Terminal 1 — VSLAM + nvblox + RViz
 cd ~/damgc_robot
 ./scripts/run_vslam_mapping.sh
 
-# Terminal 2 — camera preprocessing
+# Terminal 2 — survivor ROS pipeline
 cd ~/damgc_robot
 source /opt/ros/humble/setup.bash
 source install/local_setup.bash
-ros2 launch rescue_robot_bringup survivor_camera_processing.launch.py
+ros2 launch rescue_robot_bringup survivor_pipeline.launch.py
 
 # Terminal 3 — YOLO detector
 cd ~/damgc_robot
 ./scripts/run_survivor_detector.sh
-
-# Terminal 4 — camera XYZ → map XYZ
-cd ~/damgc_robot
-source /opt/ros/humble/setup.bash
-source install/local_setup.bash
-ros2 launch rescue_robot_survivor survivor_map_transform.launch.py
-
-# Terminal 5 — map marker visualizer
-cd ~/damgc_robot
-source /opt/ros/humble/setup.bash
-source install/local_setup.bash
-ros2 launch rescue_robot_survivor survivor_map_visualizer.launch.py
-
-# Terminal 6 — persistent Registry + Registry markers
-cd ~/damgc_robot
-source /opt/ros/humble/setup.bash
-source install/local_setup.bash
-ros2 launch rescue_robot_survivor survivor_registry.launch.py
 ```
+
+Raw 후보 marker를 끄려면 Terminal 2 명령에 `enable_raw_visualizer:=false`를
+붙입니다. 전체 설계, 자동 검증 결과와 실물 검증 체크리스트는
+[통합 launch 검증 문서](docs/SURVIVOR_PIPELINE_INTEGRATED_LAUNCH_VALIDATION.md)에 있습니다.
 
 별도 ROS 환경 터미널에서 확인합니다.
 

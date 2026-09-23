@@ -18,6 +18,10 @@ if(BUILD_TESTING)
     test_leader_apriltag_drive_launch
     test/test_leader_apriltag_drive_launch.py
   )
+  ament_add_pytest_test(
+    test_survivor_pipeline_launch
+    test/test_survivor_pipeline_launch.py
+  )
 endif()
 
 ament_package()

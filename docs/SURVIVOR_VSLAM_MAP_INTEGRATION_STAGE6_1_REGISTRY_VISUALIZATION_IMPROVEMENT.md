@@ -1,6 +1,6 @@
 # Stage 6.1 Survivor Registry RViz 가시성 개선
 
-> 상태: **구현 및 자동 검증 완료, 실제 RViz 수동 검증 미실행**  
+> 상태: **구현 / 자동 검증 / 실제 RViz 수동 검증 완료 — VERIFIED / PASS**
 > 시작 commit: `6b3ef7a351022cfaed9ef7d8989a4280b8aa4d96`
 
 ## 1. 작업 개요
@@ -233,7 +233,8 @@ ros2 param get /leader/survivor_registry_visualizer text_z_offset
 - text가 흰색이며 sphere보다 1.0 m 위인지 확인
 - ID/XYZ/VISIBLE과 mesh occlusion 개선 여부 확인
 
-상태: **NOT RUN**.
+상태: **PASS**. 실제 position sphere, VISIBLE 색상, 흰색 text, Z+1.0 m 및 mesh 겹침
+개선을 확인했다.
 
 ## 17. Manual Test B — LOST
 
@@ -242,7 +243,8 @@ ros2 param get /leader/survivor_registry_visualizer text_z_offset
 - white LAST SEEN text와 alpha 1.0 확인
 - text가 마지막 위치보다 1.0 m 위인지 확인
 
-상태: **NOT RUN**.
+상태: **PASS**. 마지막 filtered position의 노란색 불투명 sphere와 흰색 LAST SEEN text를
+확인했다.
 
 ## 18. Manual Test C — Re-entry
 
@@ -251,42 +253,50 @@ ros2 param get /leader/survivor_registry_visualizer text_z_offset
 - text는 계속 white인지 확인
 - LAST SEEN이 VISIBLE로 바뀌고 position update가 재개되는지 확인
 
-상태: **NOT RUN**.
+상태: **PASS**. same persistent ID, VISIBLE 복귀, 색상·상태 text 복귀 및 position update를
+확인했다.
 
 ## 19. Manual Test D — VISIBLE + LOST 동시 표시
 
 VISIBLE은 red/orange sphere, LOST는 yellow sphere로 즉시 구분되고 두 text는 모두 white인지
 확인한다.
 
-상태: **NOT RUN**.
+상태: **PASS**. VISIBLE과 LOST marker를 동시에 구분해 확인했다.
 
 ## 20. 수동 검증 체크리스트
 
-- [ ] VISIBLE sphere 실제 위치 유지
-- [ ] VISIBLE sphere red/orange, alpha 1.0
-- [ ] VISIBLE text white, alpha 1.0, Z+1.0 m
-- [ ] text mesh occlusion 개선
-- [ ] LOST sphere 마지막 위치 유지
-- [ ] LOST sphere yellow, alpha 1.0
-- [ ] LOST text white, alpha 1.0, Z+1.0 m
-- [ ] LAST SEEN 문구 정상
-- [ ] 재진입 시 same ID와 visible 색상 복귀
-- [ ] filtered_position 자체 변경 없음
-- [ ] Registry tracking/temporal logic regression 없음
+- [x] VISIBLE sphere 실제 위치 유지
+- [x] VISIBLE sphere red/orange, alpha 1.0
+- [x] VISIBLE text white, alpha 1.0, Z+1.0 m
+- [x] text mesh occlusion 개선
+- [x] LOST sphere 마지막 위치 유지
+- [x] LOST sphere yellow, alpha 1.0
+- [x] LOST text white, alpha 1.0, Z+1.0 m
+- [x] LAST SEEN 문구 정상
+- [x] 재진입 시 same ID와 visible 색상 복귀
+- [x] filtered_position 자체 변경 없음
+- [x] Registry tracking/temporal logic regression 없음
 
 확인하지 않은 항목은 PASS로 기록하지 않는다.
 
 ## 21. 남은 제한
 
-1.0 m offset이 모든 camera angle과 mesh 높이에서 최적인지는 실제 RViz 검증이 필요하다.
+1.0 m offset이 모든 camera angle과 mesh 높이에서 최적인지는 추가 정량 평가 대상이다.
 White text는 밝은 배경과 겹칠 수 있다. 이번 단계에서는 background panel, line marker,
 outline 또는 상태별 text 색상을 추가하지 않았다.
 
 ## 22. 판정
 
-코드, build, launch default 및 자동 테스트 기준으로 Registry Visualization Improvement는
-**PASS**다. 실제 VISIBLE/LOST/re-entry 렌더링과 mesh occlusion 개선은 아직 수행하지
-않았으므로 hardware/RViz 최종 판정은 **NOT RUN**이다.
+코드, build, launch default, 자동 테스트 및 실제 RViz VISIBLE/LOST/re-entry 렌더링
+확인 기준으로 Registry Visualization Improvement는 **VERIFIED / PASS**다.
+
+## 23. 최종 수동 검증 결과
+
+실제 RViz에서 sphere는 filtered map position에 유지되고 text만 Z축 +1.0 m 위에 표시되었다.
+text와 nvblox mesh의 겹침이 개선되었으며, VISIBLE과 LOST text는 모두 흰색이었다. LOST
+sphere는 RGBA `(1.0, 0.85, 0.0, 1.0)` 노란색 불투명 marker로 표시되어 마지막 위치를
+명확하게 확인할 수 있었다. 재등장 시 같은 persistent ID, VISIBLE 색상 및 VISIBLE text로
+복귀하고 position update가 재개되었다.
 
 ## 23. Rollback 및 Git
 

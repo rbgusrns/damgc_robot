@@ -9,8 +9,12 @@ Stage 6의 최종 목적은 현재 frame의 raw survivor candidate 표시를 보
 Typed interface, Registry core/node, reset service와 persistent marker 경로를 구현했고,
 실제 Jetson/D435에서 단일 인물 confirmation, 지속 관측, 이동, FOV 이탈→LOST,
 LAST SEEN marker, same-ID 재연결, reset과 로봇 수동 이동을 검증했다. 현재 상태는
-`PHASE A/B/C/D + PHASE E(robot movement) PASS`다. PHASE E(two-person physical)는
-사용자 요청으로 이번 검증 범위에서 제외한다.
+`PHASE A/B/C/D + PHASE E(robot movement) PASS`다. 이 문서에서 PHASE E(two-person physical)가
+제외되어 있던 것은 당시 Stage 6 검증 범위의 역사적 기록이다. 후속 Stage 6.1 physical
+validation에서 multi-person distinct-ID, moving same-ID, FOV→LOST와 same-ID reassociation,
+Registry visualization을 추가로 검증했다. 자세한 최종 결과는
+[Stage 6.1 Registry 안정성 검증](SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE6_1_REGISTRY_ROBUSTNESS_VALIDATION.md)과
+[Stage 6.1 가시성 개선](SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE6_1_REGISTRY_VISUALIZATION_IMPROVEMENT.md)을 참조한다.
 
 여기서 persistent ID는 얼굴 인식이나 appearance Re-ID가 아니다. 동일인 판단은
 map XY spatial association을 사용하며 한 process/mapping session 안에서만 유효하다.

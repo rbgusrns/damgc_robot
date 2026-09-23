@@ -9,8 +9,8 @@
 
 **현재 상태: Stage 1 VERIFIED / Stage 3 Camera XYZ VERIFIED /
 Stage 4 Map XYZ VERIFIED / Stage 5 RViz Visualization VERIFIED (PASS) /
-Stage 6 Persistent Survivor Registry VERIFIED (single-person + robot-motion verified;
-two-person physical validation excluded by user scope)**
+Stage 6 Persistent Survivor Registry VERIFIED /
+Stage 6.1 Registry Robustness + Visualization VERIFIED (실제 multi-person physical validation 포함)**
 
 코드, package build와 자동 테스트를 완료했다. survivor 전용 Jetson Docker GPU runtime에서
 YOLO11n 추론을 수행하고 실제 D435 화면에서 1명, 2명, 3명 검출을 확인했다. 각 사람의
@@ -400,12 +400,15 @@ Persistent Survivor Registry
 - `/leader/survivor/registry_markers` — persistent VISIBLE/LAST SEEN markers
 - `/leader/survivor/registry/reset` — `std_srvs/srv/Trigger`
 
-실제 단일 인물 confirmation, visible movement, FOV→LOST, same-ID reassociation, reset과
-수동 로봇 이동을 검증했다. 두 사람 physical validation은 후속으로 남아 있으며,
-process restart/map session 외부 ID 복원과 CSV/JSON 저장은 구현하지 않는다.
+Stage 6.1에서 여러 사람의 distinct persistent ID, moving survivor same-ID 유지,
+FOV→LOST, 마지막 위치와 yellow LAST SEEN marker, same-ID reassociation 및 Registry
+visualization을 실제 Jetson + D435 + VSLAM + nvblox + RViz에서 검증했다. process
+restart/map session 외부 ID 복원과 CSV/JSON 저장은 구현하지 않는다.
 
 ## Next Stage
 
-다음 단계는 실제 환경별 `association_radius_m`/`reassociation_radius_m` 정확도 tuning,
-장시간 안정성 및 다중 인물 교차 조건 평가다. Appearance Re-ID, disk persistence와
-mission coordinator는 별도 후속 범위다.
+다음 단계는 optional hardening 및 정량 검증이다. absolute survivor localization accuracy,
+association threshold tuning, 장시간 안정성, close crossing/occlusion stress test와
+CPU/GPU/runtime performance logging을 검토한다. Appearance Re-ID, disk persistence와
+Mission Coordinator는 별도 후속 범위이며, spatial association 한계가 stress test에서
+실제로 문제가 될 때 선택적으로 도입한다.

@@ -15,8 +15,10 @@
 8. [VSLAM 키보드 매핑 진행 기록](VSLAM_MAPPING_PROGRESS_2026-08-28.md) — 원클릭 실행, 방향키 주행, 영구 Docker 이미지와 실제 통합 검증
 9. [협동 이동 실행 가이드](COOPERATIVE_TRANSPORT_RUN_GUIDE.md) — 역할별 원클릭 실행, DDS heartbeat 확인과 fail-closed 주행 절차
 10. [Survivor Stage 4 map transform 검증](SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE4_MAP_TRANSFORM_VALIDATION.md) — exact timestamp TF2, `map_positions`, 정지·이동 및 회귀 검증
-11. [Survivor Stage 6 persistent registry 검증](SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE6_PERSISTENT_REGISTRY_VALIDATION.md) — typed tracks, spatial association, LOST/reassociation, reset 및 수동 이동 결과
-12. [Survivor Stage 6.1 Registry 가시성 개선](SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE6_1_REGISTRY_VISUALIZATION_IMPROVEMENT.md) — text Z offset, VISIBLE/LOST 색상, persistent marker 자동 검증과 수동 확인 절차
+11. [Survivor Stage 6 persistent registry 검증](SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE6_PERSISTENT_REGISTRY_VALIDATION.md) — 당시 Stage 6 구현·단일 인물 검증의 역사적 기록
+12. [Survivor Stage 6.1 Registry 안정성 검증](SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE6_1_REGISTRY_ROBUSTNESS_VALIDATION.md) — temporal policy, multi-person physical validation, LOST/reassociation 최종 결과
+13. [Survivor Stage 6.1 Registry 가시성 개선](SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE6_1_REGISTRY_VISUALIZATION_IMPROVEMENT.md) — text Z offset, VISIBLE/LOST 색상, persistent marker 자동·수동 검증
+14. [Survivor Pipeline 통합 launch 개발·검증](SURVIVOR_PIPELINE_INTEGRATED_LAUNCH_VALIDATION.md) — 3-terminal 실행, ownership, 자동 검증과 실물 회귀 체크리스트
 
 ## 문서 목록
 

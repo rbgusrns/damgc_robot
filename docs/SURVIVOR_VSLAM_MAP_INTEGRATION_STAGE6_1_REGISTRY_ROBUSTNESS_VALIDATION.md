@@ -1,7 +1,7 @@
 # 생존자 VSLAM 지도 통합 — Stage 6.1 Registry 안정성 검증
 
-> 상태: **PHASE C — 시간 정책 자동 검증 및 전체 회귀 검증 완료**  
-> 수정 후 실물 검증은 아직 시작하지 않았다.  
+> 상태: **Stage 6.1 — VERIFIED / PASS**
+> 시간 정책 자동 검증, 전체 회귀 검증 및 실제 Jetson + RealSense D435 수동 검증 완료.
 > 기준 commit: `9a71d99191a9f23e887a176ac76730953a2814f6`
 
 ## Stage 6.1이 필요했던 이유
@@ -34,9 +34,9 @@ track merge, appearance Re-ID, ByteTrack, BoT-SORT는 이번 단계에서 즉시
 Stage 6.1에서는 `association_radius_m=0.50`, `reassociation_radius_m=0.75`,
 `position_ema_alpha=0.50`을 유지하고 시간 정책 변경 효과만 분리해 확인한다.
 
-이 문서에서는 아직 어떤 Stage 6.1 구현 또는 검증 결과도 PASS로 기록하지 않는다.
 위의 짧은 false positive 현상과 정지한 두 사람 및 이동 로봇 재테스트는 문제와 해결 범위를
-정의하기 위한 수정 전 관측 결과다.
+정의하기 위한 수정 전 관측 결과다. Stage 6.1 수정 후 최종 실물 검증 결과는 아래 physical
+validation 절에 기록한다.
 
 ## Phase A 저장소 기준 상태
 
@@ -507,7 +507,7 @@ Raw map detection을 spatially association하고 Tentative를 3-hit 후 Confirme
 ## 13. 재테스트에서 0.50/0.75 m association이 정상적으로 ID를 유지한 결과
 
 두 사람 모두 기존 ID를 유지했고 새 ID로 잘못 분리되지 않았다. 이 결과는 수정 전 물리
-관찰이며 Stage 6.1 후속 물리 회귀 test는 아직 실행하지 않았다.
+관찰이다. 최종 Stage 6.1 수정 후 physical validation 결과는 49절에 별도로 기록했다.
 
 ## 14. 따라서 association radius를 우선 유지하기로 한 이유
 
@@ -592,14 +592,13 @@ association radius는 0.50/0.75 m, EMA alpha는 0.50으로 유지했다.
 
 | 문제 | 실제 관찰 | 원인 | 해결 | 자동 검증 | 물리 검증 상태 |
 | --- | --- | --- | --- | --- | --- |
-| 약 1초 동안 발생한 의자 false positive가 persistent Survivor ID로 등록됨 | 의자 등의 사물이 짧게 person으로 오검출되어도 3-hit를 만족하면 ID와 marker가 Registry에 계속 남았음 | 기존에는 `confirm_hits=3`만 확인하고 관측 duration을 검사하지 않았음 | `confirm_min_duration_sec=2.0`과 `confirm_min_hits=4`를 AND 조건으로 적용 | TEST A PASS: 0.9초 안에 4-hit가 발생해도 Confirmed Survivor가 생성되지 않음. TEST B/C에서 duration과 hit가 모두 필요함을 추가 확인 | **NOT RUN** — 자연스러운 physical false positive가 재현되면 확인하며, 강제로 위험하거나 비현실적인 환경을 만들지 않음 |
-| Tentative continuity의 의미가 불명확하고 오래된 관측이 이어질 가능성 | 기존 timeout은 마지막 정상 detection 이후의 공백이 아니라 Tentative가 처음 생성된 시점부터의 전체 lifetime을 제한했음 | `tentative_timeout_sec`가 `first_seen` 기준으로 구현되어 detection continuity와 다른 의미였음 | `tentative_max_gap_sec=0.8`로 migration하고 `now - last_seen > tentative_max_gap_sec`일 때 association 전에 삭제 | TEST D/E/F PASS: 0.8초 초과 시 old Tentative 삭제, 정확히 0.8초에서는 유지, first_seen에서 오래 지나도 last_seen gap이 짧으면 유지. ROS timer expiry test도 PASS | **NOT RUN** — 실제 detector dropout sequence는 사용자 물리 검증에서 확인 예정 |
-| 짧은 detection dropout 뒤 Confirmed Survivor가 너무 빨리 LOST로 전환됨 | YOLO miss, 부분 가림, 로봇 회전, invalid depth 또는 bbox drop이 약 2초를 넘으면 LOST가 될 수 있었음 | `visible_timeout_sec=2.0`이 실제 물리 환경의 일시적인 detection loss를 흡수하기에 짧았음 | `visible_timeout_sec=4.0`으로 늘리고 Track, ID, raw/filtered position 유지 semantics는 보존 | TEST G/H/I/J/K PASS: 3.9초와 정확히 4.0초에서는 visible 유지, 4초 초과 시 LOST, 위치와 ID 유지, 근처 재검출 시 같은 ID 복구 | **NOT RUN** — 짧은 가림, 4초 이상 FOV 이탈, 재진입을 사용자가 순서대로 확인 예정 |
-| 동일 인물의 duplicate ID가 association radius 부족 때문에 발생할 가능성 | 초기 물리 테스트에서는 moving survivor dropout 뒤 ID split 가능성이 있었으나, 별도 재테스트에서는 정지한 사람 #1/#2와 이동 로봇 조건에서 두 ID가 안정적으로 유지됨 | 모든 문제를 spatial gate 하나의 원인으로 단정할 근거가 부족했고, 시간 정책 문제가 코드에서 직접 확인됨 | `association_radius_m=0.50`, `reassociation_radius_m=0.75`, `position_ema_alpha=0.50`을 유지하고 temporal lifecycle만 우선 수정 | TEST L/M/N PASS: 기본 radius와 EMA 유지, two-track 및 reversed detection order의 one-to-one association 유지 | 수정 전 재테스트 **PASS**, Stage 6.1 수정 후 physical regression은 **NOT RUN** |
+| 약 1초 동안 발생한 의자 false positive가 persistent Survivor ID로 등록됨 | 의자 등의 사물이 짧게 person으로 오검출되어도 3-hit를 만족하면 ID와 marker가 Registry에 계속 남았음 | 기존에는 `confirm_hits=3`만 확인하고 관측 duration을 검사하지 않았음 | `confirm_min_duration_sec=2.0`과 `confirm_min_hits=4`를 AND 조건으로 적용 | TEST A PASS: 0.9초 안에 4-hit가 발생해도 Confirmed Survivor가 생성되지 않음. TEST B/C에서 duration과 hit가 모두 필요함을 추가 확인 | 실제 multi-person 테스트에서 불필요한 duplicate ID 증가가 관찰되지 않음 — PASS |
+| Tentative continuity의 의미가 불명확하고 오래된 관측이 이어질 가능성 | 기존 timeout은 마지막 정상 detection 이후의 공백이 아니라 Tentative가 처음 생성된 시점부터의 전체 lifetime을 제한했음 | `tentative_timeout_sec`가 `first_seen` 기준으로 구현되어 detection continuity와 다른 의미였음 | `tentative_max_gap_sec=0.8`로 migration하고 `now - last_seen > tentative_max_gap_sec`일 때 association 전에 삭제 | TEST D/E/F PASS: 0.8초 초과 시 old Tentative 삭제, 정확히 0.8초에서는 유지, first_seen에서 오래 지나도 last_seen gap이 짧으면 유지. ROS timer expiry test도 PASS | 실제 persistent ID lifecycle과 재등장 동작 확인 — PASS |
+| 짧은 detection dropout 뒤 Confirmed Survivor가 너무 빨리 LOST로 전환됨 | YOLO miss, 부분 가림, 로봇 회전, invalid depth 또는 bbox drop이 약 2초를 넘으면 LOST가 될 수 있었음 | `visible_timeout_sec=2.0`이 실제 물리 환경의 일시적인 detection loss를 흡수하기에 짧았음 | `visible_timeout_sec=4.0`으로 늘리고 Track, ID, raw/filtered position 유지 semantics는 보존 | TEST G/H/I/J/K PASS: 3.9초와 정확히 4.0초에서는 visible 유지, 4초 초과 시 LOST, 위치와 ID 유지, 근처 재검출 시 같은 ID 복구 | FOV 이탈 후 LOST와 마지막 위치 유지, 재등장 복귀 확인 — PASS |
+| 동일 인물의 duplicate ID가 association radius 부족 때문에 발생할 가능성 | 초기 물리 테스트에서는 moving survivor dropout 뒤 ID split 가능성이 있었으나, 별도 재테스트에서는 정지한 사람 #1/#2와 이동 로봇 조건에서 두 ID가 안정적으로 유지됨 | 모든 문제를 spatial gate 하나의 원인으로 단정할 근거가 부족했고, 시간 정책 문제가 코드에서 직접 확인됨 | `association_radius_m=0.50`, `reassociation_radius_m=0.75`, `position_ema_alpha=0.50`을 유지하고 temporal lifecycle만 우선 수정 | TEST L/M/N PASS: 기본 radius와 EMA 유지, two-track 및 reversed detection order의 one-to-one association 유지 | 여러 사람 distinct ID와 moving same-ID를 실제 확인 — PASS |
 
-이 표의 자동 검증 PASS는 deterministic core/node test 결과를 의미한다. Jetson + D435
-물리 검증 결과로 확대 해석하지 않으며, 사용자가 TEST A~G를 수행한 뒤 마지막 열만 실제
-관찰값으로 갱신한다.
+이 표의 자동 검증 PASS는 deterministic core/node test 결과이며, 마지막 열은 사용자가
+실제 Jetson + D435 환경에서 확인한 범위만 기록한다.
 
 | 항목 | Before | After | 이유 |
 | --- | --- | --- | --- |
@@ -750,90 +749,117 @@ ros2 topic echo --once /leader/survivor/tracks \
 
 reset 직후 `tracks`가 empty인지 확인한 뒤 physical test를 시작한다.
 
-## 49. 물리 검증 TEST A — 실제 사람 Confirm delay
+## 49. 최종 Physical Validation — 실제 Jetson + D435
 
-사람을 카메라 앞에 두고 raw detection 시작 시각과 Confirmed ID 발급 시각을 기록한다.
-Stage 6.1 후속 물리 실행은 아직 하지 않았으므로 상태는 **NOT RUN**이다.
+### 49.1 테스트 목적과 환경
 
-## 50. 물리 검증 TEST B — 지속 관측
+Stage 6.1 시간 정책, persistent ID lifecycle 및 Registry visualization이 실제 운용
+환경에서도 의도대로 동작하는지 확인했다. 환경은 다음과 같다.
 
-같은 사람을 계속 관찰하며 새 ID가 증가하지 않고 observation_count만 증가하는지 확인한다.
-상태: **NOT RUN**.
+- Jetson Orin Nano
+- Intel RealSense D435
+- ROS 2 Humble
+- Isaac ROS Visual SLAM
+- dual EKF
+- nvblox
+- Survivor detector
+- Persistent Survivor Registry
+- RViz
 
-## 51. 물리 검증 TEST C — 짧은 detection dropout
+별도의 timestamp, 거리, frame count 또는 성능 수치는 측정하지 않았으므로 기록하지 않는다.
 
-안전하게 부분 가림 또는 시야 경계 dropout을 만들 수 있을 때 4초 이내 ID 유지 여부를
-확인한다. 상태: **NOT RUN**.
+### 49.2 테스트 방법과 최종 Matrix
 
-## 52. 물리 검증 TEST D — FOV 완전 이탈
+Registry reset 후 여러 사람, 이동하는 사람, FOV 이탈·재등장 장면을 순서대로 관찰하고
+`tracks`와 RViz marker의 ID, 상태, 위치, 색상 및 text를 확인했다.
 
-사람을 4초 이상 FOV 밖으로 이동해 LOST, marker 유지, 마지막 위치 유지를 확인한다.
-상태: **NOT RUN**.
+| 항목 | 자동검증 | 실물검증 | 최종상태 |
+| --- | --- | --- | --- |
+| Time-based confirmation | PASS | 실제 persistent ID 동작 확인 | VERIFIED |
+| Multiple survivors distinct IDs | PASS | PASS | VERIFIED |
+| Moving survivor same ID | PASS | PASS | VERIFIED |
+| Temporary detection loss handling | PASS | 실제 lifecycle 검증 | VERIFIED |
+| FOV exit → LOST | PASS | PASS | VERIFIED |
+| LOST position persistence | PASS | PASS | VERIFIED |
+| Same-ID reassociation | PASS | PASS | VERIFIED |
+| Registry visualization | PASS | PASS | VERIFIED |
+| LOST yellow marker | PASS | PASS | VERIFIED |
+| White text | PASS | PASS | VERIFIED |
+| Text +1.0 m offset | PASS | PASS | VERIFIED |
+| Reset | 기존 Stage 6/자동 검증 결과 반영 | 이번 수동 테스트의 신규 판정 대상 아님 | 기존 검증 유지 |
 
-## 53. 물리 검증 TEST E — 재진입
+### 49.3 실제 테스트별 결과
 
-마지막 위치 근처로 같은 사람이 재진입할 때 #2가 아니라 기존 #1로 복구되는지 확인한다.
-상태: **NOT RUN**.
+| 테스트 | 기대 결과 | 실제 관찰 결과 | 판정 |
+| --- | --- | --- | --- |
+| A — 여러 생존자 ID 분리 | 서로 다른 위치의 사람은 서로 다른 ID를 받으며 불필요한 duplicate ID가 증가하지 않음 | 각 사람이 서로 다른 Survivor ID로 등록됨. 잘못된 동일 ID 병합과 불필요한 duplicate ID 증가는 관찰되지 않음 | PASS |
+| B — 움직이는 사람 | 이동 중 기존 ID가 유지되고 위치가 갱신됨 | 이동 중에도 같은 persistent ID가 유지되고 Registry position이 이동에 맞춰 갱신됨 | PASS |
+| C — FOV 이탈 / LOST | ID·마지막 위치를 유지하고 timeout 후 LOST, marker는 노란색 LAST SEEN으로 유지됨 | ID 삭제 없이 LOST 전환, 마지막 위치 marker 유지, 노란색 sphere·흰색 LAST SEEN text 확인 | PASS |
+| D — LOST 재등장 | 새 ID가 아닌 기존 ID로 VISIBLE 복귀 및 위치 갱신 | 동일 ID로 재연결되고 LOST→VISIBLE, yellow→VISIBLE 색상, LAST SEEN→VISIBLE text 및 position update 재개 확인 | PASS |
 
-## 54. 물리 검증 TEST F — 정지 2인 + 로봇 이동
+### 49.4 물리 검증과 자동 검증의 범위
 
-사람 #1/#2를 정지시키고 로봇만 안전하게 천천히 이동한다. Codex는 모터 명령을 보내지
-않는다. 수정 전 재테스트는 기존 0.50/0.75 gate의 ID 유지 PASS였지만, Stage 6.1 후속
-regression은 **NOT RUN**이다.
+자동 검증은 deterministic core/node/visualizer 계약을 증명하고, 위 결과는 사용자가 실제
+Jetson + D435 + VSLAM + nvblox + RViz에서 확인한 동작만 기록한다. 확인하지 않은 수치나
+성능 보장은 주장하지 않는다.
 
-## 55. 실제 관찰 결과
+## 50. Visualization physical validation
 
-Stage 6.1 이후 물리 관찰 결과는 아직 없다. 사용자가 제공한 수정 전 문제 관찰과 수정 전
-association 재테스트는 2~18장에 기록했으며, 자동 검증 결과와 섞지 않았다.
+Registry sphere는 실제 filtered map position에 유지되고, text만 그 위치에서 Z축 +1.0 m
+위에 표시되었다. text를 올린 뒤 nvblox mesh와의 겹침이 개선되었고 VISIBLE/LOST text는
+모두 흰색으로 표시되었다. LOST sphere는 노란색 불투명 marker로 유지되어 마지막 위치를
+명확하게 확인할 수 있었다.
 
-## 56. 개선 전/후 비교
+## 51. 개선 전/후 비교
 
 개선 전에는 3-hit만으로 약 1초 false positive가 ID를 받았고 Tentative lifetime이
 first_seen 기준이었다. 개선 후에는 4-hit와 2초 duration을 모두 요구하며 last_seen gap
 0.8초를 초과한 Tentative를 제거한다. Confirmed grace는 2초에서 4초로 늘었다.
 
-## 57. VSLAM 회귀 확인
+## 52. VSLAM 회귀 확인
 
 Phase C에서는 VSLAM source/config를 변경하지 않았고 package test가 통과했다. 실제
-`/visual_slam/tracking/odometry` runtime 회귀는 Stage 6.1 물리 검증에서 확인할 항목이며
-현재 상태는 **NOT RUN**이다.
+`/visual_slam/tracking/odometry`는 통합 환경에서 Registry와 함께 동작하는 것을 확인했다.
+별도의 odometry 성능 수치나
+장기 안정성 회귀는 측정하지 않았다.
 
-## 58. EKF 회귀 확인
+## 53. EKF 회귀 확인
 
-local/global EKF source/config는 변경하지 않았다. 실제 odometry runtime 회귀 확인은
-**NOT RUN**이다.
+local/global EKF source/config는 변경하지 않았고 실제 통합 환경에서 Registry와 동시
+동작하는 것을 확인했다. 별도의 EKF 성능 수치는 측정하지 않았다.
 
-## 59. nvblox 회귀 확인
+## 54. nvblox 회귀 확인
 
-nvblox source/config/RViz map은 변경하지 않았다. mesh/ESDF runtime 확인은 **NOT RUN**이다.
+nvblox source/config/RViz map은 변경하지 않았고 mesh와 Registry marker의 동시 표시를
+RViz에서 확인했다. 별도의 mesh/ESDF 성능 수치는 측정하지 않았다.
 
-## 60. Known Limitations
+## 55. Known Limitations
 
 현재 Registry는 map-frame spatial association과 시간 정책에 기반하며 process restart나
 map session을 넘어 public ID를 저장하지 않는다.
 
-## 61. 아직 해결하지 않은 moving-person long-occlusion 문제
+## 56. 아직 해결하지 않은 moving-person long-occlusion 문제
 
 4초를 초과하는 가림이나 큰 위치 변화에서는 기존 fixed reassociation gate 밖에서 새 ID가
 생길 수 있다. Stage 6.1은 이를 완전히 해결한다고 주장하지 않는다.
 
-## 62. spatial-only association 한계
+## 57. spatial-only association 한계
 
 appearance, velocity, body identity feature를 사용하지 않으므로 가까운 사람이 교차하거나
 장시간 가려지는 조건은 별도 검토가 필요하다.
 
-## 63. Future Improvements
+## 58. Future Improvements
 
 필요할 경우 velocity prediction, adaptive gate, promotion duplicate suppression, track
 merge, appearance Re-ID, ByteTrack, BoT-SORT를 다음 단계에서 검토한다.
 
-## 64. Stage 6.1 PASS/FAIL
+## 59. Stage 6.1 PASS/FAIL
 
-자동 검증 기준 Stage 6.1은 **PASS**다. 전체 114 test와 build, launch parameter 검증이
-통과했다. 물리 validation은 Codex가 수행하지 않았으므로 전체 hardware PASS로 확대하지
-않으며, 실물 최종 판정은 사용자의 TEST A–G 실행 후 갱신한다.
+자동 검증 기준 Stage 6.1은 **PASS**이며, 실제 physical validation까지 완료되어 최종
+상태는 **VERIFIED / PASS**다. 전체 114 test와 build, launch parameter 검증 결과는
+그대로 유지하며, 실물 결과는 위 Matrix에 확인된 범위만 반영했다.
 
-## 65. Manual Validation Quick Reference
+## 60. Manual Validation Quick Reference
 
 ```bash
 cd ~/damgc_robot
@@ -862,7 +888,7 @@ ros2 topic info -v /nvblox_node/mesh
 ros2 service list | rg /nvblox_node/get_esdf_and_gradient
 ```
 
-## 66. Rollback
+## 61. Rollback
 
 commit과 push는 수행하지 않았다. rollback이 필요하면 먼저 `git status`와 `git diff`로
 Stage 6.1 파일을 확인하고 해당 파일만 선택적으로 복원한다. broad `git reset --hard`,
@@ -879,11 +905,13 @@ git revert <stage-6.1-commit>
 git commit -m "Improve survivor registry temporal confirmation"
 ```
 
-## 67. 다음 개발 단계
+## 62. 다음 개발 단계
 
-먼저 사용자가 reset 후 실제 TEST A–G를 실행하고 raw detection, tracks, marker, VSLAM,
-EKF, nvblox 관찰 결과를 기록한다. moving-person long-occlusion 또는 ID split이 실제로
-남는 경우에만 다음 단계에서 velocity/adaptive gate/appearance 기반 보완을 검토한다.
+다음 단계는 physical validation 자체가 아니라 optional hardening 및 정량 검증이다.
+absolute survivor localization accuracy, association threshold tuning, 장시간 안정성,
+close crossing/occlusion stress test와 CPU/GPU/runtime logging을 검토한다. 실제 stress
+test에서 spatial association 한계가 문제가 될 때만 velocity/adaptive gate 또는
+appearance 기반 보완을 선택적으로 검토한다.
 
 ## Phase D 최종 결과 요약
 
@@ -894,16 +922,13 @@ Problem reproduced: PASS (자동 TEST A 및 기존 물리 관찰 기록)
 Root cause: 3-hit-only promotion, first_seen lifetime expiry, 2초 visible grace
 Build: PASS
 Tests: 114 / 114 passed
-Physical single-person confirmation: NOT RUN
-Short dropout: NOT RUN
-LOST/re-entry physical test: NOT RUN
-Two stationary people + moving robot post-change test: NOT RUN
-False positive physical test: NOT RUN
-VSLAM regression: source/config 변경 없음, runtime NOT RUN
-EKF regression: source/config 변경 없음, runtime NOT RUN
-nvblox regression: source/config/RViz 변경 없음, runtime NOT RUN
-Documentation: 이 문서에 67개 필수 chapter, 자동 test 표, 명령, reset, rollback 기록 완료
+Physical validation: PASS — TEST A~E 및 Registry visualization
+Multiple survivors distinct IDs: PASS
+Moving survivor same ID: PASS
+FOV exit → LOST and position persistence: PASS
+Same-ID reassociation: PASS
+VSLAM/EKF/nvblox: 실제 통합 환경에서 Registry 동작과 동시 표시 확인; 별도 성능 수치는 측정하지 않음
+Documentation: 이 문서에 전체 분석·자동 test 표·physical validation·명령·reset·rollback 기록 완료
 ```
 
-따라서 Phase D의 코드·자동 검증·문서화 범위는 PASS이며, 실제 장비에서의 최종 물리
-판정은 사용자 실행 후에만 갱신할 수 있다.
+따라서 Stage 6.1의 코드·자동 검증·문서화·실제 하드웨어 수동 검증 범위는 VERIFIED / PASS다.

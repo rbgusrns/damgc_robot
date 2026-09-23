@@ -28,7 +28,7 @@ pipeline, Survivor Stage 1·3·4·5 실기 검증과 Stage 2 구현 상태를 �
 | 그리퍼 물품 파지 | 확인 필요 | URDF 형상만 있고 제어 코드·실물 시험 근거 없음 |
 | 경량 물품 단독 운반 | 미구현 | 접근·파지·주행 연결 없음 |
 | 중량 물품 협동 운반 | 부분 완료 | 리더 DDS 상태·속도 게이트 구현, 팔로워 heartbeat/하드웨어 주행 시험 필요 |
-| 지도·생존자·로봇 상태 시각화 | 부분 완료 | RViz 3D map과 Stage 5 Survivor sphere/text marker 동시 표시는 검증; mission-level persistent registry/상태 표시는 미구현 |
+| 지도·생존자·로봇 상태 시각화 | 완료(범위 내) | RViz 3D map과 Stage 5 raw marker, Stage 6.1 persistent Registry sphere/text를 Jetson에서 동시 검증; LOST yellow LAST SEEN과 white text 포함 |
 
 ## 현재 저장소에서 재현 가능한 범위
 
