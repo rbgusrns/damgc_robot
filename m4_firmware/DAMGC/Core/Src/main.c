@@ -1267,8 +1267,9 @@ int main(void)
       }
     }
     else if ((bno055_test.state != BNO055_STATE_RUNNING) &&
-             ((int32_t)(now_ms - bno055_next_retry_ms) >= 0) &&
-             (SpeedPID_GetStatus()->active == 0U))
+            (bno055_test.state != BNO055_STATE_NOT_FOUND) &&            
+            ((int32_t)(now_ms - bno055_next_retry_ms) >= 0) &&
+            (SpeedPID_GetStatus()->active == 0U))
     {
       bno055_next_retry_ms = now_ms + 2000U;
       SerialConsole_Write("Retrying BNO055 initialization...\r\n");

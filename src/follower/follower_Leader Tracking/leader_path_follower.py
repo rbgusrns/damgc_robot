@@ -482,7 +482,7 @@ class LeaderPathFollower(Node):
         max_angular = float(self.get_parameter("max_angular_speed").value)
         if abs(speed) <= 1.0e-6:
             command.angular.z = clamp(
-                float(self._leader_command.angular.z),
+                -float(self._leader_command.angular.z),
                 -max_angular,
                 max_angular,
             )
@@ -512,9 +512,16 @@ class LeaderPathFollower(Node):
             return command
 
         command.linear.x = speed
-        curvature = 2.0 * math.sin(target_angle) / max(distance, 0.01)
+        lookahead = max(
+            float(self.get_parameter("lookahead_distance").value), 0.01
+        )
+        curvature = 2.0 * body_y / max(
+            distance * distance, lookahead * lookahead
+        )
         command.angular.z = clamp(
-            command.linear.x * curvature, -max_angular, max_angular
+            float(self._leader_command.angular.z) + speed * curvature,
+            -max_angular,
+            max_angular,
         )
         return command
 
@@ -530,9 +537,9 @@ class LeaderPathFollower(Node):
         marker.pose.position.y = target.y
         marker.pose.orientation.w = 1.0
         marker.scale.x = marker.scale.y = marker.scale.z = 0.10
-        marker.color.r = 0.1
+        marker.color.r = 1.0
         marker.color.g = 1.0
-        marker.color.b = 0.1
+        marker.color.b = 0.0
         marker.color.a = 1.0
         self._target_pub.publish(marker)
 
@@ -548,6 +555,9 @@ class LeaderPathFollower(Node):
             return
         target = self._target_pose()
         if target is None:
+            if len(self._path) >= 2:
+                self._publish_stop()
+                return
             command = Twist()
             command_timeout = float(
                 self.get_parameter("leader_command_timeout").value
@@ -556,8 +566,14 @@ class LeaderPathFollower(Node):
                 time.monotonic() - self._leader_command_received_at
                 <= command_timeout
             ):
+                limit = float(self.get_parameter("max_linear_speed").value)
+                linear = -float(self._leader_command.linear.x)
+                command.linear.x = clamp(linear, -limit, limit)
+                leader_turn = float(self._leader_command.angular.z)
+                if abs(command.linear.x) <= 1.0e-6:
+                    leader_turn = -leader_turn
                 command.angular.z = clamp(
-                    float(self._leader_command.angular.z),
+                    leader_turn,
                     -float(self.get_parameter("max_angular_speed").value),
                     float(self.get_parameter("max_angular_speed").value),
                 )
