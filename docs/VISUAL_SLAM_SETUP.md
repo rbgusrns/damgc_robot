@@ -143,6 +143,22 @@ Visual SLAM, STM32 융합과 nvblox를 한 번에 실행:
 ros2 launch rescue_robot_bringup visual_slam_nvblox_realsense.launch.py
 ```
 
+STM32 odometry를 사용할 수 없고 호스트의 D435 카메라 launch만 실행 중이라면,
+Docker에서 다음 launch를 사용한다. VSLAM이 `odom → base_link`와
+`map → odom` TF를 발행하고 nvblox가 이를 사용한다. 이 모드는 dual EKF 또는
+다른 odom TF 발행자와 동시에 실행하지 않는다.
+
+```bash
+source /opt/ros/humble/setup.bash
+source /workspaces/isaac_ros-dev/install_docker/local_setup.bash
+export DAMGC_VSLAM_HEADLESS=1
+ros2 launch rescue_robot_bringup nvblox_vslam_realsense.launch.py
+```
+
+`nvblox_realsense.launch.py`만 실행하면 pose 발행자가 없을 때 `odom` TF 조회가
+실패하고 `Layer pointclouds not published`가 반복된다. 새 통합 launch는
+Docker 노드에 Fast DDS UDPv4도 설정해 호스트 카메라 메시지를 수신한다.
+
 이미 localization을 별도로 실행했다면 통합 launch를 사용하지 않고 VSLAM과 nvblox를
 각각 실행한다. 그렇지 않으면 EKF 두 개가 중복 실행된다.
 
