@@ -10,6 +10,7 @@ def generate_launch_description():
         output="screen",
         parameters=[{
             "num_cameras": 1,
+            "global_frame": "odom",
             "use_tf_transforms": True,
             "mapping_type": "static_tsdf",
             "voxel_size": 0.05,

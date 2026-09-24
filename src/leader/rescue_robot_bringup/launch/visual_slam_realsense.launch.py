@@ -1,11 +1,17 @@
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
 import os
 
 
 def generate_launch_description():
     headless = os.environ.get("DAMGC_VSLAM_HEADLESS", "0") == "1"
+    odom_tf = LaunchConfiguration("publish_odom_to_base_tf")
+    map_tf = LaunchConfiguration("publish_map_to_odom_tf")
+    jitter_threshold = LaunchConfiguration("image_jitter_threshold_ms")
     description_share = get_package_share_directory("rescue_robot_description")
     robot_description_path = os.path.join(
         description_share, "urdf", "rescue_robot.urdf")
@@ -34,13 +40,12 @@ def generate_launch_description():
             "accel_noise_density": 0.001862,
             "accel_random_walk": 0.003,
             "calibration_frequency": 200.0,
-            "image_jitter_threshold_ms": 22.0,
-            # Use the RealSense camera frame for the first tracking test.
-            # A later integration step will connect this frame to base_link.
+            "image_jitter_threshold_ms": ParameterValue(jitter_threshold, value_type=float),
+            # The robot description connects base_link to the RealSense frames.
             "base_frame": "base_link",
-            # robot_localization owns both TF links in the fused setup.
-            "publish_odom_to_base_tf": False,
-            "publish_map_to_odom_tf": False,
+            # The dual-EKF setup owns these links unless explicitly enabled.
+            "publish_odom_to_base_tf": ParameterValue(odom_tf, value_type=bool),
+            "publish_map_to_odom_tf": ParameterValue(map_tf, value_type=bool),
             # Debug renderings are optional; odometry/status and rosbag output
             # remain active in headless mode.
             "enable_slam_visualization": not headless,
@@ -59,4 +64,10 @@ def generate_launch_description():
         ],
     )
 
-    return LaunchDescription([robot_state_publisher, visual_slam])
+    return LaunchDescription([
+        DeclareLaunchArgument("publish_odom_to_base_tf", default_value="false"),
+        DeclareLaunchArgument("publish_map_to_odom_tf", default_value="false"),
+        DeclareLaunchArgument("image_jitter_threshold_ms", default_value="22.0"),
+        robot_state_publisher,
+        visual_slam,
+    ])

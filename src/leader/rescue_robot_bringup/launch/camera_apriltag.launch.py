@@ -49,6 +49,8 @@ def generate_launch_description():
             launch_arguments={
                 "camera_namespace": "leader",
                 "camera_name": "camera",
+                # A USB reset during startup can leave this D435 waiting indefinitely.
+                "initial_reset": "false",
                 "enable_color": "true",
                 "enable_depth": depth_enabled,
                 "enable_sync": sync_enabled,
@@ -62,7 +64,7 @@ def generate_launch_description():
                 "publish_tf": "true",
                 "tf_publish_rate": "30.0",
                 "rgb_camera.color_profile": "640x480x30",
-                "depth_module.depth_profile": "424x240x15",
+                "depth_module.depth_profile": "848x480x30",
             }.items(),
         ),
         Node(
