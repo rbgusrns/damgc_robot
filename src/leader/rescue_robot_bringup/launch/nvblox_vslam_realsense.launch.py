@@ -6,16 +6,13 @@ the dual-EKF launch, which also publishes odom -> base_link and map -> odom.
 
 import os
 
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 
 def _include(name, arguments=None):
-    path = os.path.join(
-        get_package_share_directory("rescue_robot_bringup"), "launch", name
-    )
+    path = os.path.join(os.path.dirname(__file__), name)
     return IncludeLaunchDescription(
         PythonLaunchDescriptionSource(path),
         launch_arguments=(arguments or {}).items(),
@@ -38,9 +35,9 @@ def generate_launch_description():
         SetEnvironmentVariable("LD_LIBRARY_PATH", os.pathsep.join(gxf_library_paths)),
         _include("visual_slam_realsense.launch.py", {
             "publish_odom_to_base_tf": "true",
-            "publish_map_to_odom_tf": "true",
+            "publish_map_to_odom_tf": "false",
             "image_jitter_threshold_ms": "50.0",
         }),
         _include("nvblox_realsense.launch.py"),
-        _include("nvblox_costmap.launch.py"),
+        _include("nvblox_nav2.launch.py"),
     ])

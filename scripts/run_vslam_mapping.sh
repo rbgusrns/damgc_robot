@@ -337,9 +337,18 @@ if ! docker exec -u "${CONTAINER_USER}" "${CONTAINER_NAME}" bash -lc '
   ros2 pkg prefix rescue_robot_bringup >/dev/null
   ros2 pkg prefix isaac_ros_visual_slam >/dev/null
   ros2 pkg prefix nvblox_ros >/dev/null
-  ros2 pkg prefix robot_localization >/dev/null
 '; then
   printf 'The container is missing a required ROS package or install_docker overlay.\n' >&2
+  exit 1
+fi
+if [[ "${VSLAM_ONLY}" != "1" ]] && ! docker exec -u "${CONTAINER_USER}" "${CONTAINER_NAME}" bash -lc '
+  source /opt/ros/humble/setup.bash
+  ros2 pkg prefix nav2_planner >/dev/null
+  ros2 pkg prefix nav2_controller >/dev/null
+  ros2 pkg prefix nav2_bt_navigator >/dev/null
+  ros2 pkg prefix nav2_lifecycle_manager >/dev/null
+'; then
+  printf 'The container is missing a required Nav2 package.\n' >&2
   exit 1
 fi
 
@@ -360,7 +369,11 @@ docker exec -d -u "${CONTAINER_USER}" \
     export LD_LIBRARY_PATH="/opt/ros/humble/share/isaac_ros_gxf/gxf/lib/serialization:${LD_LIBRARY_PATH}"
     export LD_LIBRARY_PATH="/opt/ros/humble/share/isaac_ros_gxf/gxf/lib/logger:${LD_LIBRARY_PATH}"
     echo "$$" > /tmp/damgc_vslam_mapping_vslam.pid
-    exec ros2 launch rescue_robot_bringup visual_slam_nvblox_realsense.launch.py >>"${log_path}" 2>&1
+    if [[ "${DAMGC_VSLAM_ONLY}" == "1" ]]; then
+      exec ros2 launch rescue_robot_bringup visual_slam_realsense.launch.py \
+        publish_odom_to_base_tf:=true >>"${log_path}" 2>&1
+    fi
+    exec ros2 launch rescue_robot_bringup nvblox_vslam_realsense.launch.py >>"${log_path}" 2>&1
   ' _ "${container_log_dir}/vslam_nvblox.log"
 
 if [[ "${VSLAM_HEADLESS}" == "1" ]]; then
