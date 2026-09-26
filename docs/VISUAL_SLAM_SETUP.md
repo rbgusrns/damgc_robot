@@ -144,19 +144,22 @@ ros2 launch rescue_robot_bringup visual_slam_nvblox_realsense.launch.py
 ```
 
 STM32 odometry를 사용할 수 없고 호스트의 D435 카메라 launch만 실행 중이라면,
-Docker에서 다음 launch를 사용한다. VSLAM이 `odom → base_link`와
-`map → odom` TF를 발행하고 nvblox가 이를 사용한다. 이 모드는 dual EKF 또는
+Docker에서 다음 launch를 사용한다. VSLAM이 `odom → base_link` TF를 발행하고
+nvblox와 Nav2는 `odom` 프레임을 사용한다. 이 모드는 dual EKF 또는
 다른 odom TF 발행자와 동시에 실행하지 않는다.
 
 ```bash
 source /opt/ros/humble/setup.bash
 source /workspaces/isaac_ros-dev/install_docker/local_setup.bash
 export DAMGC_VSLAM_HEADLESS=1
+ros2 pkg prefix rescue_robot_bringup  # /workspaces/isaac_ros-dev/install_docker/rescue_robot_bringup
 ros2 launch rescue_robot_bringup nvblox_vslam_realsense.launch.py
 ```
 
-이 통합 launch는 Nav2 로컬 costmap도 실행한다. costmap의 nvblox layer는
-`/nvblox_node/static_map_slice`를 구독하며 `/costmap/costmap`에 결과를 발행한다.
+이 통합 launch는 Nav2 planner, controller, BT navigator와 global/local costmap을
+실행한다. 바퀴 구동과 분리된 RViz 경로 계획 테스트는
+`src/leader/rescue_robot_bringup/docs/NVBLOX_NAV2_RVIZ.md`를 따른다.
+costmap의 nvblox layer는 `/nvblox_node/static_map_slice`를 구독한다.
 이미 VSLAM과 nvblox가 실행 중일 때 costmap만 추가하려면 컨테이너에서 실행한다:
 
 ```bash
