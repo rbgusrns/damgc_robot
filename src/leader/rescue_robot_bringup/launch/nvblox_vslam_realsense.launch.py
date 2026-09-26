@@ -42,4 +42,5 @@ def generate_launch_description():
             "image_jitter_threshold_ms": "50.0",
         }),
         _include("nvblox_realsense.launch.py"),
+        _include("nvblox_costmap.launch.py"),
     ])

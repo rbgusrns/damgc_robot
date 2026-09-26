@@ -155,6 +155,16 @@ export DAMGC_VSLAM_HEADLESS=1
 ros2 launch rescue_robot_bringup nvblox_vslam_realsense.launch.py
 ```
 
+이 통합 launch는 Nav2 로컬 costmap도 실행한다. costmap의 nvblox layer는
+`/nvblox_node/static_map_slice`를 구독하며 `/costmap/costmap`에 결과를 발행한다.
+이미 VSLAM과 nvblox가 실행 중일 때 costmap만 추가하려면 컨테이너에서 실행한다:
+
+```bash
+ros2 launch rescue_robot_bringup nvblox_costmap.launch.py
+ros2 topic info /nvblox_node/static_map_slice
+ros2 lifecycle get /costmap/costmap
+```
+
 `nvblox_realsense.launch.py`만 실행하면 pose 발행자가 없을 때 `odom` TF 조회가
 실패하고 `Layer pointclouds not published`가 반복된다. 새 통합 launch는
 Docker 노드에 Fast DDS UDPv4도 설정해 호스트 카메라 메시지를 수신한다.

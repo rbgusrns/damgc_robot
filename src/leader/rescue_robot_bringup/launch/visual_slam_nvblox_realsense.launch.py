@@ -22,4 +22,5 @@ def generate_launch_description():
     ]
     if os.environ.get("DAMGC_VSLAM_ONLY", "0") != "1":
         actions.append(_include("nvblox_realsense.launch.py"))
+        actions.append(_include("nvblox_costmap.launch.py"))
     return LaunchDescription(actions)

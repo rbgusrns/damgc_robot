@@ -19,6 +19,9 @@
   <exec_depend>leader_cooperation</exec_depend>
   <exec_depend>leader_approach_control</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>nav2_costmap_2d</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <exec_depend>nvblox_nav2</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>robot_localization</exec_depend>
   <exec_depend>rescue_robot_apriltag</exec_depend>
