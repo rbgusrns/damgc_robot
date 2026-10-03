@@ -91,6 +91,12 @@ def parameter_harness() -> SimpleNamespace:
         _received_seconds={item: 10.0 for item in sources},
         _command_pub=publisher,
         _publish_status=lambda status: statuses.append(status),
+        _diagnostic_window_start=0.0,
+        _diagnostic_samples=0,
+        _diagnostic_vx_min=float("inf"),
+        _diagnostic_vx_max=float("-inf"),
+        _diagnostic_wz_min=float("inf"),
+        _diagnostic_wz_max=float("-inf"),
         _motion_sources=CommandSelectorNode._motion_sources,
         get_logger=lambda: SimpleNamespace(info=lambda message: None),
         statuses=statuses,
@@ -166,7 +172,10 @@ def test_wheel_freshness_controls_nav_output(monkeypatch, guard_status, expected
     harness._nav_guard = SimpleNamespace(check=lambda *args: guard_status)
     harness.get_clock = lambda: SimpleNamespace(
         now=lambda: SimpleNamespace(nanoseconds=10_000_000_000))
-    harness.get_logger = lambda: SimpleNamespace(warning=lambda message: None)
+    harness.get_logger = lambda: SimpleNamespace(
+        warning=lambda message: None,
+        info=lambda message: None,
+    )
     harness._to_twist = CommandSelectorNode._to_twist
     CommandSelectorNode._on_timer(harness)
     assert harness._command_pub.messages[-1].linear.x == expected

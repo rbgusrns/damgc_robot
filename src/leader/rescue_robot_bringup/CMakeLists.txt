@@ -26,6 +26,10 @@ if(BUILD_TESTING)
     test_survivor_pipeline_launch
     test/test_survivor_pipeline_launch.py
   )
+  ament_add_pytest_test(
+    test_nav2_goal_tolerance_config
+    test/test_nav2_goal_tolerance_config.py
+  )
 endif()
 
 ament_package()

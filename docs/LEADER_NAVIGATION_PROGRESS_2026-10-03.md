@@ -444,3 +444,55 @@ Nav2 Humble NavFn은 이 옵션에서 마지막 두 path pose의 차이로 endpo
 이 마지막 수정은 물리 주행으로 검증하지 않았다. 사용자가 지정한 마지막 test는 `215754`였고,
 이번 수정은 그 bag 분석에서 확인한 방향 불일치를 바로잡기 위해 반영한 후속 변경이다. 다음 실행은
 goal yaw와 `/plan` 끝 orientation을 확인한 뒤 전체 frontier 탐색을 반복해야 한다.
+
+### 2026-10-03 22:21 실차 직진 목표 재시험
+
+Headless mapping stack을 시작하고 selector를 `STOP`으로 두어 준비 상태를 확인한 다음, 전방 costmap이
+free인 구간에서 `odom x=0.40 m`, 이어서 `x=0.70 m` 목표를 보냈다. 두 action은 `SUCCEEDED`였지만
+wheel odometry는 각각 `x=0.215 m`, `x=0.515 m`에서 멈췄다. 두 경우 모두 목표까지 약 `0.185 m`가
+남았다. 기본 `general_goal_checker.xy_goal_tolerance=0.20 m`와 일치하므로, 이전에 관찰된 짧은
+이동 후 정지는 조기 goal success로 설명된다.
+
+원인 확인을 위해 controller와 goal checker의 허용 오차를 실행 중에만 `0.05 m`로 낮추고 같은
+`x=0.70 m` 목표를 재시도했다. 로봇은 `x=0.519 m`까지 약 `4 mm`만 더 움직인 뒤 10초 progress
+검사에서 abort됐다. 실패 구간 100개의 `/evaluation` 표본은 전부 `vx=0`인 trajectory를 선택했고,
+모든 양의 `vx` candidate는 `total=-1`로 무효였다. 대표 sample에서 무효 사유는
+`RotateToGoal` critic이었다. DWB Humble 구현은 `FollowPath.xy_goal_tolerance`를 초기화 때
+critic 내부에 읽어 보관하므로, 실행 중 parameter를 바꿔도 기존 critic에는 반영되지 않는다.
+따라서 이 재시험은 시작 시점의 `0.20 m` 내부 창이 남은 상태에서 goal checker만 `0.05 m`로
+좁힌 결과로 해석한다. controller를 재시작할 때 goal checker와 DWB tolerance가 함께 적용되도록
+source YAML의 두 값을 `0.05 m`로 맞췄다. 새 Nav2에서의 물리 검증은 아래 22:42 시험에서
+완료했다.
+
+시험 후 selector는 `STOP`, `/leader/cmd_vel`은 zero였고 마지막 5초 wheel odometry jitter는 0이었다.
+rosbag은 `data/vslam_mapping_20261003_222105/`, 실행 로그는
+`log/vslam_mapping_20261003_222105/`에 저장했다. bag 집계에서 wheel 경로 `0.522 m`, 순변위
+`0.519 m`, VSLAM 경로 `0.876 m`가 기록됐다. 좌우 I2C CRC 오류는 0이었으며 STM32 sequence drop
+누적치는 실행 중 증가해 구동 통신 계측을 계속 확인해야 한다.
+
+새 시작 시 설정 반영과 목표 허용 오차 안쪽 도달은 아래 22:42 시험에서 확인했다. 다음 검증은
+반복 주행과 회전·장애물 정지 동작이다.
+
+### 2026-10-03 22:42 goal tolerance 정합성 재검증
+
+Nav2 bringup을 `install_docker`에 다시 빌드하고 새로운 mapping stack에서 시작했다. 시작 wheel pose는
+`(-0.00008, -0.00000) m`였고, controller parameter readback은 goal checker와 `FollowPath` 양쪽
+모두 `0.05 m`였다. 전방 costmap의 `0.15..0.45 m` 구간은 측정한 차체 폭 전체에서 cost `0`이었다.
+
+`odom x=0.40 m` 직진 목표는 `SUCCEEDED`였고 정지 wheel pose는 `(0.3525, 0.0022) m`, 목표와의
+거리는 `0.0476 m`였다. 이전 `0.20 m` tolerance의 약 `0.185 m` 오차 정지보다 목표에 가까워졌고,
+실제 시작부터 약 `0.353 m` 이동했다. selector는 `STOP`, 최종 `/leader/cmd_vel`은 zero였으며 종료
+후 5초 wheel jitter는 0이었다. 이 한 번의 짧은 주행은 새 설정이 초기화될 때 적용되고 `0.05 m`
+내 goal 도착이 가능함을 확인한다. 반복성과 회전·장애물 정지는 아직 검증하지 않았다.
+
+실행 bag은 `data/vslam_mapping_20261003_224243/`, 로그는
+`log/vslam_mapping_20261003_224243/`에 저장했다. wheel odometry는 46.7 Hz, 최대 sample gap
+283.4 ms, path/net displacement `0.353/0.353 m`; VSLAM path/net displacement는
+`0.302/0.189 m`였다. BNO055 fault bit와 e-stop은 각각 clear/0이었지만 firmware `fault_bits=2`와
+STM32 sequence drop 증가는 남았다. I2C CRC error는 0이었다.
+
+IMU raw stream은 약 103.2 Hz였고 정지 구간 gyro-z 평균/표준편차는 `-0.00069/0.00143 rad/s`로
+관측됐다. 다만 최신 bag에서도 `fault_bits=2`는 UART error/RX overrun을 뜻하고 sequence drop이
+`104→137`로 증가했다. 이는 BNO055 fault bit(0)와는 별개다. wheel odometry에는 불연속이 보이지
+않았지만 bag에 raw `WHEEL_STATE`의 `encoder_status`가 기록되지 않아 엔코더 자체의 상태까지
+정상이라고 단정할 수 없다.

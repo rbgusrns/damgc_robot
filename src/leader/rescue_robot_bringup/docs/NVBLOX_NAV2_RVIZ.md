@@ -11,6 +11,12 @@ VSLAM은 비교 기록용이고 TF/시각 위치 보정은 발행하지 않는�
 등록은 별도 localization 구성을 사용해야 한다. 아래 과거 검증 기록의 VSLAM TF 구성은
 현재 전용 launch의 동작을 설명하지 않는다.
 
+매번 새 mapping 실행을 시작하면 새 STM32 bridge process가 wheel odometry의
+`x/y/yaw`를 0으로 초기화하고 첫 encoder sample을 tick 기준점으로 잡는다. 주행 후
+mapping stack을 완전히 종료한 다음 로봇을 손으로 시작 위치에 옮기면 다음 실행의
+wheel odom은 다시 원점에서 시작한다. stack이 살아 있는 동안 들어 옮겨도 pose reset은
+일어나지 않는다.
+
 카메라가 이미 실행 중일 때 컨테이너에서 다음 launch를 사용한다.
 
 ```bash
