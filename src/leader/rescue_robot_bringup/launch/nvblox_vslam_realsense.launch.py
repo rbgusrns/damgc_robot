@@ -1,7 +1,7 @@
-"""Map with the existing D435 stream and VSLAM as the odom TF source.
+"""Use wheel odometry for local mapping and Nav2; observe VSLAM independently.
 
-Use this when wheel odometry/local EKF is unavailable. Do not run it alongside
-the dual-EKF launch, which also publishes odom -> base_link and map -> odom.
+Do not run another odom -> base_link publisher (including dual EKF) alongside.
+VSLAM does not correct this local frame until visual translation is validated.
 """
 
 import os
@@ -10,6 +10,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 
 def _include(name, arguments=None):
@@ -36,10 +37,12 @@ def generate_launch_description():
         SetEnvironmentVariable("FASTDDS_BUILTIN_TRANSPORTS", "UDPv4"),
         SetEnvironmentVariable("LD_LIBRARY_PATH", os.pathsep.join(gxf_library_paths)),
         _include("visual_slam_realsense.launch.py", {
-            "publish_odom_to_base_tf": "true",
-            "publish_map_to_odom_tf": "true",
+            "publish_odom_to_base_tf": "false",
+            "publish_map_to_odom_tf": "false",
             "image_jitter_threshold_ms": "50.0",
         }),
+        Node(package="rescue_robot_bringup", executable="wheel_odometry_tf.py",
+             name="wheel_odometry_tf", output="screen"),
         _include("nvblox_realsense.launch.py", {
             "filter_enabled": LaunchConfiguration("filter_enabled"),
         }),

@@ -9,8 +9,10 @@ install(DIRECTORY docs DESTINATION share/${PROJECT_NAME})
 install(PROGRAMS
   scripts/arrow_key_teleop.py
   scripts/costmap_topic_alias.py
+  scripts/frontier_exploration.py
   scripts/robot_self_filter.py
   scripts/vslam_covariance_adapter.py
+  scripts/wheel_odometry_tf.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

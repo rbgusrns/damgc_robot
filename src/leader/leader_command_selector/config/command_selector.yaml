@@ -7,3 +7,5 @@
     nav2_timeout: 0.50
     axis_epsilon: 1.0e-9
     shutdown_stop_count: 3
+    nav_wheel_guard_enabled: true
+    nav_wheel_odom_timeout: 0.5

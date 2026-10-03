@@ -29,10 +29,21 @@ export FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS:-UDPv4}"
 VSLAM_HEADLESS="${VSLAM_HEADLESS:-0}"
 VSLAM_ONLY="${VSLAM_ONLY:-0}"
 SELF_FILTER_ENABLED="${SELF_FILTER_ENABLED:-1}"
+MAPPING_SOURCE_MODE="${MAPPING_SOURCE_MODE:-STOP}"
+NAV_DIAGNOSTIC_IMAGES="${NAV_DIAGNOSTIC_IMAGES:-0}"
 STM32_I2C_DEVICE="${STM32_I2C_DEVICE:-/dev/i2c-7}"
 STM32_I2C_ADDRESS="${STM32_I2C_ADDRESS:-66}"
 STM32_I2C_POLL_HZ="${STM32_I2C_POLL_HZ:-500.0}"
 STM32_I2C_WRITE_ENABLED="${STM32_I2C_WRITE_ENABLED:-1}"
+
+if [[ "${MAPPING_SOURCE_MODE}" != "STOP" && "${MAPPING_SOURCE_MODE}" != "TELEOP" ]]; then
+  printf 'MAPPING_SOURCE_MODE must be STOP or TELEOP. Select NAV2 explicitly after startup.\n' >&2
+  exit 1
+fi
+if [[ "${NAV_DIAGNOSTIC_IMAGES}" != "0" && "${NAV_DIAGNOSTIC_IMAGES}" != "1" ]]; then
+  printf 'NAV_DIAGNOSTIC_IMAGES must be 0 or 1.\n' >&2
+  exit 1
+fi
 
 if [[ "${VSLAM_HEADLESS}" != "0" && "${VSLAM_HEADLESS}" != "1" ]] || \
   [[ "${SELF_FILTER_ENABLED}" != "0" && "${SELF_FILTER_ENABLED}" != "1" ]] || \
@@ -55,6 +66,9 @@ if [[ "${STM32_I2C_WRITE_ENABLED}" == "1" ]]; then
 fi
 
 mkdir -p "${RUNTIME_ROOT}" "${LOG_DIR}"
+printf 'run_id=%s\nstart_time=%s\nself_filter_enabled=%s\nnav_diagnostic_images=%s\nmapping_source_mode=%s\nfrontier_runner_speed=0.10 m/s, 0.20 rad/s (applied when run_frontier_exploration.sh starts)\n' \
+  "${RUN_ID}" "$(date --iso-8601=seconds)" "${SELF_FILTER_ENABLED}" \
+  "${NAV_DIAGNOSTIC_IMAGES}" "${MAPPING_SOURCE_MODE}" >"${LOG_DIR}/run_context.txt"
 
 is_container_running() {
   [[ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER_NAME}" 2>/dev/null || true)" == "true" ]]
@@ -141,6 +155,13 @@ cleanup() {
   set +e
 
   printf '\nStopping mapping stack...\n'
+  # Stop actuation before the stationary tail and potentially slow bag analysis.
+  if ! timeout 3 ros2 param set /leader/command_selector source_mode STOP >/dev/null 2>&1; then
+    printf 'Selector STOP could not be confirmed; stopping host launch groups now.\n' >&2
+    for pid in "${HOST_PIDS[@]}"; do
+      kill -INT -- "-${pid}" >/dev/null 2>&1 || true
+    done
+  fi
 
   # Let rosbag receive a clean SIGINT and write metadata before its topics or
   # container disappear.
@@ -180,6 +201,7 @@ cleanup() {
   fi
 
   rm -f "${LAUNCHER_PID_FILE}"
+  rm -f "${RUNTIME_ROOT}/active_run_id"
   printf 'Stopped. Logs: %s\n' "${LOG_DIR}"
 }
 
@@ -194,6 +216,15 @@ if [[ -f "${LAUNCHER_PID_FILE}" ]]; then
   rm -f "${LAUNCHER_PID_FILE}"
 fi
 printf '%s\n' "$$" > "${LAUNCHER_PID_FILE}"
+printf '%s\n' "${RUN_ID}" >"${RUNTIME_ROOT}/active_run_id"
+if command -v tegrastats >/dev/null 2>&1; then
+  setsid tegrastats --interval 1000 --logfile "${LOG_DIR}/tegrastats.log" \
+    >/dev/null 2>&1 &
+  HOST_PIDS+=("$!")
+else
+  printf 'tegrastats not installed; Jetson resource telemetry unavailable.\n' \
+    >>"${LOG_DIR}/run_context.txt"
+fi
 
 if [[ ! -t 0 ]]; then
   printf 'Run this script from an interactive terminal for arrow-key input.\n' >&2
@@ -264,7 +295,7 @@ setsid bash -lc "
 " >"${LOG_DIR}/realsense.log" 2>&1 &
 HOST_PIDS+=("$!")
 
-printf '[3/7] Starting Leader command selector in TELEOP mode...\n'
+printf '[3/7] Starting Leader command selector in %s mode...\n' "${MAPPING_SOURCE_MODE}"
 setsid bash -lc "
   export ROS_DOMAIN_ID='${ROS_DOMAIN_ID}'
   export ROS_LOCALHOST_ONLY='${ROS_LOCALHOST_ONLY}'
@@ -273,7 +304,7 @@ setsid bash -lc "
   source /opt/ros/humble/setup.bash
   source '${REPO_ROOT}/install/setup.bash'
   exec ros2 launch leader_command_selector command_selector.launch.py \\
-    source_mode:=TELEOP
+    source_mode:='${MAPPING_SOURCE_MODE}'
 " >"${LOG_DIR}/leader_command_selector.log" 2>&1 &
 HOST_PIDS+=("$!")
 
@@ -439,6 +470,7 @@ wait_for_topic "/visual_slam/tracking/odometry" 120
 printf '[6/7] Starting metrics rosbag...\n'
 docker exec "${CONTAINER_NAME}" rm -f "${CONTAINER_BAG_PID_FILE}" >/dev/null 2>&1 || true
 docker exec -d -u "${CONTAINER_USER}" \
+  -e NAV_DIAGNOSTIC_IMAGES="${NAV_DIAGNOSTIC_IMAGES}" \
   -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" \
   -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
   -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
@@ -449,8 +481,29 @@ docker exec -d -u "${CONTAINER_USER}" \
     source /opt/ros/humble/setup.bash
     source /workspaces/isaac_ros-dev/install_docker/setup.bash
     echo "$$" > /tmp/damgc_vslam_mapping_bag.pid
-    exec ros2 bag record --output "${bag_path}" \
-      /leader/cmd_vel \
+    image_topics=()
+    if [[ "${NAV_DIAGNOSTIC_IMAGES}" == "1" ]]; then
+      image_topics=(/leader/camera/infra1/image_rect_raw /leader/camera/infra2/image_rect_raw
+        /leader/camera/infra1/camera_info /leader/camera/infra2/camera_info
+        /leader/camera/depth/image_rect_raw /leader/camera/depth/camera_info
+        /leader/camera/depth/self_filtered)
+    fi
+    exec ros2 bag record --include-hidden-topics --output "${bag_path}" \
+      "${image_topics[@]}" \
+      /leader/command_selector/status \
+      /parameter_events /diagnostics /rosout \
+      /nav2/cmd_vel /evaluation /plan /local_plan /received_global_plan /transformed_global_plan \
+      /leader/teleop/cmd_vel /leader/approach/cmd_vel_safe \
+      /global_costmap/costmap_raw /local_costmap/costmap_raw \
+      /global_costmap/costmap /global_costmap/costmap_updates \
+      /local_costmap/costmap /local_costmap/costmap_updates \
+      /local_costmap/published_footprint /nvblox_node/static_map_slice \
+      /navigate_to_pose/_action/status /navigate_to_pose/_action/feedback \
+      /follow_path/_action/status /follow_path/_action/feedback \
+      /leader/cmd_vel /leader/gripper/manual_command /leader/system_state \
+      /leader/stm32_rx/frame_count /leader/stm32_rx/poll_count \
+      /leader/stm32_rx/empty_poll_count /leader/stm32_rx/crc_errors \
+      /leader/stm32_rx/sequence_drops \
       /leader/odom/raw \
       /leader/imu/data_raw \
       /leader/odometry/local \
@@ -482,7 +535,7 @@ printf '  recording: %s\n' "${BAG_DIR}"
 printf '  capturing a 5-second stationary baseline...\n'
 sleep 5
 
-printf '[7/7] Starting arrow-key control. E/D changes speed; Space stops; Ctrl-C shuts everything down.\n'
+printf '[7/7] Starting arrow-key control (selector=%s). Select TELEOP explicitly to drive. Ctrl-C shuts everything down.\n' "${MAPPING_SOURCE_MODE}"
 source_with_nounset_disabled "${REPO_ROOT}/install/setup.bash"
 ros2 run rescue_robot_bringup arrow_key_teleop.py --ros-args \
   -p command_topic:=/leader/teleop/cmd_vel \

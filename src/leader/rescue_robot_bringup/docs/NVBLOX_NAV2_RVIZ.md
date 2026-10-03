@@ -1,9 +1,15 @@
 # nvblox 기반 Nav2 목표 확인
 
-현재 구성은 VSLAM이 `odom -> base_link`를 발행하고 nvblox가 `odom` 프레임의
+2026-10-03 주행 문제 후 현재 전용 launch는 wheel odometry가 `odom -> base_link`를
+발행하고 nvblox가 `odom` 프레임의
 `/nvblox_node/static_map_slice`를 발행한다. Nav2 global/local costmap 모두 이 slice를
-사용한다. Nav2 자체는 `map` 프레임이나 AMCL을 요구하지 않는다. Survivor의
-장기 위치 등록에는 `map`이 필요하므로 VSLAM이 `map -> odom`도 발행한다.
+사용한다. Nav2 위치·속도와 frontier 위치는 `/leader/odom/raw`를 기준으로 한다.
+VSLAM은 비교 기록용이고 TF/시각 위치 보정은 발행하지 않는다. VSLAM translation
+정지나 wheel/VSLAM 차이만으로 주행을 끊지 않는다. wheel 데이터 자체의 freshness와
+유효성은 selector가 확인한다. Nav2 자체는 `map` 프레임이나 AMCL을 요구하지 않는다.
+이 전용 wheel 모드에는 `map -> odom`이 없으므로 Survivor의 map 기반 장기 위치
+등록은 별도 localization 구성을 사용해야 한다. 아래 과거 검증 기록의 VSLAM TF 구성은
+현재 전용 launch의 동작을 설명하지 않는다.
 
 카메라가 이미 실행 중일 때 컨테이너에서 다음 launch를 사용한다.
 
@@ -30,8 +36,9 @@ source install_docker/local_setup.bash
 기존 `nvblox_costmap.launch.py` 또는 다른 VSLAM/nvblox launch와 동시에 실행하지 않는다.
 카메라·VSLAM·nvblox가 이미 실행 중이면 `nvblox_nav2.launch.py`만 실행할 수 있다.
 특히 `visual_slam_nvblox_realsense.launch.py`는 dual EKF가 TF를 발행하므로
-VSLAM의 `publish_odom_to_base_tf` 값이 `false`다. 위 전용 launch에서는
-`publish_odom_to_base_tf`와 `publish_map_to_odom_tf`가 모두 `true`다.
+VSLAM의 `publish_odom_to_base_tf` 값이 `false`다. 위 전용 launch에서도
+`publish_odom_to_base_tf`와 `publish_map_to_odom_tf`를 모두 `false`로 두며,
+`wheel_odometry_tf` 노드가 wheel pose와 timestamp를 보존해 TF를 발행한다.
 따라서 이 launch와 dual EKF launch를 동시에 실행하면 TF publisher가 중복된다.
 
 별도 컨테이너 터미널에서 같은 setup 파일을 source한 뒤
@@ -74,6 +81,8 @@ ros2 topic hz /costmap/costmap
 ```
 
 ## Survivor와 함께 실행할 때: TF 및 depth 동기화
+
+이 절은 wheel 기반 전용 launch로 변경하기 전의 통합 검증 기록이다.
 
 2026-09-26의 Nav2 통합(`1b201a8`)에서 전용 VSLAM launch의
 `publish_map_to_odom_tf`가 `true`에서 `false`로 바뀌었다. 전용 실행 경로에는
@@ -289,8 +298,8 @@ mapper가 이미 적분한 점유를 유지할 수 있어 이 변경은 그리�
 `nvblox_realsense.launch.py`는 이제 D435 깊이 영상과 nvblox 사이에서
 `robot_self_filter.py`를 실행한다. 현재 필터는 camera intrinsics와 base-to-camera TF로
 깊이 픽셀을 `base_link` 좌표로 바꾸고, 다음 그리퍼 swept volume 안에 들어오는 점을 지운다:
-`x=0.12..0.38 m`, `y=-0.15..+0.15 m`, `z=0.00..0.16 m`. 이 범위는 URDF 그리퍼보다
-넓어 손가락 개폐와 흔들림을 포함한다. 이 영역 안의 실제 장애물도 함께 지워지는
+`x=0.08..0.43 m`, `y=-0.20..+0.20 m`, `z=0.00..0.22 m`. 기존보다 여유를 늘려 URDF 그리퍼,
+손가락 개폐와 흔들림을 포함한다. 이 영역 안의 실제 장애물도 함께 지워지는
 의도된 tradeoff다. 전체 영상의 고정된 아래쪽 띠나 낮은 장애물을 일괄 제거하지 않고,
 원본 토픽은 유지하며 nvblox에는 `/leader/camera/depth/self_filtered`를 연결한다.
 
@@ -350,6 +359,27 @@ gripper self-occupancy가 제거된 것으로 판단한다.
 있을 때 놓치는지 확인해야 한다. snapshot: `log/self_filter_ab_20261003/filtered_swept_volume.json`,
 `filtered_swept_volume_wide.json`; run data: `data/vslam_mapping_20261003_162742`.
 
+### 2026-10-03 swept-volume 추가 여유
+
+후속 stopped costmap 표본에서 lethal cell이 로봇 기준 전방 오른쪽 footprint 모서리 가까이에
+관측됐다. 사용자가 그리퍼 자기 점유로 판단해 margin을 조금 더 늘려 달라고 요청했다. 기본
+필터 범위를 `x=0.08..0.43`, `y=±0.20`, `z=0.00..0.22 m` (`base_link`)로 변경했다.
+새 mapping session에서 parameter 적용을 확인했다. 중심과 주변 5×5 costmap 셀은 0이었고
+최근접 lethal cell은 약 `(+0.525,+0.475) m`였다. 확장된 volume 안의 실제 장애물도 함께
+필터될 수 있다.
+
+### 2026-10-03 확장 filter 후 frontier 주행 재시험
+
+`data/vslam_mapping_20261003_202448`에서 시작 pose 기준 전방 2 m, 반경 2 m disk를 탐색했다.
+속도 제한은 선속도 `0.10 m/s`, 각속도 `0.20 rad/s`였다. 첫 목표는 허용 오차 내 즉시 성공,
+두 번째 목표는 약 4.6초 주행 후 성공했다. 세 번째 목표는 약 10초 후 `Failed to make
+progress`로 abort했다. 이때 `/nav2/cmd_vel`은 우회전 방향 각속도 `-0.20 rad/s`까지 명령해,
+관찰된 급우회전이 Nav2 출력에도 포함된 것을 확인했다. 종료 pose는 약 `(0.236,-0.069) m`,
+yaw `-17.8°`였다. 원인은 확정하지 않았다. Controller 10 Hz loop miss와 BT tick warning도
+발생했다. 실패 후 selector를 STOP으로 두고 zero command와 5초 정지 odom을 확인한 다음
+mapping을 종료했다. 탐색은 불완전이며 성공으로 판정하지 않는다. 기록 bag에 VSLAM odometry와
+status 표본이 없어 비교할 수 없다.
+
 ## Nav2 footprint: 차체와 그리퍼를 포함한 다각형
 
 Nav2 costmap 설정은 `robot_radius` 원 대신 `base_link` 기준 6점 convex polygon과
@@ -396,3 +426,69 @@ odometry 변화는 대략 `(+0.82,-0.054) m`, yaw `-0.02° → -5.81°`였다. �
 다음 검증은 각속도 0인 짧은 직진으로 구동계 편향을 분리하고, 좌우 encoder/속도 telemetry를
 기록하는 것이다. 이후 반복 직진·회전, 장애물 정지, cancel/failure 정지 동작을 확인한다.
 E-stop 및 bridge watchdog은 아직 실물 시험하지 않았다.
+
+### 2026-10-03 20:45 계측 재시험
+
+계측을 추가한 뒤 새 run에서 목표 2개는 통과했지만, 세 번째 목표는 `/nav2/cmd_vel` 선속도
+`0`과 제자리 회전만 10초 지속되어 `Failed to make progress`로 abort했다. wheel pose 변화는
+약 4 mm였다. 선택 frontier의 ESDF clearance는 `0.354 m`로 기준 `0.35 m`를 겨우 넘었다.
+현재 증거로는 DWB가 footprint 충돌/비용 때문에 전진 궤적을 선택하지 못했을 가능성이 크지만,
+critic별 점수는 당시 bag에 없어 원인을 확정하지 못한다. 실행 중 controller loop miss는 없었다.
+Explorer는 자기 입력 global OccupancyGrid가 stale됐다고 알렸으나, 그 topic 자체가 bag에 없어
+Nav2 raw grid 기록과 비교할 수 없었다.
+
+다음 run의 bag은 `/global_costmap/costmap`, local/global costmap update topic 및 DWB
+`/evaluation`을 포함한다. DWB evaluation은 trajectory별 critic 점수를 보존하므로 정지 궤적이
+선택된 이유를 가르는 데 쓴다. Filter는 약 20–27 Hz로 돌고 frame drop은 0이었다. 계측 중
+selector 요약 logger에 severity 선택 버그가 발견되어 수정했고, selector와 두 ROS overlay를
+다시 빌드했다. 이 주행 자료는 `data/vslam_mapping_20261003_204257/`와
+`log/vslam_mapping_20261003_204257/`에 있다.
+
+# Bounded frontier exploration
+
+The explorer chooses its search disk once from the first wheel odometry sample
+(`/leader/odom/raw`): the center is 2 m ahead in the robot's startup heading,
+and the radius is 2 m.
+It reads Nav2's `/global_costmap/costmap` (in `odom`), selects reachable free
+cells next to unknown nvblox slice cells inside that disk, checks the Nav2
+costmap for traversability and nvblox ESDF for 0.35 m obstacle clearance, and
+sends them one at a time to `/navigate_to_pose`. The Nav2 OccupancyGrid alone
+does not preserve the unobserved state in this setup, so the explorer reads
+`/nvblox_node/static_map_slice` for frontier detection. Reached goals are
+skipped on later scans. A rejected, aborted, or otherwise failed goal stops the
+explorer for operator review. This bounded first-pass policy does not guarantee
+complete coverage behind walls or beyond the current observed map slice. An
+early physical trial ended after wall contact. Later controlled repeats verified
+selector stopping, but this frontier policy still has an unresolved controller
+stall described below and is not yet validated for coverage.
+
+Start the existing mapping stack and wait until Nav2 is active. The repository
+runner applies the requested speed ceiling, records the frontier node output,
+and returns the selector to `STOP` when interrupted or when launch exits:
+
+```bash
+./scripts/run_frontier_exploration.sh
+```
+
+When exploration completes or is interrupted, stop the base through the
+selector:
+
+```bash
+ros2 param set /leader/command_selector source_mode STOP
+```
+
+The explorer expects `/global_costmap/costmap`, `/leader/odom/raw`,
+`/nvblox_node/static_map_slice`, and the Nav2 `NavigateToPose` action. The
+current rolling global costmap is 10 m square, so it can represent the 4 m
+diameter target disk while the robot moves within it. The first repeated
+physical trial is recorded above; it reached two targets and then aborted on
+the third. Treat the behavior as in-progress, not validated coverage.
+
+The mapping runner stores per-process logs under `log/vslam_mapping_<run_id>/`,
+including controller/Nav2 output, selector state/output summaries, RealSense,
+STM32 bridge, rosbag status, and Jetson `tegrastats`. The frontier runner adds
+`frontier_exploration.log` and ROS client logs in `ros_logs/`. The bag includes
+commands from Nav2 and the selector, wheel odometry, action feedback/status,
+global/local costmaps, footprint, plans, TF, `/rosout`, `/diagnostics`, and
+parameter events. The explorer log reports frontier filter counts, selected
+target/cost/ESDF clearance, goal duration/status, and periodic Nav2 feedback.

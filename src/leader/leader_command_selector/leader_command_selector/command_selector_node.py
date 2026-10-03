@@ -6,12 +6,15 @@ from typing import Dict, List, Optional
 
 import rclpy
 from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
+from rclpy.qos import qos_profile_sensor_data
+from leader_command_selector.nav_odometry_guard import NavOdometryGuard
 
 from leader_command_selector.command_selector_logic import (
     CommandSource,
@@ -44,6 +47,14 @@ class CommandSelectorNode(Node):
         super().__init__("command_selector")
         self._declare_parameters()
         self._load_and_validate_parameters()
+        self._nav_guard = None
+        if self.get_parameter("nav_wheel_guard_enabled").value:
+            self._nav_guard = NavOdometryGuard(
+                float(self.get_parameter("nav_wheel_odom_timeout").value))
+            self.create_subscription(
+                Odometry, "/leader/odom/raw", self._on_guard_odom,
+                qos_profile_sensor_data,
+            )
 
         self._command_pub = self.create_publisher(Twist, "cmd_vel", COMMAND_QOS)
         self._status_pub = self.create_publisher(
@@ -69,6 +80,12 @@ class CommandSelectorNode(Node):
             source: None for source in self._motion_sources()
         }
         self._last_status: Optional[str] = None
+        self._diagnostic_window_start = time.monotonic()
+        self._diagnostic_samples = 0
+        self._diagnostic_vx_min = float("inf")
+        self._diagnostic_vx_max = float("-inf")
+        self._diagnostic_wz_min = float("inf")
+        self._diagnostic_wz_max = float("-inf")
         self._parameter_callback = self.add_on_set_parameters_callback(
             self._on_parameter_change
         )
@@ -102,6 +119,21 @@ class CommandSelectorNode(Node):
         self.declare_parameter("nav2_timeout", 0.50)
         self.declare_parameter("axis_epsilon", 1.0e-9)
         self.declare_parameter("shutdown_stop_count", 3)
+        self.declare_parameter("nav_wheel_guard_enabled", True)
+        self.declare_parameter("nav_wheel_odom_timeout", 0.5)
+
+    def _on_guard_odom(self, message):
+        if self._source != CommandSource.NAV2:
+            return
+        p, q = message.pose.pose.position, message.pose.pose.orientation
+        norm = q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w
+        twist = message.twist.twist
+        valid = (message.header.frame_id == "odom" and message.child_frame_id == "base_link"
+                 and all(isfinite(v) for v in (p.x, p.y, p.z, norm,
+                         twist.linear.x, twist.linear.y, twist.angular.z))
+                 and abs(norm - 1.0) <= 0.01)
+        stamp = message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
+        self._nav_guard.update(stamp, time.monotonic(), valid)
 
     def _load_and_validate_parameters(self) -> None:
         """Load startup settings and reject ambiguous values."""
@@ -186,6 +218,8 @@ class CommandSelectorNode(Node):
 
         if source != self._source:
             self._source = source
+            if self._nav_guard is not None:
+                self._nav_guard.reset()
             self._clear_commands()
             self._command_pub.publish(Twist())
             self._publish_status(self._status_at(time.monotonic()))
@@ -206,16 +240,44 @@ class CommandSelectorNode(Node):
             command,
             received_seconds,
         )
-        self._command_pub.publish(self._to_twist(selected))
-        self._publish_status(
-            selection_status(
-                self._source,
-                now_seconds,
-                self._selector_parameters,
-                command,
-                received_seconds,
-            )
+        status = selection_status(
+            self._source,
+            now_seconds,
+            self._selector_parameters,
+            command,
+            received_seconds,
         )
+        if self._source == CommandSource.NAV2 and self._nav_guard is not None:
+            guard_status = self._nav_guard.check(
+                now_seconds, self.get_clock().now().nanoseconds * 1e-9)
+            if guard_status != "READY":
+                selected = PlanarCommand()
+                status = guard_status
+                if status != self._last_status:
+                    self.get_logger().warning(f"Nav2 output held: {status}")
+        if self._source != CommandSource.STOP:
+            self._diagnostic_samples += 1
+            self._diagnostic_vx_min = min(self._diagnostic_vx_min, selected.linear_x)
+            self._diagnostic_vx_max = max(self._diagnostic_vx_max, selected.linear_x)
+            self._diagnostic_wz_min = min(self._diagnostic_wz_min, selected.angular_z)
+            self._diagnostic_wz_max = max(self._diagnostic_wz_max, selected.angular_z)
+            if now_seconds - self._diagnostic_window_start >= 1.0:
+                age = (now_seconds - received_seconds
+                       if received_seconds is not None else float("inf"))
+                self.get_logger().info(
+                    "1s output summary source=%s status=%s samples=%d "
+                    "vx=[%.3f,%.3f] wz=[%.3f,%.3f] input_age=%.3fs" % (
+                        self._source.value, status, self._diagnostic_samples,
+                        self._diagnostic_vx_min, self._diagnostic_vx_max,
+                        self._diagnostic_wz_min, self._diagnostic_wz_max, age))
+                self._diagnostic_window_start = now_seconds
+                self._diagnostic_samples = 0
+                self._diagnostic_vx_min = float("inf")
+                self._diagnostic_vx_max = float("-inf")
+                self._diagnostic_wz_min = float("inf")
+                self._diagnostic_wz_max = float("-inf")
+        self._command_pub.publish(self._to_twist(selected))
+        self._publish_status(status)
 
     def _selected_cache(self):
         if self._source == CommandSource.STOP:

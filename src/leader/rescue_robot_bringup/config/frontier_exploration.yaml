@@ -1,0 +1,11 @@
+frontier_exploration:
+  ros__parameters:
+    costmap_topic: /global_costmap/costmap
+    odometry_topic: /leader/odom/raw
+    target_offset: 2.0
+    exploration_radius: 2.0
+    max_cost: 70
+    minimum_obstacle_clearance: 0.35
+    frontier_min_cells: 2
+    goal_separation: 0.35
+    rescan_period: 1.0

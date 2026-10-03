@@ -154,7 +154,8 @@ def test_motion_sources_route_only_through_the_selector() -> None:
 
     assert '"/leader/teleop/cmd_vel"' in teleop
     assert "safe_command_topic: /leader/approach/cmd_vel_safe" in guard
-    assert "source_mode:=TELEOP" in mapping_script
+    assert 'MAPPING_SOURCE_MODE="${MAPPING_SOURCE_MODE:-STOP}"' in mapping_script
+    assert "source_mode:='${MAPPING_SOURCE_MODE}'" in mapping_script
     assert "-p command_topic:=/leader/teleop/cmd_vel" in mapping_script
 
 

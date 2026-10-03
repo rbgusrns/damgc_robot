@@ -85,6 +85,7 @@ def parameter_harness() -> SimpleNamespace:
     statuses = []
     harness = SimpleNamespace(
         _source=CommandSource.TELEOP,
+        _nav_guard=None,
         _selector_parameters=selector_parameters(),
         _commands={item: PlanarCommand(0.5, 0.5) for item in sources},
         _received_seconds={item: 10.0 for item in sources},
@@ -150,3 +151,25 @@ def test_twist_output_populates_only_planar_axes() -> None:
     assert message.angular.z == -0.4
     assert message.linear.y == message.linear.z == 0.0
     assert message.angular.x == message.angular.y == 0.0
+
+
+@pytest.mark.parametrize("guard_status,expected", [
+    ("NAV2_WHEEL_ODOM_STALE", 0.0), ("READY", 0.08)])
+def test_wheel_freshness_controls_nav_output(monkeypatch, guard_status, expected):
+    """The final actuator-facing publisher must emit zero even with fresh Nav2."""
+    monkeypatch.setattr(node_module.time, "monotonic", lambda: 10.0)
+    harness = parameter_harness()
+    harness._source = CommandSource.NAV2
+    harness._commands[CommandSource.NAV2] = PlanarCommand(0.08, 0.25)
+    harness._received_seconds[CommandSource.NAV2] = 10.0
+    harness._last_status = None
+    harness._nav_guard = SimpleNamespace(check=lambda *args: guard_status)
+    harness.get_clock = lambda: SimpleNamespace(
+        now=lambda: SimpleNamespace(nanoseconds=10_000_000_000))
+    harness.get_logger = lambda: SimpleNamespace(warning=lambda message: None)
+    harness._to_twist = CommandSelectorNode._to_twist
+    CommandSelectorNode._on_timer(harness)
+    assert harness._command_pub.messages[-1].linear.x == expected
+    if expected == 0.0:
+        assert harness._command_pub.messages[-1].angular.z == 0.0
+    assert harness.statuses[-1] == ("ACTIVE_NAV2" if guard_status == "READY" else guard_status)

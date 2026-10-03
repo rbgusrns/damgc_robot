@@ -23,7 +23,7 @@ pipeline, Survivor Stage 1·3·4·5 실기 검증과 Stage 2 구현 상태를 �
 | BNO055와 wheel odometry 보정 | 부분 완료 | 현재 장비는 STM32 IMU/wheel odometry와 dual EKF를 검증; BNO055 기반 계획 항목은 별도 미완료 |
 | 카메라 기반 생존자 탐지 | 완료 | survivor 전용 Docker GPU runtime과 YOLO11n pipeline 검증; 실제 D435에서 1/2/3명 검출, bbox/confidence, 좌→우 numbering 및 rqt debug image 확인 |
 | depth 기반 생존자 3차원 위치 | 완료(범위 내) | Stage 3 camera optical XYZ와 Stage 4 exact-timestamp TF2 map XYZ, `/leader/survivor/map_positions`를 실제 D435에서 검증 |
-| Nav2 자율주행 | 부분 완료 | VSLAM/nvblox·Nav2 경로 생성에 더해 2026-10-03 selector `NAV2`를 통한 실물 `NavigateToPose` 목표 2개 성공을 확인했다. 0.10 m/s 상한에서 active 구간 VSLAM 전진 약 0.71 m, lateral 0.014 m, 누적 yaw 약 -7.5°였고 각속도 보정 명령이 변했다. 좌우 모터별 telemetry가 없어 구동 편차 기여는 미분리; 반복성·도착 오차·장애물 정지·E-stop은 미검증 |
+| Nav2 자율주행 | 부분 완료 | 전방 2 m 중심·반경 2 m frontier 탐색 구현. 2026-10-03 반복 실물 run에서 개별 목표 2개까지 연속 성공한 뒤 DWB 경로 추종이 멈춰 abort되는 현상 재현. 마지막 분석은 NavFn path endpoint yaw `-135°`와 실제 접근 bearing `-34.7°` 불일치를 확인; explorer가 목표 bearing으로 yaw를 설정하도록 수정했으나 물리 재검증 전. 장애물 회피·E-stop·전체 disk 완주는 미검증 |
 | AprilTag 물품 인식·정밀 접근 | 부분 완료 | 양 로봇 camera/base alignment와 guarded software velocity 구현; 실제 접근·파지 검증 필요 |
 | 그리퍼 물품 파지 | 확인 필요 | URDF 형상만 있고 제어 코드·실물 시험 근거 없음 |
 | 경량 물품 단독 운반 | 미구현 | 접근·파지·주행 연결 없음 |
