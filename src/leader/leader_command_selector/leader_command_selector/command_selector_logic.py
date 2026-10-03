@@ -13,6 +13,7 @@ class CommandSource(str, Enum):
     TELEOP = "TELEOP"
     APPROACH = "APPROACH"
     NAV2 = "NAV2"
+    MISSION = "MISSION"
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class SelectorParameters:
     teleop_timeout: float
     approach_timeout: float
     nav2_timeout: float
+    mission_timeout: float
     axis_epsilon: float
 
     def validate(self) -> None:
@@ -38,6 +40,7 @@ class SelectorParameters:
             self.teleop_timeout,
             self.approach_timeout,
             self.nav2_timeout,
+            self.mission_timeout,
             self.axis_epsilon,
         )
         if not all(isfinite(value) for value in values):
@@ -46,6 +49,7 @@ class SelectorParameters:
             self.teleop_timeout,
             self.approach_timeout,
             self.nav2_timeout,
+            self.mission_timeout,
         ) <= 0.0:
             raise ValueError("Source timeouts must be greater than zero")
         if self.axis_epsilon < 0.0:
@@ -59,6 +63,8 @@ class SelectorParameters:
             return self.approach_timeout
         if source == CommandSource.NAV2:
             return self.nav2_timeout
+        if source == CommandSource.MISSION:
+            return self.mission_timeout
         raise ValueError("STOP has no source timeout")
 
 

@@ -61,6 +61,9 @@ class CommandSelectorNode(Node):
         self.create_subscription(
             Twist, "/nav2/cmd_vel", self._on_nav2_command, COMMAND_QOS
         )
+        self.create_subscription(
+            Twist, "mission/cmd_vel_safe", self._on_mission_command, COMMAND_QOS
+        )
 
         self._commands: Dict[CommandSource, Optional[PlanarCommand]] = {
             source: None for source in self._motion_sources()
@@ -76,12 +79,13 @@ class CommandSelectorNode(Node):
         self._publish_status(self._status_at(time.monotonic()))
         self.get_logger().info(
             "Command selector ready: source=%s, timeouts=(teleop %.3fs, "
-            "approach %.3fs, nav2 %.3fs)"
+            "approach %.3fs, nav2 %.3fs, mission %.3fs)"
             % (
                 self._source.value,
                 self._selector_parameters.teleop_timeout,
                 self._selector_parameters.approach_timeout,
                 self._selector_parameters.nav2_timeout,
+                self._selector_parameters.mission_timeout,
             )
         )
 
@@ -91,6 +95,7 @@ class CommandSelectorNode(Node):
             CommandSource.TELEOP,
             CommandSource.APPROACH,
             CommandSource.NAV2,
+            CommandSource.MISSION,
         )
 
     def _declare_parameters(self) -> None:
@@ -100,6 +105,7 @@ class CommandSelectorNode(Node):
         self.declare_parameter("teleop_timeout", 0.30)
         self.declare_parameter("approach_timeout", 0.35)
         self.declare_parameter("nav2_timeout", 0.50)
+        self.declare_parameter("mission_timeout", 0.35)
         self.declare_parameter("axis_epsilon", 1.0e-9)
         self.declare_parameter("shutdown_stop_count", 3)
 
@@ -110,7 +116,7 @@ class CommandSelectorNode(Node):
             self._source = CommandSource(source_value)
         except ValueError as error:
             raise ValueError(
-                "source_mode must be STOP, TELEOP, APPROACH, or NAV2"
+                "source_mode must be STOP, TELEOP, APPROACH, NAV2, or MISSION"
             ) from error
         self._publish_rate = float(self.get_parameter("publish_rate").value)
         self._shutdown_stop_count = int(
@@ -120,6 +126,7 @@ class CommandSelectorNode(Node):
             teleop_timeout=float(self.get_parameter("teleop_timeout").value),
             approach_timeout=float(self.get_parameter("approach_timeout").value),
             nav2_timeout=float(self.get_parameter("nav2_timeout").value),
+            mission_timeout=float(self.get_parameter("mission_timeout").value),
             axis_epsilon=float(self.get_parameter("axis_epsilon").value),
         )
         if not isfinite(self._publish_rate) or self._publish_rate <= 0.0:
@@ -136,6 +143,9 @@ class CommandSelectorNode(Node):
 
     def _on_nav2_command(self, message: Twist) -> None:
         self._on_command(CommandSource.NAV2, message)
+
+    def _on_mission_command(self, message: Twist) -> None:
+        self._on_command(CommandSource.MISSION, message)
 
     def _on_command(self, source: CommandSource, message: Twist) -> None:
         """Cache only a valid command from the currently selected source."""
@@ -181,7 +191,7 @@ class CommandSelectorNode(Node):
         except ValueError:
             return SetParametersResult(
                 successful=False,
-                reason="source_mode must be STOP, TELEOP, APPROACH, or NAV2",
+                reason="source_mode must be STOP, TELEOP, APPROACH, NAV2, or MISSION",
             )
 
         if source != self._source:

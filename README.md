@@ -53,7 +53,10 @@
   FOV→LOST, same-ID reassociation, yellow LAST SEEN marker, white status text와
   Registry text Z+1.0 m를 확인했다. VSLAM·nvblox 위 RViz 표시까지
   **VERIFIED**다.
-- 아직 완료되지 않음: Nav2 autonomous driving, 전체 물품 파지·운반, Mission Coordinator,
+- 협동 미션(2026-09-30 추가, `src/cooperative_mission`): 리더 AprilTag(QR) 탐색·정렬·파지 →
+  팔로워 반대편 이동·파지 → ACK 기반 동시 리프트 → 공통 속도 1초 협동 직진을 조정하는 Mission
+  Coordinator. 소프트웨어·시뮬레이션 시험 완료, **실물 검증 필요**. STM32 펌웨어 변경 없음.
+- 아직 완료되지 않음: Nav2 autonomous driving, 전체 물품 파지·운반,
   실물 리더–팔로워 협동 운반, process/map-session 외부 Survivor ID 저장.
 - Survivor의 `Survivor candidate N`은 현재 PoseArray frame-local 번호이고 Registry ID와
   다르다. Stage 4 raw map A→B 평균 변화는 약 `0.115 m`였으므로 정밀 절대 위치를
@@ -373,6 +376,24 @@ heartbeat 또는 명령이 끊기면 0 속도로 정지합니다. 상세 계약�
 모터 없는 네트워크 점검과 실제 장비의 안전한 enable/종료 순서는
 [협동 이동 실행 가이드](docs/COOPERATIVE_TRANSPORT_RUN_GUIDE.md)를 따릅니다.
 
+## 협동 미션: QR 인식 → 파지 → 반대편 파지 → 동시 리프트 → 1초 협동 직진
+
+`cooperative_mission` 패키지가 프로젝트 시나리오 전체를 자동으로 수행합니다. 기존 AprilTag
+인식·접근 controller·command selector·velocity guard·STM32 bridge·Dynamixel 노드를 그대로
+재사용하고, 리더 `mission_coordinator`와 팔로워 `mission_executor`만 추가했습니다.
+
+```bash
+bash scripts/run_cooperative_mission.sh follower   # Follower Orin 먼저
+bash scripts/run_cooperative_mission.sh leader     # Leader Orin, Enter로 시작
+```
+
+1. 리더가 물체 태그를 제자리 탐색으로 찾고 정렬 → 2. 리더 집게 닫기 → 3. 팔로워가 반대 면 태그로
+정렬 후 집게 닫기 → 4. 팔로워 ACK 순간 두 RX-64 동시 리프트 → 5. 리더 공통 속도를 팔로워가 부호
+반전으로 추종해 같은 방향 1.0 s 직진 → 정지·유지. 이후 Enter로 함께 내려놓습니다.
+
+설계·안전 정책은 [cooperative_mission README](src/cooperative_mission/README.md), 실행·보정 절차는
+[협동 미션 실행 가이드](docs/COOPERATIVE_MISSION_RUN_GUIDE.md)를 따릅니다.
+
 ## 팔로워 인식 파이프라인
 
 ```bash
@@ -413,6 +434,7 @@ AprilTag controller가 이 토픽을 직접 publish하지 않습니다. 현재 b
 - [프로젝트 개요](docs/PROJECT_OVERVIEW.md)
 - [개발 계획서](docs/Plan.md)
 - [개발 현황 및 로드맵](docs/STATUS_AND_ROADMAP.md)
+- [협동 미션 실행 가이드](docs/COOPERATIVE_MISSION_RUN_GUIDE.md)
 - [Survivor 통합 launch 검증](docs/SURVIVOR_PIPELINE_INTEGRATED_LAUNCH_VALIDATION.md)
 - [nvblox/Nav2 검증](src/leader/rescue_robot_bringup/docs/NVBLOX_NAV2_RVIZ.md)
 - [Leader AprilTag Drive 실행 가이드](src/leader/rescue_robot_bringup/docs/LEADER_APRILTAG_DRIVE_RUN_GUIDE.md)

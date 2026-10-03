@@ -8,6 +8,7 @@ Leader의 최종 `/leader/cmd_vel` source를 하나로 선택한다.
 | `TELEOP` | `/leader/teleop/cmd_vel` |
 | `APPROACH` | `/leader/approach/cmd_vel_safe` |
 | `NAV2` | `/nav2/cmd_vel` |
+| `MISSION` | `/leader/mission/cmd_vel_safe` |
 
 Output은 `/leader/cmd_vel`, status는 transient-local
 `/leader/command_selector/status` (`std_msgs/msg/String`)다. Generic launch default는 `STOP`이다.
@@ -18,6 +19,7 @@ ros2 param set /leader/command_selector source_mode STOP
 ros2 param set /leader/command_selector source_mode TELEOP
 ros2 param set /leader/command_selector source_mode APPROACH
 ros2 param set /leader/command_selector source_mode NAV2
+ros2 param set /leader/command_selector source_mode MISSION
 ros2 topic echo /leader/command_selector/status \
   --qos-durability transient_local
 ```

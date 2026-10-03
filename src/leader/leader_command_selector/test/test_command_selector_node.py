@@ -31,7 +31,7 @@ def make_twist(linear_x: float = 0.1, angular_z: float = 0.2) -> Twist:
 
 
 def selector_parameters() -> SelectorParameters:
-    return SelectorParameters(0.30, 0.35, 0.50, 1.0e-9)
+    return SelectorParameters(0.30, 0.35, 0.50, 0.35, 1.0e-9)
 
 
 def command_harness(source: CommandSource) -> SimpleNamespace:
@@ -55,6 +55,7 @@ def command_harness(source: CommandSource) -> SimpleNamespace:
         (CommandSource.TELEOP, CommandSource.APPROACH),
         (CommandSource.APPROACH, CommandSource.NAV2),
         (CommandSource.NAV2, CommandSource.TELEOP),
+        (CommandSource.MISSION, CommandSource.APPROACH),
     ],
 )
 def test_unselected_source_is_completely_ignored(selected, incoming) -> None:
@@ -67,7 +68,12 @@ def test_unselected_source_is_completely_ignored(selected, incoming) -> None:
 
 @pytest.mark.parametrize(
     "source",
-    [CommandSource.TELEOP, CommandSource.APPROACH, CommandSource.NAV2],
+    [
+        CommandSource.TELEOP,
+        CommandSource.APPROACH,
+        CommandSource.NAV2,
+        CommandSource.MISSION,
+    ],
 )
 def test_selected_source_is_cached_with_receipt_time(
     source, monkeypatch: pytest.MonkeyPatch

@@ -23,7 +23,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "source_mode",
                 default_value="STOP",
-                choices=["STOP", "TELEOP", "APPROACH", "NAV2"],
+                choices=["STOP", "TELEOP", "APPROACH", "NAV2", "MISSION"],
                 description="Initial Leader velocity command source",
             ),
             Node(

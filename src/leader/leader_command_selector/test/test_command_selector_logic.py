@@ -20,6 +20,7 @@ def parameters(**overrides: float) -> SelectorParameters:
         "teleop_timeout": 0.30,
         "approach_timeout": 0.35,
         "nav2_timeout": 0.50,
+        "mission_timeout": 0.35,
         "axis_epsilon": 1.0e-9,
     }
     values.update(overrides)
@@ -32,6 +33,7 @@ def parameters(**overrides: float) -> SelectorParameters:
         (CommandSource.TELEOP, PlanarCommand(0.1, 0.2)),
         (CommandSource.APPROACH, PlanarCommand(0.03, -0.1)),
         (CommandSource.NAV2, PlanarCommand(0.2, 0.4)),
+        (CommandSource.MISSION, PlanarCommand(0.05, 0.0)),
     ],
 )
 def test_each_fresh_source_is_forwarded(source, expected) -> None:
@@ -54,6 +56,7 @@ def test_stop_is_zero_even_with_a_fresh_command() -> None:
         (CommandSource.TELEOP, 9.699),
         (CommandSource.APPROACH, 9.649),
         (CommandSource.NAV2, 9.499),
+        (CommandSource.MISSION, 9.649),
     ],
 )
 def test_each_stale_source_fails_closed(source, received) -> None:
@@ -129,6 +132,7 @@ def test_planar_input_is_preserved_without_clamping() -> None:
         parameters(teleop_timeout=0.0),
         parameters(approach_timeout=-1.0),
         parameters(nav2_timeout=nan),
+        parameters(mission_timeout=0.0),
         parameters(axis_epsilon=-1.0),
     ],
 )
