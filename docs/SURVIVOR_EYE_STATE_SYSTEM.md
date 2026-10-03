@@ -10,7 +10,7 @@
 - `OPEN`은 의식이 있음을 뜻하지 않는다.
 - 안면·눈 검출 실패, 작은 ROI, 낮은 confidence, 가림이나 영상 품질 문제는 상태 판단의 근거로 사용하지 않는다.
 
-이번 2차 개발은 D435 RGB frame에서 얼굴 검출, landmark 기반 양쪽 눈 ROI, 기존 classifier, 전용 ROS debug image를 별도 node에서 실행하는 범위다. Temporal history, blink 구분, Survivor ID 연결, RViz 표시, pose/posture/activity는 구현하지 않았다.
+2차 개발은 D435 RGB frame에서 얼굴 검출, landmark 기반 양쪽 눈 ROI, 기존 classifier, 전용 ROS debug image를 별도 node에서 실행한다. 3차에서는 구조화된 raw observation topic, 임시 EyeTrack, 3초 temporal voting, stable structured topic과 전용 temporal debug image를 추가했다. Survivor ID 연결, RViz 표시, pose/posture/activity는 구현하지 않았다.
 
 ## B. 전체 시스템 아키텍처
 
@@ -36,10 +36,9 @@
                    │                             │
           기존 RViz / rqt 화면                 현재까지 구현 완료
                                                  │
-                                   ┄┄┄ Stage 3 계획 ┄┄┄
-                                   약 3초 temporal history
-                                   blink / sustained closed 구분
-                                   OPEN / CLOSED / UNKNOWN
+                                   ┄┄┄ Stage 3 ┄┄┄
+                                   Raw topic → EyeTrack temporal node
+                                   stable L/R + combined state topic
                                                  │
                                    ┄┄┄ Stage 4 계획 ┄┄┄
                                    기존 Survivor #ID와 observation 연결
@@ -51,18 +50,18 @@
                                    D435 crop 수집·사람 검수·fine-tuning
 ```
 
-Stage 1 standalone classifier의 학습 및 공개 test split 평가는 완료했다. Stage 2 standalone image 도구와 독립 ROS node는 구현·빌드됐다. Goal 4 실시간 시험에서 실제 D435 얼굴, 유효한 양쪽 눈 ROI, classifier 출력과 ROS debug image까지 확인했다. 사용자가 양쪽 눈 OPEN이라고 확인한 frame에서 왼쪽 눈이 CLOSED로 오분류되어 실물 정확도는 아직 충분하지 않다. 따라서 **2차 전체 상태는 PARTIAL**이다.
+Stage 1 standalone classifier의 학습 및 공개 test split 평가는 완료했다. Stage 2의 D435→얼굴→눈 ROI→좌우 raw 분류→debug image 실행 경로도 실물에서 확인했다. 따라서 **Stage 2 기능 구현은 COMPLETE**다. 다만 사용자가 양쪽 눈 OPEN이라고 확인한 frame에서 왼쪽 눈이 CLOSED로 오분류되어 실물 정확도 검증은 PARTIAL이다.
 
 ## C. 전체 개발 단계
 
 | 단계 | 범위 | 상태 |
 | --- | --- | --- |
-| Stage 1 | crop된 눈 이미지 → YOLO11n-cls → OPEN/CLOSED와 confidence | 완료. 공개 test split 결과이며 실물 성능 보증은 아니다. |
-| Stage 2 | D435 RGB → 얼굴/landmark → L/R eye ROI → classifier → debug image | 독립 node와 전체 연결을 실물 D435에서 확인. 유효 ROI와 결과를 확인했지만 양쪽 OPEN frame에서 왼쪽 오분류가 있어 정확도 검증은 PARTIAL. |
-| Stage 3 | 약 3초 raw 결과 history, blink와 지속 감김 구분, OPEN/CLOSED/UNKNOWN | 계획. sample 수와 threshold는 실물 자료로 정한다. |
-| Stage 4 | Eye State observation을 기존 persistent Survivor ID와 연결 | 계획. 새 ID를 만들지 않고 Survivor Registry ID를 authority로 쓴다. |
-| Stage 5 | rqt와 RViz 시각화 | 계획. rqt에는 Survivor ID와 상태, RViz에는 기존 marker/text 확장을 검토한다. |
-| Stage 6 | 실제 D435 crop 수집, 사람의 ground truth 검수, subject-separated data로 필요 시 fine-tuning | 계획. classifier 출력 자체를 label로 사용하지 않는다. |
+| Stage 1 | crop된 눈 이미지 → YOLO11n-cls → OPEN/CLOSED와 confidence | **COMPLETE**. 공개 test split 결과이며 실물 성능 보증은 아니다. |
+| Stage 2 | D435 RGB → 얼굴/landmark → L/R eye ROI → classifier → debug image | **COMPLETE**. D435에서 실행 경로 확인. classifier 실물 정확도 검증은 PARTIAL. |
+| Stage 3 | raw topic과 임시 EyeTrack → 약 3초 history와 OPEN/CLOSED/UNKNOWN | 코드·단위/ROS 검증 완료. 실제 D435에서 기본 전이 관측. 짧은 가림 후 ID 유지가 일관되지 않고 병렬 실행 처리율이 낮아 전체 판정 PARTIAL. |
+| Stage 4 | Eye State observation을 기존 persistent Survivor ID와 연결 | **NOT STARTED**. 새 ID를 만들지 않고 Survivor Registry ID를 authority로 쓴다. |
+| Stage 5 | rqt와 RViz의 최종 Eye State 표시 통합 | **NOT STARTED**. Stage 2/3의 독립 debug topic은 이미 존재한다. |
+| Stage 6 | 실제 D435 crop 수집, 사람의 ground truth 검수, subject-separated data로 필요 시 fine-tuning | **PLANNED**. classifier 출력 자체를 label로 사용하지 않는다. |
 
 ## D. Stage 1: standalone classifier
 
@@ -145,6 +144,7 @@ ROS package는 `src/leader/rescue_robot_eye_state/`의 `rescue_robot_eye_state`�
 - Input: `/leader/camera/color/image_raw` (`sensor_msgs/msg/Image`). 실제 graph에서 후보 `/leader/camera/color/image_rect`는 없고 raw RGB topic을 확인했다.
 - ROS image 변환: `cv_bridge`, `imgmsg_to_cv2(..., desired_encoding="bgr8")`.
 - Output: `/leader/survivor/eye_state/debug_image` (`sensor_msgs/msg/Image`, `bgr8`). 기존 `/leader/survivor/debug_image`에는 publish하지 않는다.
+- Raw output: `/leader/survivor/eye_state/raw` (`rescue_robot_interfaces/msg/EyeStateObservationArray`). 입력 RGB image의 `header`를 그대로 사용하며 얼굴이 없으면 빈 배열을 발행한다.
 - 별도 launch: `survivor_eye_state.launch.py`. 기존 `survivor_pipeline.launch.py`에 자동 연결하지 않는다.
 - Model path는 launch/ROS parameter `model_path`로 설정하고 node 시작 시 한 번 load한다. YuNet도 `yunet_model_path`로 시작 때 한 번 load한다.
 - Classifier는 valid한 좌우 ROI만 모아 frame 단위로 batch inference한다. `gray` mode는 BGR→grayscale→3채널 replicate 후 Ultralytics의 일반 classifier transform을 사용한다. `rgb` mode는 원래 BGR image를 전달하고 Ultralytics의 기본 BGR→RGB 처리를 사용한다.
@@ -170,7 +170,63 @@ Launch parameter:
 
 한 frame의 모든 YuNet face detection을 처리하고 detection 순서로 `Face 0`, `Face 1`을 매긴다. 각 frame에서 새로 매기는 인덱스라 frame 사이 ID 지속성이 없다. **Face index는 Survivor ID가 아니다.** Stage 4 전에는 두 체계를 연결하지 않는다.
 
-`survivor_eye_state_node.py`에는 `EyeStateFrameResult`, `FaceEyeStateResult`, `EyeStateSideResult` immutable dataclass가 있다. 결과는 이미지 timestamp(sec/nanosec), 얼굴 frame-local index/bbox/confidence, 좌우별 valid/state/confidence/ROI bbox/invalid reason을 가진다. `latest_result` property로 최신 결과를 node 내부에서 보관한다. 아직 raw message topic은 발행하지 않는다. 미래 소비자·장기 schema가 정해지지 않은 상태에서 `rescue_robot_interfaces`에 임시 public message를 추가하지 않았다. 현재 ROS 출력은 debug image 한 개다.
+`survivor_eye_state_node.py`에는 `EyeStateFrameResult`, `FaceEyeStateResult`, `EyeStateSideResult` immutable dataclass가 있다. 결과는 이미지 timestamp(sec/nanosec), 얼굴 frame-local index/bbox/confidence, 좌우별 valid/state/confidence/ROI bbox/invalid reason을 가진다. `latest_result`는 최신 결과를 node 내부에 보관한다. 3차 Goal 1부터 같은 frame의 결과를 `EyeStateObservationArray`로 변환해 raw topic에도 발행한다. 배열 header는 입력 image header이며, 각 `EyeStateObservation`에는 frame-local 얼굴 index, bbox의 x/y/width/height, face confidence와 좌우별 valid/state/confidence가 있다. 상태는 메시지의 `STATE_INVALID=0`, `STATE_OPEN=1`, `STATE_CLOSED=2`, `STATE_LOW_CONFIDENCE=3`, `STATE_NO_PREDICTION=4` 상수를 사용한다. confidence가 없는 invalid 결과는 0.0으로 기록한다. ROI crop·landmark 좌표와 invalid 원인은 현재 메시지에 포함하지 않는다.
+
+### Stage 3 Goal 1: 임시 EyeTrack
+
+`tools/eye_state/eye_track.py`의 `EyeTrackManager`는 raw topic을 사용할 다음 ROS node에 연결할 수 있는 독립 Python 모듈이다. Goal 1에서는 ROS subscriber나 안정 상태 발행을 추가하지 않았다. `update(stamp_ns, bboxes)`에는 **raw 메시지 header의 ROS image timestamp**와 얼굴 bbox 목록을 전달한다. wall clock으로 만료를 계산하지 않으며, 같은 시각이나 역순 시각의 frame은 거부한다. ROS 시간이 재설정되면 `reset()`으로 연결을 비우고 새로 시작한다.
+
+기본 matching은 bbox IoU 0.25 이상 **또는** 두 bbox 대각선 평균으로 나눈 중심 거리 0.30 이하인 후보를 사용한다. 면적 비율이 0.5~2.0을 벗어나면 연결하지 않는다. 후보를 IoU 내림차순, 중심 거리 오름차순, track ID, 얼굴 index 순으로 정렬해 1:1 greedy matching한다. 매칭되지 않은 얼굴은 새 ID를 받고, 보이지 않는 기존 track은 마지막 관측 뒤 기본 1.5초까지 유지한다. Goal 1에서는 `left_history`, `right_history`가 비어 있는 placeholder였으며, Goal 2에서 timestamp sample과 temporal state 계산이 추가됐다. 기본 matching threshold와 timeout은 현장 자료로 조정할 출발값이다.
+
+**EyeTrack ID는 몇 초짜리 임시 프로세스 내부 ID이며 Survivor ID가 아니다.** 현재 EyeTrack은 Survivor Registry와 연결되지 않는다. 여러 얼굴의 검출 순서가 바뀌어도 1:1 연결을 유지하는 경우와 잠시 사라진 얼굴의 timeout은 카메라 없는 단위 테스트에서 검증했다. 얼굴 교차·장시간 가림의 ID 유지는 보장하지 않는다.
+
+### Stage 3 Goal 2: 시간 기반 눈 상태 안정화
+
+같은 모듈의 `EyeTrackManager.update(stamp_ns, bboxes, eye_states)`가 bbox 매칭 뒤 각 track의 왼쪽·오른쪽 눈 history에 sample을 독립 추가한다. sample은 source RGB ROS header에서 온 nanosecond timestamp, `valid`, raw state, confidence를 보유한다. history는 sample 개수가 아니라 현재 image timestamp에서 기본 3.0초보다 오래된 sample을 제거한다. `INVALID`, `LOW_CONFIDENCE`, `NO_PREDICTION`, `UNKNOWN`은 저장·coverage 계산에는 반영하되 OPEN/CLOSED 점수에는 넣지 않는다.
+
+각 눈은 valid한 OPEN/CLOSED sample이 최소 5개이고, 유효 분류 sample 비율이 history 전체의 최소 0.50이며, confidence 합이 0보다 클 때만 상태를 확정한다. OPEN/CLOSED별 score는 해당 상태 sample들의 confidence 합이다. score 합으로 나눈 비율이 0.70 이상이면 해당 상태, 아니면 `UNKNOWN`이다. 좌·우를 먼저 독립 계산하고 둘 다 같은 OPEN 또는 CLOSED일 때만 combined 상태를 그 값으로 정한다. 불일치 또는 한 눈이 UNKNOWN이면 combined는 `UNKNOWN`이다. hysteresis는 추가하지 않았다. sliding time window 때문에 오래된 상태가 빠져 지속 CLOSED 뒤 OPEN으로 돌아오는 동작을 테스트한다.
+
+기본 parameter는 `history_window_sec=3.0`, `min_valid_samples=5`, `min_valid_coverage=0.50`, `open_ratio_threshold=0.70`, `closed_ratio_threshold=0.70`이다. 이 값은 실제 D435 분포를 측정해 최적화한 값이 아니라 초기 검증용이다. blink 단발 sample, 지속 CLOSED 전환, 재개안, 모호한 vote, 부족한 sample, invalid coverage, 좌우 불일치, 서로 다른 track history 분리를 synthetic timestamp sequence로 시험했다. temporal core는 ROS와 분리해 시험했고, ROS 연결 및 카메라 상태는 다음 Goal 3 설명의 smoke test 결과처럼 제한적으로 확인했다.
+
+### Stage 3 Goal 3: temporal ROS node
+
+새 node `survivor_eye_state_temporal_node`는 `rescue_robot_eye_state` package 안의 `scripts/survivor_eye_state_temporal_node.py`다. Stage 2 raw topic `/leader/survivor/eye_state/raw`를 구독하고 `rescue_robot_interfaces/msg/EyeStateTrackObservationArray`를 `/leader/survivor/eye_state/stable`로 발행한다. 입력 message header(timestamp/frame)을 그대로 사용한다. stable message는 임시 `eye_track_id`, frame-local `face_index`, 얼굴 bbox/confidence, 좌우 raw valid/state/confidence, 좌우 stable state와 valid sample 수, combined state, history duration, `history_ready`를 가진다. `history_ready`는 두 눈 모두 min valid sample과 valid coverage 조건을 만족한다는 뜻이며 OPEN/CLOSED 판정 완료를 뜻하지 않는다. **EyeTrack ID는 Survivor ID가 아니다.**
+
+전용 debug image topic은 `/leader/survivor/eye_state/temporal_debug_image`다. node는 Stage 2 `/leader/survivor/eye_state/debug_image`와 raw message를 timestamp(sec/nanosec)로 정확히 짝지어 overlay를 그린다. overlay pairing cache는 각각 최근 10개로 제한한다. debug image가 없거나 timestamp가 맞지 않아도 structured stable topic 발행은 독립적으로 계속된다. 기존 Stage 2 debug topic은 수정하거나 덮어쓰지 않는다.
+
+새 launch `survivor_eye_state_temporal.launch.py`는 temporal node만 실행하며 camera나 Stage 2를 시작하지 않는다. 먼저 RGB camera와 `survivor_eye_state.launch.py`를 실행한 뒤 별도 terminal에서 이 launch를 실행한다. threshold/track parameter와 topic 이름은 launch argument로 설정할 수 있다.
+
+| Parameter | 기본값 | 용도 |
+| --- | --- | --- |
+| `raw_topic` | `/leader/survivor/eye_state/raw` | Stage 2 structured input |
+| `stage2_debug_image_topic` | `/leader/survivor/eye_state/debug_image` | timestamp 짝맞춤용 source image |
+| `output_topic` | `/leader/survivor/eye_state/stable` | temporal structured output |
+| `debug_image_topic` | `/leader/survivor/eye_state/temporal_debug_image` | temporal overlay image |
+| `history_window_sec` | `3.0` | sample 유지 시간 |
+| `min_valid_samples` | `5` | 눈별 최소 valid 분류 수 |
+| `min_valid_coverage` | `0.5` | valid sample coverage 하한 |
+| `open_ratio_threshold`, `closed_ratio_threshold` | `0.70`, `0.70` | confidence weighted state threshold |
+| `track_timeout_sec` | `1.5` | 얼굴 미관측 후 track 유지 시간 |
+| `match_iou_threshold` | `0.25` | bbox IoU matching 기준 |
+| `match_center_distance_threshold` | `0.30` | bbox 크기 정규화 중심거리 기준 |
+
+실행 및 확인 예:
+
+```bash
+# RGB camera와 Stage 2가 이미 실행 중인 상태에서
+ros2 launch rescue_robot_eye_state survivor_eye_state_temporal.launch.py
+
+ros2 topic list -t | grep -E 'eye_state/(raw|stable|debug_image|temporal_debug_image)'
+ros2 topic echo /leader/survivor/eye_state/stable
+
+# rqt_image_view에서 각 화면을 별도 실행
+ros2 run rqt_image_view rqt_image_view --ros-args \\
+  -r image:=/leader/survivor/eye_state/debug_image
+ros2 run rqt_image_view rqt_image_view --ros-args \\
+  -r image:=/leader/survivor/eye_state/temporal_debug_image
+```
+
+Goal 3의 ROS smoke test에서 실제 D435 RGB topic(640×480 RGB8, 약 29 Hz)을 사용해 Stage 2와 temporal node를 함께 짧게 실행했다. node list 및 raw/stable/두 debug topic을 확인했고, stable 빈 배열이 발행됐으며 temporal debug image도 약 3 Hz로 수신됐다. 당시 카메라 화면에서 얼굴을 검출하지 못해 실제 D435의 EyeTrack/history/state 동작은 **NOT RUN**이다. 별도 temporal node 합성 ROS test에서는 두 얼굴이 서로 다른 EyeTrack ID를 유지하고 각각 valid sample 5개 뒤 `history_ready=true`, combined OPEN으로 발행됐으며 paired debug image가 수신됐다. 장시간 시험이나 VSLAM/Nav2 통합은 하지 않았다.
 
 ### Debug image와 확인 명령
 
@@ -198,7 +254,7 @@ ros2 run rqt_image_view rqt_image_view --ros-args \
 8. YOLO11n-cls가 valid한 양쪽 eye crop들을 한 번에 추론한다. class name과 class probability를 checkpoint mapping에 따라 변환한다.
 9. timestamp, face, 좌우 validity/state/confidence를 내부 결과 dataclass에 보관한다.
 10. 원본 frame에 얼굴·ROI·state/confidence 또는 invalid reason을 그린다.
-11. 입력 header를 유지해 전용 debug image topic으로 publish한다.
+11. 입력 header를 유지해 전용 debug image와 구조화된 raw observation topic으로 publish한다.
 
 Classifier/FaceDetector가 frame 처리 중 오류를 내면 worker는 subscription을 유지하고 오류를 제한적으로 log한다. Model load 오류는 startup 실패로 처리된다.
 
@@ -299,7 +355,7 @@ docker run --rm -it --runtime=nvidia --network host --ipc=host \
   '
 ```
 
-실제 검증은 다른 Docker workload가 없는 상태에서 카메라-only RGB stream을 사용했다. 별도 YOLO runtime container에서 CPU와 GPU device 0을 실행했고 GPU 실행은 성공했다. 측정된 짧은 시험은 `inference_rate_hz=2.0`이므로 기본 5 Hz 장시간 운용을 검증한 것은 아니다. GPU 추론은 VSLAM 등 다른 GPU workload와 함께 검증하지 않았다.
+이 절의 실행 예시는 camera-only 검증에 사용한 구조다. 별도 YOLO runtime container에서 CPU와 GPU device 0을 실행했고 GPU 실행은 성공했다. 짧은 단독 시험은 `inference_rate_hz=2.0`으로 측정됐다. 이후 Stage 3 Goal 4에서는 VSLAM·Survivor와 GPU 병렬 실행을 수 분간 확인했으며, 처리율과 자원 사용량은 아래 Goal 4 기록에 남겼다. 기본 5 Hz 장시간 운용은 검증하지 않았다.
 
 ### 4. topic, node, image 확인
 
@@ -338,15 +394,14 @@ ros2 run rqt_image_view rqt_image_view --ros-args \
 | 실제 사람, 유효 ROI | 640×480 D435 RGB, 얼굴 bbox 110×144, face conf 0.9953, L/R ROI 36×36. 사용자가 두 눈 OPEN 확인 | gray ROS node: L `CLOSED` 약 0.95, R `OPEN` 약 1.00. 같은 frame 단독 gray: L `CLOSED` 0.9972, R `OPEN` 0.9914 | 왼쪽 오분류, 오른쪽 정답 |
 | 동일 frame RGB 전처리 | 위와 같은 paired D435 frame, 양쪽 OPEN | standalone: L `CLOSED` 0.9076, R `CLOSED` 0.9360 | 양쪽 오분류. 한 장으로 mode 우열을 확정하지 않음 |
 
-debug ROS image message 수신과 저장 frame 확인은 완료했다. `rqt_image_view` GUI 자체는 실행하지 않았다 (**NOT RUN**). 양쪽 눈 CLOSED 유지, blink, 좌/우·상/하 얼굴 회전, 안경 유무 비교, 0.5/1.0/1.5/2.0 m 거리 시험은 **NOT RUN**이다.
+Stage 2 당시 debug ROS image message 수신과 저장 frame 확인은 완료했다. `rqt_image_view` GUI 자체는 실행하지 않았다 (**NOT RUN**). 당시 양쪽 눈 CLOSED 유지, blink, 좌/우·상/하 얼굴 회전, 안경 유무 비교, 0.5/1.0/1.5/2.0 m 거리 시험은 **NOT RUN**이었다. CLOSED/blink/옆얼굴 행동의 후속 관찰은 아래 Stage 3 Goal 4 기록을 따른다. 거리·안경 조건은 계속 **NOT RUN**이다.
 
 ## L. 후속 개발 순서
 
-1. **Stage 3 — Temporal History:** frame별 raw L/R 결과를 약 3초 유지한다. 5 Hz라면 약 15 sample이지만 이는 설계 출발점일 뿐이다. blink와 지속 감김 구분, `OPEN/CLOSED/UNKNOWN` threshold는 실물 자료와 failure 비용을 고려해 정한다.
-2. **Stage 4 — Survivor ID Association:** 새 ID를 만들지 않는다. 기존 Survivor Registry의 persistent Survivor #ID를 authority로 사용하고 시간·영상·공간 정보의 association 규칙을 검증한다.
-3. **Stage 5 — rqt/RViz Integration:** rqt에는 Survivor #ID와 Eyes 상태를, RViz에는 기존 Survivor marker/text 주변에 Eye State observation을 표시하는 방식을 검토한다.
-4. **Stage 6 — D435 Dataset and Fine-tuning:** 실제 ROI를 수집하고 사람이 OPEN/CLOSED label을 검수한다. subject-separated train/val/test를 만든 뒤 domain gap이 확인될 때 fine-tune하고 CLOSED recall을 평가한다.
-5. 그 이후 별도 cue로 **YOLO Pose → posture → activity**를 단계적으로 검토한다. Eye State와 pose는 독립된 관찰 cue로 유지하고, 이후 검증된 규칙을 통해 multi-cue Survivor visual state로 결합할 수 있다.
+1. **Stage 4 — Survivor ID Association:** 새 ID를 만들지 않는다. 기존 Survivor Registry의 persistent Survivor #ID를 authority로 사용한다. EyeTrack 관측과 기존 Survivor person observation/Registry track을 시간·영상·공간 정보로 연결하는 규칙을 설계하고 검증한다. Eye State는 새 Survivor를 만들거나 Registry identity를 대체하지 않는다.
+2. **Stage 5 — rqt/RViz Integration:** rqt에는 Survivor #ID와 Eyes 상태를, RViz에는 기존 Survivor marker/text 주변에 Eye State observation을 표시하는 방식을 검토한다.
+3. **Stage 6 — D435 Dataset and Fine-tuning:** 실제 ROI를 수집하고 사람이 OPEN/CLOSED label을 검수한다. subject-separated train/val/test를 만든 뒤 domain gap이 확인될 때 fine-tune하고 CLOSED recall을 평가한다.
+4. 그 이후 별도 cue로 **YOLO Pose → posture → activity**를 단계적으로 검토한다. Eye State와 pose는 독립된 관찰 cue로 유지하고, 이후 검증된 규칙을 통해 multi-cue Survivor visual state로 결합할 수 있다.
 
 consciousness 판단, 임상 진단, 단일 classifier output으로 Survivor ID 또는 Registry state를 바꾸는 동작은 이 개발 계획의 범위가 아니다.
 
@@ -355,4 +410,69 @@ consciousness 판단, 임상 진단, 단일 classifier output으로 Survivor ID 
 - **Stage 1: COMPLETE.** 40/40 epoch 학습, checkpoint 저장, 공개 test split 평가 및 standalone inference 기록이 있다.
 - **Stage 2 구현/build: COMPLETE.** 독립 ROS package/node, parameter launch, YuNet/ROI/classifier 코드와 전용 debug topic을 구현했고 package 단독 build와 synthetic ROS message 전달을 확인했다.
 - **Stage 2 실물 연결: COMPLETE. 정확도/조건 검증: PARTIAL.** 실제 D435에서 얼굴→landmark→유효한 36×36 양쪽 ROI→YOLO classifier→ROS debug image 흐름을 확인했다. 사용자가 양쪽 OPEN으로 확인한 한 frame에서 gray mode 왼쪽은 오분류했고 rgb mode는 양쪽을 CLOSED로 예측했다. 작은 얼굴의 INVALID gate도 확인했다. 통제된 CLOSED, blink, 자세, 거리 시험은 수행하지 않았다.
-- **2차 전체 판정: PARTIAL.** CLOSED, blink, pose 변화, 거리별 검증과 실제 valid eye crop 성능이 남아 있다.
+- **2차 기능 구현 판정: COMPLETE.** D435 입력부터 raw L/R 분류와 debug publish까지 실행했다. 실물 classifier 정확도와 거리·안경 등 조건별 검증은 PARTIAL이다.
+- **3차 Goal 1: 구현 및 격리 검증 완료.** raw 메시지 생성과 독립 ROS package 빌드, EyeTrack 단위 테스트 8개가 통과했다. 저장된 D435 RGB frame을 짧게 재생한 ROS 시험에서 raw topic과 기존 debug image가 같은 timestamp로 각각 수신됐다. 이번 시험은 현재 D435 생방송이나 다중 얼굴 실측이 아니다. 3초 안정 상태 판정은 아직 없다.
+- **3차 Goal 2: temporal 계산 구현 및 단위 검증 완료.** time based 3초 history, 최소 valid sample 5개, coverage 0.50, confidence weighted 0.70 threshold, 좌우 독립/동일 상태 combined 규칙을 추가했다. EyeTrack 단위 테스트와 기존 ROI/classifier 단위 테스트 총 38개가 통과했다. ROS node/topic 연결은 Goal 3에 남아 있다.
+- **3차 Goal 3: ROS integration 완료.** stable custom message, 별도 temporal node/launch, timestamp exact-match debug overlay를 추가했다. 필요한 2개 package 빌드와 `ros2 pkg executables` 등록을 확인했다. D435 Stage 2+3 짧은 실행에서 node/topic 발행은 PASS, 실제 face track은 얼굴 미검출로 NOT RUN이다. 두 얼굴 합성 ROS test에서는 안정 상태/track ID/debug output이 PASS다.
+- **3차 Goal 4 및 Stage 3 전체 판정: PARTIAL.** 실제 D435에서 기본 temporal 전이와 기존 시스템 병렬 실행을 관측했다. 짧은 가림 후 ID 유지, 병렬 처리율, 실물 다중 얼굴 검증이 남아 있다.
+- **Stage 4 Survivor ID Association: NOT STARTED.** 기존 Registry ID를 authority로 쓰는 설계만 기록했다.
+- **Stage 5 최종 rqt/RViz 통합: NOT STARTED.** 독립 Stage 2/3 debug image topic은 이미 구현됐다.
+- **Stage 6 D435 dataset refinement/fine-tuning: PLANNED.** 사람 검수 및 subject 단위 분할이 필요하다.
+
+### Stage 3 Goal 4: 실제 D435 및 병렬 실행 검증
+
+이 Goal에서는 기능 확장 없이 단독 D435 실행, 기존 VSLAM/Survivor pipeline과의 병렬 실행, 문서와 Git 상태를 확인했다. Eye State launch는 카메라를 실행하지 않으며 기존 Survivor Registry와 연결하지 않는다.
+
+#### Temporal 동작 해석
+
+- Raw는 각 처리 frame의 classifier 결과이고 Stable은 EyeTrack의 좌우별 최근 timestamp 기반 history 결과다. history는 ROS image header timestamp를 사용하며 기본 window는 3초다.
+- 각 눈 history는 독립적이다. valid OPEN/CLOSED sample이 최소 5개이고 valid coverage가 0.50 이상일 때 confidence 합의 비율을 계산한다. 한 상태 비율이 0.70 이상이면 해당 Stable 상태, 그렇지 않으면 `UNKNOWN`이다. `INVALID`, `LOW_CONFIDENCE`, `NO_PREDICTION`은 점수에서 제외된다.
+- 두 Stable 눈이 모두 OPEN일 때 Final OPEN, 둘 다 CLOSED일 때 Final CLOSED, 나머지는 Final UNKNOWN이다. 별도 blink detector나 hysteresis는 없다. 짧은 CLOSED raw sample은 3초 vote에서 영향이 희석될 수 있지만 보장된 blink 분류는 아니다.
+- 짧은 synthetic unit test에서는 blink sequence 뒤 OPEN 유지, sustained CLOSED 및 reopen 전이가 통과했다. 실물에서는 OPEN 유지와 순간 raw 변동, sustained close 뒤 CLOSED 진입, 눈을 다시 뜬 뒤 OPEN 복귀가 관측됐다. 다만 classifier prediction 변동으로 UNKNOWN/CLOSED가 다시 나타나 실물 동작의 안정성은 PARTIAL이다.
+- 옆으로 얼굴을 돌려 양쪽 ROI가 invalid가 된 경우 valid count가 줄고 `history_ready=false`, Final UNKNOWN으로 전환되는 것이 관측됐다. 단안만 유효한 경우 결합 상태를 확정하지 않는다.
+- **EyeTrack ID는 일시적 local track 번호이며 Survivor ID가 아니다.** 같은 track은 raw face bbox를 IoU 0.25 이상 또는 평균 bbox 대각선 정규화 중심 거리 0.30 이하로 greedy 1:1 matching한다. 면적 변화 gate는 0.5~2.0이며 마지막 관측으로부터 1.5초 뒤 만료한다. 복잡한 교차/가림에서 identity를 보장하는 tracker가 아니다.
+
+#### 실제 행동 시험
+
+| 시험 | 실제 관찰 | 결과 |
+| --- | --- | --- |
+| 3초 이상 눈 뜸 | valid history가 준비된 뒤 좌우 Stable OPEN, Final OPEN을 관측 | 동작 확인. 정확도 보증은 아님 |
+| 짧은 blink 여러 번 | Raw에 순간 CLOSED/invalid가 나왔으며 Stable/Final은 대부분 OPEN을 유지. 일부 순간 UNKNOWN도 관측 | 부분 확인 |
+| 3초 이상 눈 감음 | Raw CLOSED가 누적되고 좌우 Stable이 CLOSED로 수렴한 뒤 Final CLOSED 관측 | 동작 확인. 분류 변동 존재 |
+| 다시 눈 뜸 | Stable/Final이 CLOSED에서 UNKNOWN을 거쳐 OPEN으로 복귀. 이후 일부 변동도 관측 | 전이 확인, 안정도 PARTIAL |
+| 옆얼굴/한쪽 눈 가림 | 얼굴은 잡혔지만 양쪽 eye ROI invalid, history가 준비되지 않고 UNKNOWN | 무효 처리 확인 |
+| 1초 이내 얼굴 가림 후 복귀 | 잠시 빈 observation 뒤 이전 EyeTrack 번호가 다시 보인 사례가 있었으나 bbox/detection 변화 뒤 새 번호로 바뀐 사례도 관측 | ID 유지 PARTIAL, 보장되지 않음 |
+| 2초 이상 얼굴 부재 후 복귀 | 부재 중 빈 observation, 복귀 후 새 EyeTrack 번호 생성 | timeout 후 새 ID 동작 확인 |
+| 두 사람 각각 안정 상태 | 두 사람을 ground truth로 통제한 시험은 수행하지 않음 | **NOT RUN** |
+
+얼굴 검출 순서 변경/동시 두 사람의 temporal history 분리 검증은 앞선 synthetic unit/ROS 시험만 통과했다. 실물 multi-face 결과로 간주하지 않는다. rqt_image_view GUI도 이번 Goal에서 열지 않았다(**NOT RUN**). 사람이 의도한 동작 외에 매 frame별 OPEN/CLOSED ground truth를 별도 annotation하지 않아 실물 표는 정성 관찰이다.
+
+#### VSLAM/Survivor와 병렬 실행
+
+통합 검증은 `VSLAM_HEADLESS=1 STM32_I2C_WRITE_ENABLED=0 ./scripts/run_vslam_mapping.sh`로 시작했다. 이 script가 단 한 번 D435를 실행했고, 기존 `survivor_pipeline.launch.py`와 Eye State Stage 2/3은 해당 RGB topic을 구독했다. Eye State launch에서는 카메라를 시작하지 않았다. 통합 graph에서 VSLAM, nvblox, Nav2, person detector, map transform, Survivor Registry/visualizer 및 Stage 2/3 node가 함께 존재했고, Survivor tracks/map positions와 Eye State raw/stable/debug topic이 충돌 없이 확인됐다. EyeTrack을 Survivor ID와 association하지 않았다.
+
+통합 중 `/leader/camera/color/image_raw` publisher는 `/leader/camera` 하나였고 subscriber endpoint는 여러 pipeline에 연결됐다. 약 8초 단일 rclpy collector 측정은 RGB 19.06 Hz, Eye raw 1.54 Hz, stable 1.54 Hz, temporal debug 0.62 Hz, VisualSlam tracking odometry 4.85 Hz였다. Stage 2 debug는 표본 1개여서 주기를 산출할 수 없었다. Eye inference cap은 2 Hz였다. 이 짧은 측정은 diagnostics subscriber 부하도 포함해 baseline이나 보장된 처리율이 아니다.
+
+통합 중 Jetson RAM은 약 6.2 GiB / 7.6 GiB, swap은 약 0.45 GiB였고 CPU core 사용률은 대체로 70–96% 구간, GPU GR3D는 약 5–44%였다. Docker snapshot에서 Eye State container는 약 33% CPU / 1.03 GiB RAM, Survivor detector 약 56% / 1.00 GiB, mapping container 약 166% / 1.13 GiB를 사용했다. OOM이나 실행 중 node crash는 관측하지 않았지만 frame rate가 낮고 자원 여유가 작아 **동시 운용 성능은 PARTIAL**이다. 필요 시 추론 rate/해상도/CPU 사용을 추가 측정·조정해야 한다.
+
+수 분간 실행한 뒤 중단했고 VSLAM script는 bag을 마무리하고 정상 cleanup했다. Survivor launch를 Ctrl-C로 종료할 때 기존 `camera_info_qos_bridge.py`에서 `rclpy.shutdown already called` traceback 및 일부 기존 child exit code가 출력됐다. 이는 Eye State 코드 변경 파일이 아니며 pipeline의 정상 운용 중 기능 문제로 확인된 것은 아니지만, 종료 경로 로그 오류로 기록한다. `rqt_image_view` 시각 확인은 하지 않았다. 실제 실행 토픽은 다음과 같다.
+
+| 용도 | topic |
+| --- | --- |
+| D435 RGB 입력 | `/leader/camera/color/image_raw` |
+| Stage 2 raw debug | `/leader/survivor/eye_state/debug_image` |
+| Stage 2 structured raw | `/leader/survivor/eye_state/raw` |
+| Stage 3 structured stable | `/leader/survivor/eye_state/stable` |
+| Stage 3 temporal debug | `/leader/survivor/eye_state/temporal_debug_image` |
+
+```bash
+source /opt/ros/humble/setup.bash
+ros2 run rqt_image_view rqt_image_view
+# topic 선택 메뉴에서 위 Stage 2/Stage 3 debug topic 중 하나 선택
+```
+
+#### Git·회귀 확인
+
+변경은 Eye State 도구/node/launch, `rescue_robot_interfaces` eye message 정의/생성 설정, 이 문서에 한정한다. existing person detector, Survivor Registry, survivor pipeline launch, VSLAM, nvblox, Nav2, AprilTag 설정은 수정하지 않았다. Eye State node를 실행하지 않아도 기존 pipeline launch가 Eye State package를 필수로 시작하는 연결은 없다. dataset/run/cache/debug capture 경로는 ignore 대상이다. 실제 최종 `git status`, `git diff --check`, `git diff --stat`은 이 Goal 종료 직전 확인 결과를 아래 최종 판정에 반영한다.
+
+Stage 3의 코어 알고리즘과 ROS 구조는 구현됐고 실물 상태 전이도 관측했지만, 짧은 가림 ID 유지의 일관성과 통합 자원/처리율, 실물 multi-face 검증이 남아 **Stage 3 Goal 4 및 Stage 3 전체 판정은 PARTIAL**이다.

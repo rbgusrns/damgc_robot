@@ -22,6 +22,7 @@ from rclpy.qos import (
     ReliabilityPolicy,
     qos_profile_sensor_data,
 )
+from rescue_robot_interfaces.msg import EyeStateObservation, EyeStateObservationArray
 from sensor_msgs.msg import Image
 
 
@@ -41,10 +42,17 @@ DEFAULT_MODEL_PATH = Path(
     "/home/maze/eye_state_runs/eye_state/baseline/weights/eye_state_best.pt"
 )
 DEBUG_IMAGE_TOPIC = "/leader/survivor/eye_state/debug_image"
+RAW_OBSERVATION_TOPIC = "/leader/survivor/eye_state/raw"
 LATEST_IMAGE_QOS = QoSProfile(
     history=HistoryPolicy.KEEP_LAST,
     depth=1,
     reliability=ReliabilityPolicy.BEST_EFFORT,
+    durability=DurabilityPolicy.VOLATILE,
+)
+RAW_OBSERVATION_QOS = QoSProfile(
+    history=HistoryPolicy.KEEP_LAST,
+    depth=10,
+    reliability=ReliabilityPolicy.RELIABLE,
     durability=DurabilityPolicy.VOLATILE,
 )
 BBox = Tuple[int, int, int, int]
@@ -74,7 +82,7 @@ class FaceEyeStateResult:
 
 @dataclass(frozen=True)
 class EyeStateFrameResult:
-    """Raw structured results retained in memory for later ROS interfaces."""
+    """Raw structured results retained in memory and published as ROS data."""
 
     stamp_sec: int
     stamp_nanosec: int
@@ -126,6 +134,39 @@ def make_frame_result(stamp, faces, predictions) -> EyeStateFrameResult:
         stamp_nanosec=int(stamp.nanosec),
         faces=tuple(face_results),
     )
+
+
+_RAW_STATE_CODES = {
+    "INVALID": EyeStateObservation.STATE_INVALID,
+    "OPEN": EyeStateObservation.STATE_OPEN,
+    "CLOSED": EyeStateObservation.STATE_CLOSED,
+    "LOW_CONFIDENCE": EyeStateObservation.STATE_LOW_CONFIDENCE,
+    "NO_PREDICTION": EyeStateObservation.STATE_NO_PREDICTION,
+}
+
+
+def make_raw_observation_array(header, result: EyeStateFrameResult):
+    """Convert one Stage 2 result to a typed, timestamped ROS observation."""
+    output = EyeStateObservationArray()
+    output.header = header
+    for face in result.faces:
+        observation = EyeStateObservation()
+        observation.face_index = face.index
+        (observation.x, observation.y,
+         observation.width, observation.height) = face.bbox
+        observation.face_confidence = float(face.face_confidence)
+        for side_name in ("left", "right"):
+            side = getattr(face, side_name)
+            setattr(observation, f"{side_name}_valid", side.valid)
+            try:
+                state_code = _RAW_STATE_CODES[side.state]
+            except KeyError as exc:
+                raise ValueError(f"unsupported raw eye state: {side.state!r}") from exc
+            setattr(observation, f"{side_name}_state", state_code)
+            setattr(observation, f"{side_name}_confidence",
+                    float(side.confidence) if side.confidence is not None else 0.0)
+        output.observations.append(observation)
+    return output
 
 
 def annotate_frame(frame, faces, predictions, show_landmarks: bool):
@@ -253,7 +294,11 @@ class SurvivorEyeStateNode(Node):
         )
 
         self.debug_publisher = self.create_publisher(
-            Image, DEBUG_IMAGE_TOPIC, qos_profile_sensor_data
+            Image, DEBUG_IMAGE_TOPIC, 10
+        )
+        self.raw_publisher = self.create_publisher(
+            EyeStateObservationArray, RAW_OBSERVATION_TOPIC,
+            RAW_OBSERVATION_QOS,
         )
         self.image_subscription = self.create_subscription(
             Image, image_topic, self._image_callback, LATEST_IMAGE_QOS
@@ -272,6 +317,7 @@ class SurvivorEyeStateNode(Node):
         self.get_logger().info(
             "Eye State ready: "
             f"image_topic={image_topic}, debug_topic={DEBUG_IMAGE_TOPIC}, "
+            f"raw_topic={RAW_OBSERVATION_TOPIC}, "
             f"model={model_path}, classes={self.classifier.names}, "
             f"device={self.classifier.device}, "
             f"rate_limit={self.inference_rate_hz:.2f} Hz, "
@@ -331,6 +377,9 @@ class SurvivorEyeStateNode(Node):
         debug_message = self.bridge.cv2_to_imgmsg(annotated, encoding="bgr8")
         debug_message.header = message.header
         self.debug_publisher.publish(debug_message)
+        self.raw_publisher.publish(
+            make_raw_observation_array(message.header, result)
+        )
 
     def destroy_node(self):
         with self._condition:
