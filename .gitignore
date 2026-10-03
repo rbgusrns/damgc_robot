@@ -10,5 +10,9 @@ log_docker/
 __pycache__/
 *.pyc
 *.csv
+*.pt
+*.onnx
 /runs/eye_state/
 /artifacts/eye_state/
+/eye_roi_debug/
+/data/eye_state_d435_debug/
