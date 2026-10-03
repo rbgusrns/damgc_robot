@@ -7,8 +7,9 @@ the dual-EKF launch, which also publishes odom -> base_link and map -> odom.
 import os
 
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 
 
 def _include(name, arguments=None):
@@ -31,6 +32,7 @@ def generate_launch_description():
         gxf_library_paths.append(existing_library_path)
 
     return LaunchDescription([
+        DeclareLaunchArgument("filter_enabled", default_value="true"),
         SetEnvironmentVariable("FASTDDS_BUILTIN_TRANSPORTS", "UDPv4"),
         SetEnvironmentVariable("LD_LIBRARY_PATH", os.pathsep.join(gxf_library_paths)),
         _include("visual_slam_realsense.launch.py", {
@@ -38,6 +40,8 @@ def generate_launch_description():
             "publish_map_to_odom_tf": "true",
             "image_jitter_threshold_ms": "50.0",
         }),
-        _include("nvblox_realsense.launch.py"),
+        _include("nvblox_realsense.launch.py", {
+            "filter_enabled": LaunchConfiguration("filter_enabled"),
+        }),
         _include("nvblox_nav2.launch.py"),
     ])

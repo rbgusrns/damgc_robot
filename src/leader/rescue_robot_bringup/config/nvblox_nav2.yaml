@@ -86,7 +86,8 @@ global_costmap:
       update_frequency: 2.0
       publish_frequency: 1.0
       transform_tolerance: 0.3
-      robot_radius: 0.3
+      footprint: "[[-0.060, -0.145], [0.060, -0.145], [0.3175, -0.070], [0.3175, 0.070], [0.060, 0.145], [-0.060, 0.145]]"
+      footprint_padding: 0.01
       plugins: [nvblox_layer, inflation_layer]
       nvblox_layer:
         plugin: nvblox::nav2::NvbloxCostmapLayer
@@ -97,7 +98,7 @@ global_costmap:
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
-        inflation_radius: 0.5
+        inflation_radius: 0.3
         cost_scaling_factor: 10.0
 
 local_costmap:
@@ -114,7 +115,8 @@ local_costmap:
       publish_frequency: 2.0
       always_send_full_costmap: true
       transform_tolerance: 0.3
-      robot_radius: 0.3
+      footprint: "[[-0.060, -0.145], [0.060, -0.145], [0.3175, -0.070], [0.3175, 0.070], [0.060, 0.145], [-0.060, 0.145]]"
+      footprint_padding: 0.01
       plugins: [nvblox_layer, inflation_layer]
       nvblox_layer:
         plugin: nvblox::nav2::NvbloxCostmapLayer
@@ -125,5 +127,5 @@ local_costmap:
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
-        inflation_radius: 0.5
+        inflation_radius: 0.3
         cost_scaling_factor: 10.0

@@ -36,8 +36,11 @@
   TF를 직접 발행한다.
 - VSLAM·nvblox·Nav2: 단일 D435, VSLAM, nvblox mesh/3D ESDF와 Nav2 planner/controller/
   BT navigator/lifecycle manager 통합이 구현되어 있다. Nav2 `ComputePathToPose` 경로
-  생성과 `odom` frame은 확인했지만 `/nav2/cmd_vel`은 wheel bridge와 분리되어 있고,
-  현장 controller가 유효 trajectory를 찾지 못해 autonomous driving 완료로 판정하지 않는다.
+  생성, `odom` frame, selector `NAV2`를 통한 실물 목표 주행 성공을 확인했다. 2026-10-03
+  0.10 m/s 상한에서 두 `NavigateToPose` 목표가 성공했고 active 주행 구간 VSLAM은 약
+  0.71 m 전진을 기록했다. 직진 중 각속도 보정이 관찰됐고 좌우 바퀴별 telemetry는
+  기록하지 않아 모터 편차와 Nav2 보정의 기여를 아직 분리하지 못했다. 반복성·정지
+  오차·장애물 회피·E-stop은 미검증이며 autonomous mission 완료로 판정하지 않는다.
 - Survivor Stage 5 완료: YOLO person detection, aligned depth 거리,
   camera optical XYZ와 `/leader/survivor/camera_positions`, 원본 촬영 시각의
   camera→map TF2와 `/leader/survivor/map_positions`, sphere/text RViz 표시 및
@@ -185,10 +188,14 @@ controller, BT navigator와 lifecycle manager를 실행합니다. Nav2 global/lo
 - nvblox mesh와 ESDF service 확인
 - `/nav2/cmd_vel` 발행 확인
 
-`/nav2/cmd_vel`은 Leader selector의 `NAV2` input으로 연결되어 있다. Mapping 시작 시
-selector는 `TELEOP`이며 실제 Nav2 실차 주행은 수행하지 않았다. 따라서 현재 상태를
-완성된 autonomous driving으로 표시하지 않으며, 실장비 이동·반복
-목표 주행·controller valid trajectory 확보가 남아 있습니다. 상세 절차와 2026-10-02
+`/nav2/cmd_vel`은 Leader selector의 `NAV2` input으로 연결되어 있으며 selector 출력은
+`/leader/cmd_vel`을 거쳐 STM32 bridge에 도달한다. Mapping 시작 시 selector는 `TELEOP`이다.
+2026-10-03 `0.10 m/s` 속도 상한에서 짧은 두 `NavigateToPose` 목표의 실물 주행 성공을
+확인했다. active 명령 구간에서 VSLAM은 약 `0.71 m` 전진, lateral `0.014 m`, 누적 yaw
+약 `-7.5°`를 기록했고 각속도 명령은 `-0.20..+0.16 rad/s` 범위로 변했다. 이 결과는
+Nav2가 실제 구동까지 수행함을 보이지만, 좌우 모터 telemetry가 없어 방향 보정과 구동
+편차를 분리하지 못한다. 반복 주행, goal 도착 오차, 장애물 정지, E-stop은 남아 있다.
+상세 절차와 2026-10-03
 검증 결과는 [nvblox/Nav2 검증 문서](src/leader/rescue_robot_bringup/docs/NVBLOX_NAV2_RVIZ.md)를
 참고합니다.
 

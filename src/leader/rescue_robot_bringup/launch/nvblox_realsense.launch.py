@@ -1,8 +1,20 @@
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
+    self_filter = Node(
+        package="rescue_robot_bringup",
+        executable="robot_self_filter.py",
+        name="robot_self_filter",
+        output="screen",
+        parameters=[{
+            "enabled": ParameterValue(LaunchConfiguration("filter_enabled"), value_type=bool),
+        }],
+    )
     nvblox = Node(
         package="nvblox_ros",
         executable="nvblox_node",
@@ -33,11 +45,15 @@ def generate_launch_description():
             "publish_layer_rate_hz": 5.0,
         }],
         remappings=[
-            ("camera_0/depth/image", "/leader/camera/depth/image_rect_raw"),
+            ("camera_0/depth/image", "/leader/camera/depth/self_filtered"),
             ("camera_0/depth/camera_info", "/leader/camera/depth/camera_info"),
             ("camera_0/color/image", "/leader/camera/color/image_raw"),
             ("camera_0/color/camera_info", "/leader/camera/color/camera_info"),
         ],
     )
 
-    return LaunchDescription([nvblox])
+    return LaunchDescription([
+        DeclareLaunchArgument("filter_enabled", default_value="true"),
+        self_filter,
+        nvblox,
+    ])

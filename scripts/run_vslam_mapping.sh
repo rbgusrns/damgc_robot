@@ -28,14 +28,16 @@ export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
 export FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS:-UDPv4}"
 VSLAM_HEADLESS="${VSLAM_HEADLESS:-0}"
 VSLAM_ONLY="${VSLAM_ONLY:-0}"
+SELF_FILTER_ENABLED="${SELF_FILTER_ENABLED:-1}"
 STM32_I2C_DEVICE="${STM32_I2C_DEVICE:-/dev/i2c-7}"
 STM32_I2C_ADDRESS="${STM32_I2C_ADDRESS:-66}"
 STM32_I2C_POLL_HZ="${STM32_I2C_POLL_HZ:-500.0}"
 STM32_I2C_WRITE_ENABLED="${STM32_I2C_WRITE_ENABLED:-1}"
 
 if [[ "${VSLAM_HEADLESS}" != "0" && "${VSLAM_HEADLESS}" != "1" ]] || \
+  [[ "${SELF_FILTER_ENABLED}" != "0" && "${SELF_FILTER_ENABLED}" != "1" ]] || \
   [[ "${VSLAM_ONLY}" != "0" && "${VSLAM_ONLY}" != "1" ]]; then
-  printf 'VSLAM_HEADLESS and VSLAM_ONLY must be 0 or 1.\n' >&2
+  printf 'VSLAM_HEADLESS, SELF_FILTER_ENABLED, and VSLAM_ONLY must be 0 or 1.\n' >&2
   exit 1
 fi
 if [[ "${VSLAM_ONLY}" == "1" && "${VSLAM_HEADLESS}" != "1" ]]; then
@@ -373,6 +375,7 @@ docker exec -d -u "${CONTAINER_USER}" \
   -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
   -e DAMGC_VSLAM_HEADLESS="${VSLAM_HEADLESS}" \
   -e DAMGC_VSLAM_ONLY="${VSLAM_ONLY}" \
+  -e DAMGC_SELF_FILTER_ENABLED="${SELF_FILTER_ENABLED}" \
   "${CONTAINER_NAME}" bash -lc '
     log_path="$1"
     source /opt/ros/humble/setup.bash
@@ -386,7 +389,8 @@ docker exec -d -u "${CONTAINER_USER}" \
       exec ros2 launch rescue_robot_bringup visual_slam_realsense.launch.py \
         publish_odom_to_base_tf:=true >>"${log_path}" 2>&1
     fi
-    exec ros2 launch rescue_robot_bringup nvblox_vslam_realsense.launch.py >>"${log_path}" 2>&1
+    exec ros2 launch rescue_robot_bringup nvblox_vslam_realsense.launch.py \
+      filter_enabled:="${DAMGC_SELF_FILTER_ENABLED}" >>"${log_path}" 2>&1
   ' _ "${container_log_dir}/vslam_nvblox.log"
 
 if [[ "${VSLAM_HEADLESS}" == "1" ]]; then

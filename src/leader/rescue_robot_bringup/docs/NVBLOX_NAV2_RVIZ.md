@@ -179,3 +179,220 @@ marker도 발행되고 registry에 Survivor ID가 나타났다. detector의 마�
 trajectory를 찾지 못해 중단됐다. 따라서 주행 완료는 확인되지 않았으며
 Nav2 경로 생성과 노드 활성 상태까지만 검증됐다.
 로봇을 이동시키며 map 좌표 안정성을 확인하는 시험은 별도로 필요하다.
+
+## 다음 주행 시험: controller 실패 원인 분리
+
+현재 기록에는 실패 요약만 있고 당시 controller 로그 원문과 local costmap 수치가 없어
+원인을 특정할 수 없다. `robot_radius`를 줄이거나 DWB 설정을 바꾸기 전에 다음 자료를
+같은 실패 시각에 모은다. 실제 모터 시험은 E-stop과 bridge watchdog을 확인하고 낮은
+속도의 짧은 목표부터 별도 안전 절차로 수행한다.
+
+### 목표를 보내기 전
+
+아래 항목을 저장해 controller가 실제 로봇 위치와 비용 지도를 어떻게 보고 있는지 확인한다.
+
+```bash
+ros2 lifecycle get /planner_server
+ros2 lifecycle get /controller_server
+ros2 lifecycle get /bt_navigator
+ros2 topic hz /visual_slam/tracking/odometry
+ros2 topic echo --once /visual_slam/tracking/odometry
+ros2 topic echo --once /local_costmap/costmap
+ros2 topic echo --once /local_costmap/published_footprint
+ros2 topic echo --once /nvblox_node/static_map_slice
+ros2 topic info /nav2/cmd_vel
+ros2 topic info /leader/cmd_vel
+```
+
+RViz에서 로봇 footprint가 local costmap의 자유 셀에 놓이는지, 목표와 계획 경로가
+장애물/인플레이션 영역을 통과하지 않는지 캡처한다. `NavigateToPose`를 보낼 때는
+controller server 로그 전체와 `/plan`, local costmap, `/nav2/cmd_vel`을 함께 기록한다.
+Nav2의 “no valid trajectories” 메시지가 발생한 시각을 표시하고, 그때 costmap이 로봇
+주변을 lethal/unknown으로 표시했는지 확인한다.
+
+### 판별 순서
+
+1. `odom` pose와 속도 갱신이 멈추거나 튀는지 확인한다. 문제가 있으면 controller 튜닝보다
+   VSLAM/odometry 입력을 먼저 다룬다.
+2. footprint가 local costmap에 완전히 들어가 있는지, footprint 주변이 lethal 또는
+   unknown인지 확인한다. 그렇다면 nvblox slice의 값/범위, inflation과 footprint 설정을
+   검토한다.
+3. `/plan`이 있고 로봇에서 첫 경로 점까지 연결되는지 확인한다. 경로가 없으면 planner와
+   costmap을 조사하고, 경로는 있으나 controller만 실패하면 DWB 평가 결과를 조사한다.
+4. 장애물 없는 바닥에서 로봇 가까이의 짧은 목표로 재현한다. 목표 방향, 회전 필요 여부,
+   로봇 전방 축과 `base_link` 축 일치 여부를 기록한다.
+5. 원인과 관측 자료가 일치할 때만 footprint/radius 또는 controller 파라미터를 조정하고
+   동일 조건에서 다시 비교한다. 통과 뒤에는 저속 구동, 정지, 반복 목표 순으로 확장한다.
+
+CAD 모델 치수는 약 `0.373 × 0.226 m`다. 기존 Nav2 설정은 `robot_radius: 0.3 m`,
+`inflation_radius: 0.5 m`였으며 2026-10-03 14시대 주행 때 이 값으로 실행됐다. 이후 source
+설정이 `robot_radius: 0.2 m`, `inflation_radius: 0.3 m`로 바뀌었고 15:44 이후 raw/filtered
+정지 비교는 이 값으로 실행했다. 이어서 이 문서 마지막의 다각형 footprint로 변경했으며,
+그 footprint 설정은 아직 ROS 실행에서 확인하지 않았다.
+
+## 2026-10-03 실물 주행 진단
+
+`./scripts/run_vslam_mapping.sh`로 D435, VSLAM, nvblox, Nav2, Leader selector와 STM32
+bridge를 함께 실행했다. RViz는 GPU 자원 사용을 줄이기 위해 시험 중 종료했으며 ROS 노드와
+rosbag 기록은 유지했다. VSLAM 위치는 시작 시 `(0, 0)` 부근이었고, 사용자가 앞쪽 약 1 m가
+비어 있는 것을 육안으로 확인했다.
+
+Nav2 controller 속도를 시험용으로 `max_vel_x=0.05 m/s`, `max_speed_xy=0.05 m/s`,
+`max_vel_theta=0.15 rad/s`로 낮추고 selector를 `NAV2`로 바꿨다. `odom` frame에서 정면
+`+x=0.8 m` 목표가 수락됐지만, controller가 약 0.83초 뒤 `No valid trajectories out of 209!`
+로그와 함께 abort했다. 사용자가 실제 로봇이 약 8 cm 움직인 것을 확인했다. 시험 종료 후
+selector를 `STOP`으로 설정했다. 전체 0.8 m 목표 주행은 실패했으며, 속도 상한은 runtime 설정이라
+재실행 때 기본 설정으로 돌아간다.
+
+전체 mapping rosbag 분석은 약 31분 동안 VSLAM tracking success 100%를 기록했다. 다만
+`/visual_slam/tracking/odometry` 누적 경로 길이는 `0.711 m`, net displacement는 `0.084 m`였고,
+wheel odometry는 각각 `0.034 m`, `0.032 m`였다. VSLAM의 최대 sample gap은 `838 ms`였으며
+마지막 정지 5초의 pose 변화는 `0.003 m / 0.07°`였다. tracking status가 Success였다는 사실만으로
+저속 경로의 정밀 odometry를 보장하지 않으므로, wheel/VSLAM 불일치와 frame interval 경고도
+후속 주행 시험에서 함께 다룬다. 전체 수치는 rosbag의 `analysis.md`에 있다.
+
+### costmap 장애물과 그리퍼의 일치
+
+목표 전후 odometry pose에서 로봇 중심 costmap cell은 cost `99`였다. 같은 costmap에서 가장
+가까운 lethal cell은 로봇 기준 `(x=+0.15 m, y=0.00 m)`였다. 현재 Leader URDF의 그리퍼 중앙
+연결부는 중심 `x=0.185 m`, 폭 `0.050 m`로 앞면이 `x=0.160 m`에 놓이며, 높이 범위는
+`z=0.030–0.090 m`다. 따라서 그리퍼는 costmap lethal cell 위치와 수 cm 이내로 일치한다.
+costmap은 `robot_radius=0.30 m`, `inflation_radius=0.50 m`를 사용하므로 이 셀은 로봇 footprint
+안쪽에서 중심 주변까지 높은 비용을 만든다. 이 위치 대응과 camera depth 입력 때문에
+**그리퍼 자기 점유가 209개 궤적 거부의 유력 원인**이다.
+
+현재 `nvblox_realsense.launch.py`는 D435 depth를 nvblox에 직접 연결하고, launch에는 로봇
+형상 기반 depth mask/self-filter가 없다. ESDF height 범위 `0.01–0.30 m`에는 URDF 그리퍼의
+`0.03–0.09 m` 높이가 포함된다. nvblox slice 원점은 `x=0`이고 시작 당시 로봇도 `x≈0`이어서
+후방 footprint 일부가 slice의 미관측 경계에 놓이는 문제도 함께 있다. 그리퍼 위치 일치는 직접
+관측됐지만, 경계/unknown이 기여한 양은 아직 분리되지 않았다.
+
+실행 중 ESDF 최소 높이를 `0.01`에서 `0.10 m`로 바꿔도 local costmap은 변하지 않았다. Static
+mapper가 이미 적분한 점유를 유지할 수 있어 이 변경은 그리퍼 가설을 반증하지 않는다. 원래 값
+`0.01 m`로 되돌렸다. 실제 해결은 depth의 그리퍼 픽셀을 mask/self-filter한 뒤 새 nvblox map을
+만들어 같은 목표를 다시 보내는 A/B 검증으로 진행한다. 낮은 장애물을 놓치지 않도록 ESDF 높이
+범위를 영구적으로 높이는 방식은 해결책으로 채택하지 않는다.
+
+### 수집 파일
+
+- VSLAM/STM32 rosbag: [`data/vslam_mapping_20261003_144710`](../../../../data/vslam_mapping_20261003_144710)
+- VSLAM/wheel 궤적 비교: [`analysis.md`](../../../../data/vslam_mapping_20261003_144710/analysis.md)
+- Nav2/costmap rosbag: [`data/nav2_diagnostic_20261003_144710`](../../../../data/nav2_diagnostic_20261003_144710)
+- Nav2 controller와 VSLAM launch 로그: `log/vslam_mapping_20261003_144710/vslam_nvblox.log`
+- bridge/카메라 로그: `log/vslam_mapping_20261003_144710/stm32_bridge.log`, `realsense.log`
+- 촬영한 camera frame: `log/vslam_mapping_20261003_144710/color.png`, `depth.png`
+
+이번 run의 속도 제한은 시험 도중 parameter service로 설정한 값이며 YAML에는 저장하지 않았다.
+이 기록은 실제 모터 E-stop 작동 시험이 아니다.
+## 로봇 부품 self-filter
+
+`nvblox_realsense.launch.py`는 이제 D435 깊이 영상과 nvblox 사이에서
+`robot_self_filter.py`를 실행한다. 현재 필터는 camera intrinsics와 base-to-camera TF로
+깊이 픽셀을 `base_link` 좌표로 바꾸고, 다음 그리퍼 swept volume 안에 들어오는 점을 지운다:
+`x=0.12..0.38 m`, `y=-0.15..+0.15 m`, `z=0.00..0.16 m`. 이 범위는 URDF 그리퍼보다
+넓어 손가락 개폐와 흔들림을 포함한다. 이 영역 안의 실제 장애물도 함께 지워지는
+의도된 tradeoff다. 전체 영상의 고정된 아래쪽 띠나 낮은 장애물을 일괄 제거하지 않고,
+원본 토픽은 유지하며 nvblox에는 `/leader/camera/depth/self_filtered`를 연결한다.
+
+`SELF_FILTER_ENABLED=0`은 raw depth A/B 비교용 우회 설정이다. 필터 사용 중 TF/처리 오류가
+발생하면 해당 프레임은 nvblox로 보내지 않고 throttled warning을 남긴다. 한 프레임이라도
+raw depth가 누적돼 static map에 자기 점유가 남는 일을 막는다. 주행 전
+`robot_self_filter` 로그와 filtered 토픽을 확인한다.
+
+### 2026-10-03 첫 표면투영 필터 비교 이력
+
+필터 추가 뒤 host와 Isaac ROS overlay를 빌드하고, `VSLAM_HEADLESS=1`
+`STM32_I2C_WRITE_ENABLED=0`으로 카메라/VSLAM/nvblox/Nav2를 실행했다. 모터 bridge 쓰기는
+비활성화했고 navigation 목표는 보내지 않았다. Filtered depth 토픽은 평균 약 18 Hz였다.
+한 쌍의 848×480 frame에서 원본의 유효 픽셀 345,727개 중 3,234개(0.94%)가 제거됐다.
+
+로봇 중심 costmap cell은 직전 원본 depth 시험 때 99였고 이번 필터 실행에서는 52였다.
+하지만 두 실행 사이 Nav2 설정도 `robot_radius=0.30/inflation_radius=0.50 m`에서 현재
+`0.20/0.30 m`로 바뀌었으므로 이 차이를 필터 효과로 단정할 수 없다. 이번 필터 실행에서
+lethal cost 100 셀은 남았으며 가장 가까운 셀은 로봇 기준 전방 오른쪽 약
+`(+0.23, -0.12) m`였다. 필터가 깊이 픽셀 일부를 제거하는 것까지는 확인했지만 costmap
+개선 여부는 동일 Nav2 설정으로 raw/filtered 입력을 각각 새 map에서 비교해야 한다.
+
+측정 자료: `log/vslam_mapping_20261003_153237/depth_raw.png`,
+`depth_self_filtered.png`, `depth_filter_comparison.png`, `analysis.md`와
+`data/vslam_mapping_20261003_153237` rosbag. 비교 이미지는 제거된 깊이 픽셀을 빨간색으로
+표시한다.
+
+### 첫 표면투영 버전: 같은 Nav2 설정 비교 이력
+
+2026-10-03에 `SELF_FILTER_ENABLED=0`과 `=1`로 각각 fresh nvblox map을 만들었다. 두 run
+모두 `robot_radius=0.20 m`, `inflation_radius=0.30 m`였고 selector는 TELEOP, STM32 bridge
+쓰기는 꺼져 있었으며 주행 목표는 보내지 않았다. 두 rosbag의 VSLAM pose sample은 모두
+`(0, 0)`이었다.
+
+- Raw 입력: 중심 costmap cell 표본 10개의 중앙값 `60`; 가장 가까운 lethal 셀은
+  `(+0.225, -0.075) m`.
+- 필터 입력: 중심 cell 중앙값 `52`; 가장 가까운 lethal 셀은 `(+0.225, -0.125) m`.
+- TF 처리 수정 뒤 pass-through 경고는 없었다. depth frame에서 유효 픽셀 약 0.96%를 제거했다.
+
+필터가 그리퍼로 추정되는 점유와 중심 비용을 줄인 신호는 있지만, lethal 셀이 남았고 완전한
+원인 제거는 입증하지 못했다. 설정은 동일하지만 두 map은 연속 재시작에서 생성됐으므로
+환경/적분 차이도 남는다. 이번 결과를 주행 가능 판정으로 사용하지 않는다.
+스냅샷은 `log/self_filter_ab_20261003/raw.json`, `filtered_tf_fixed.json`에 있다.
+
+### 2026-10-03 확장 swept-volume 정지 확인
+
+사용자 지시에 따라 그리퍼 고정 표면 대신 `x=0.12..0.38`, `y=±0.15`,
+`z=0.00..0.16 m` (`base_link`) 안에 측정된 depth 점을 모두 제외하도록 넓혔다. TF 처리에
+실패한 프레임은 raw로 통과시키지 않고 drop해 nvblox static map에 자기 점유가 남는 일을
+막는다. Bridge write off, Nav2 goal 없음, 새 nvblox map에서 10개 local costmap 표본을 얻었다.
+중심 비용은 모두 `0`; 가장 가까운 lethal 셀은 `(+0.575, +0.475) m`였다. 직전 좁은 구역 시험의
+가까운 셀 `(+0.175, -0.075) m`는 더 이상 가까이 나타나지 않았다. 이번 정지 확인에서는
+gripper self-occupancy가 제거된 것으로 판단한다.
+
+단, 이 넓은 3D 구역 안에 놓인 실제 장애물도 depth map에서 제거된다. 정지 상태로 검증했으며
+실제 그리퍼를 흔들거나 주행시키는 시험은 하지 않았다. 주행 전 작은 장애물이 그 영역 안에
+있을 때 놓치는지 확인해야 한다. snapshot: `log/self_filter_ab_20261003/filtered_swept_volume.json`,
+`filtered_swept_volume_wide.json`; run data: `data/vslam_mapping_20261003_162742`.
+
+## Nav2 footprint: 차체와 그리퍼를 포함한 다각형
+
+Nav2 costmap 설정은 `robot_radius` 원 대신 `base_link` 기준 6점 convex polygon과
+`footprint_padding: 0.01`을 사용한다. 단순화 URDF의 바퀴 뒤쪽부터 그리퍼 끝까지
+`x=-0.060..+0.3175 m`, 좌우 바퀴 바깥까지 `y=±0.145 m`를 감싼다. 그리퍼 두 손가락
+사이의 빈 공간도 다각형 안에 포함되므로 좁은 틈에서는 보수적으로 동작한다.
+
+이 footprint는 Nav2가 장애물과의 경로/충돌 여유를 계산할 때 쓴다. nvblox 지도에서
+로봇 자신의 점을 지우지는 않으므로 앞 절의 depth self-filter는 별도로 유지한다.
+간략화 URDF와 실물 치수 기록 사이에 차이가 있으므로 하드웨어 외곽 대조가 남아 있다.
+2026-10-03 정지 bringup에서 `/local_costmap/published_footprint`와
+`/global_costmap/published_footprint`를 확인했다. 두 토픽 모두 `odom` frame으로 발행됐고
+padding 적용 꼭짓점은 `x=-0.070..+0.3275 m`, `y=±0.155 m`였다. Bridge write는 비활성화했고
+Nav2 목표도 보내지 않았다. 실제 외곽과 치수는 하드웨어에서 한 번 더 대조해야 하며, 이
+정지 확인만으로 주행 안전성을 보증하지 않는다.
+
+## 2026-10-03 후속 실물 Nav2 주행: 0.10 m/s
+
+확장 swept-volume 필터와 polygon footprint 적용 후 headless mapping/Nav2를 올려 실제 목표를
+보냈다. 두 시험 모두 mapping bag을 기록했고, RViz는 실행하지 않았다.
+
+- `vslam_mapping_20261003_163319`: 선속도 상한 `0.05 m/s`, 각속도 상한
+  `0.15 rad/s`, `odom x=0.6 m` 목표. 약 10초 뒤 `Failed to make progress`로 abort했다.
+  VSLAM 위치가 목표 진행 중 흔들렸고 `Unknown Tracker Error 2`가 기록됐다.
+- `vslam_mapping_20261003_163828`: 선속도 상한 `0.10 m/s`, 각속도 상한
+  `0.20 rad/s`. `odom x=0.5 m`, `x=0.9 m`의 두 action 목표가 모두 `SUCCEEDED`로 끝났다.
+  selector는 각 시험 직전에 `NAV2`, 종료 뒤 `STOP`이었다.
+
+성공 실행 bag에서 active `/leader/cmd_vel` 481개는 선속도 `0.0667..0.10 m/s`
+(평균 `0.09 m/s`)였고 각속도는 `-0.20..+0.1579 rad/s` 범위였다. active command 전체
+구간의 VSLAM pose 변화는 대략 `(+0.712,+0.014) m`, yaw `-0.09° → -7.64°`였다. wheel
+odometry 변화는 대략 `(+0.82,-0.054) m`, yaw `-0.02° → -5.81°`였다. 이 구간에서 Nav2는
+직진 목표에도 heading 보정을 보냈다. `/cmd_vel.linear.y`는 0이었으므로 직접 횡속도를 명령한
+것은 아니다. 좌우 바퀴 개별 encoder/속도 telemetry가 rosbag에 없어, 관찰된 움직임 중
+얼마가 controller 보정이고 얼마가 모터 편차인지는 분리하지 못했다.
+
+두 목표의 성공은 실물 command 경로와 짧은 목표 action이 작동했음을 확인하지만, 정밀한
+도착 오차나 반복성까지 의미하지 않는다. 기존 2026-10-03 초기 8 cm/trajectory 실패 기록은
+그 당시 조건의 이력으로 유지하고, 최신 결과와 합쳐 단일 시험 결과처럼 취급하지 않는다.
+상세 run data 및 분석은 `data/vslam_mapping_20261003_163319/analysis.md`,
+`data/vslam_mapping_20261003_163828/analysis.md`에 있다. 이 rosbag과 log 디렉터리는 로컬
+장비에 남겨뒀으며 Git에 포함하지 않는다.
+
+다음 검증은 각속도 0인 짧은 직진으로 구동계 편향을 분리하고, 좌우 encoder/속도 telemetry를
+기록하는 것이다. 이후 반복 직진·회전, 장애물 정지, cancel/failure 정지 동작을 확인한다.
+E-stop 및 bridge watchdog은 아직 실물 시험하지 않았다.

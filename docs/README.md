@@ -19,6 +19,8 @@
 12. [Survivor Stage 6.1 Registry 안정성 검증](SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE6_1_REGISTRY_ROBUSTNESS_VALIDATION.md) — temporal policy, multi-person physical validation, LOST/reassociation 최종 결과
 13. [Survivor Stage 6.1 Registry 가시성 개선](SURVIVOR_VSLAM_MAP_INTEGRATION_STAGE6_1_REGISTRY_VISUALIZATION_IMPROVEMENT.md) — text Z offset, VISIBLE/LOST 색상, persistent marker 자동·수동 검증
 14. [Survivor Pipeline 통합 launch 개발·검증](SURVIVOR_PIPELINE_INTEGRATED_LAUNCH_VALIDATION.md) — 3-terminal 실행, ownership, 자동 검증과 실물 회귀 체크리스트
+15. [리더 탐색·구호품 전달 시나리오 계획](LEADER_SCENARIO_V2_DEVELOPMENT_PLAN.md) — 자율 탐색, 생존자 발견 후 시작 위치 복귀, 구급함 파지·전달의 현재 상태와 단계별 완료 조건
+16. [리더 VSLAM/Nav2 실물 진행 기록](LEADER_NAVIGATION_PROGRESS_2026-10-03.md) — 그리퍼 self-filter/footprint, 속도별 실물 목표 주행, bag 측정과 남은 방향 편차 진단
 
 ## 문서 목록
 
