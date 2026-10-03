@@ -23,7 +23,7 @@ pipeline, Survivor Stage 1·3·4·5 실기 검증과 Stage 2 구현 상태를 �
 | BNO055와 wheel odometry 보정 | 부분 완료 | 현재 장비는 STM32 IMU/wheel odometry와 dual EKF를 검증; BNO055 기반 계획 항목은 별도 미완료 |
 | 카메라 기반 생존자 탐지 | 완료 | survivor 전용 Docker GPU runtime과 YOLO11n pipeline 검증; 실제 D435에서 1/2/3명 검출, bbox/confidence, 좌→우 numbering 및 rqt debug image 확인 |
 | depth 기반 생존자 3차원 위치 | 완료(범위 내) | Stage 3 camera optical XYZ와 Stage 4 exact-timestamp TF2 map XYZ, `/leader/survivor/map_positions`를 실제 D435에서 검증 |
-| Nav2 자율주행 | 부분 완료 | 전방 2 m 중심·반경 2 m frontier 탐색 구현. checker/DWB tolerance `0.05 m` 설정 후 `20261003_224243` 실차 목표가 wheel odom 오차 `0.0476 m`로 성공. 반복 경로·frontier bearing, 장애물 회피·E-stop·전체 disk 완주는 미검증 |
+| Nav2 자율주행 | 부분 완료 | 전방 2 m 중심·반경 2 m frontier 탐색 구현. checker/DWB tolerance `0.05 m`로 `20261003_224243` 직진 goal은 `0.0476 m` 오차로 성공했으나 `225235` 반복 goal은 측면 편향 후 progress abort (`0.0648 m` 오차). 주행 재현성 미확인; 회전·장애물 회피·E-stop·전체 disk 완주 미검증 |
 | AprilTag 물품 인식·정밀 접근 | 부분 완료 | 양 로봇 camera/base alignment와 guarded software velocity 구현; 실제 접근·파지 검증 필요 |
 | 그리퍼 물품 파지 | 확인 필요 | URDF 형상만 있고 제어 코드·실물 시험 근거 없음 |
 | 경량 물품 단독 운반 | 미구현 | 접근·파지·주행 연결 없음 |

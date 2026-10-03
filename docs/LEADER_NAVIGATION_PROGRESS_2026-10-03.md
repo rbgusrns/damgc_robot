@@ -496,3 +496,26 @@ IMU raw stream은 약 103.2 Hz였고 정지 구간 gyro-z 평균/표준편차는
 `104→137`로 증가했다. 이는 BNO055 fault bit(0)와는 별개다. wheel odometry에는 불연속이 보이지
 않았지만 bag에 raw `WHEEL_STATE`의 `encoder_status`가 기록되지 않아 엔코더 자체의 상태까지
 정상이라고 단정할 수 없다.
+
+### 2026-10-03 22:52 직진 목표 반복 시험
+
+새 mapping stack은 wheel odom `(-0.00012, 0.00000) m`에서 시작했다. goal checker/DWB tolerance는
+각각 `0.05 m`, controller 상한은 `0.10 m/s`와 `0.20 rad/s`로 확인했다. 목표 중앙선은 costmap에서
+치명 장애물 없이 free였고 정지 시 e-stop은 `0`이었다. bridge는 시험 중 UART sequence gap을
+보고했고 system `fault_bits=2`도 남아 통신 상태는 깨끗하지 않았다.
+
+`odom (0.40, 0.00) m` 목표를 보냈다. 로봇은 wheel odom `(0.35350, -0.04523) m`, yaw `-15.81°`까지
+움직인 뒤 약 12.5초 시점에 controller의 `Failed to make progress`로 abort됐다. 목표까지 남은
+거리는 `0.0648 m`로 `0.05 m` 허용 범위 밖이었다. 따라서 직전 한 번의 성공은 반복 재현되지
+않았다. launcher cleanup이 selector를 `STOP`으로 바꾸고 주행 stack을 종료했다.
+
+bag `data/vslam_mapping_20261003_225235/`의 wheel odom은 46.9 Hz, 최대 간격 169.8 ms, 경로/순변위
+`0.363/0.356 m`였다. IMU는 103.3 Hz, 최대 간격 210 ms였고 정지 구간 gyro-z 평균/표준편차는
+`-0.00059/0.00138 rad/s`; 마지막 5초 odom jitter는 0이었다. VSLAM tracking 표본은 전부 success였지만
+rate는 18.0 Hz, 최대 간격은 807 ms, 처리 최대시간은 약 499 ms였다. VSLAM과 wheel 누적 yaw 차이는
+`0.44°`였으나 path는 각각 `0.668 m`와 `0.363 m`로 차이가 컸다. raw encoder 상태는 bag에 없어
+확인할 수 없다.
+
+확인된 abort 로그 원인은 progress checker다. 기록만으로 측면 편향, controller 후보 평가, UART
+sequence gap 중 어느 항목이 직접 원인인지는 분리되지 않았다. 로그와 bag은 각각
+`log/vslam_mapping_20261003_225235/`, `data/vslam_mapping_20261003_225235/`에 보존했다.
