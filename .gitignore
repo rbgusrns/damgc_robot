@@ -10,3 +10,5 @@ log_docker/
 __pycache__/
 *.pyc
 *.csv
+/runs/eye_state/
+/artifacts/eye_state/
