@@ -1,4 +1,7 @@
 import os
+import json
+import math
+from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -9,12 +12,21 @@ def generate_launch_description():
     package_share = get_package_share_directory("rescue_robot_bringup")
     ekf_config = os.path.join(package_share, "config", "dual_ekf.yaml")
 
+    local_parameters = [ekf_config]
+    snapshot = os.environ.get("DAMGC_MAPPING_SNAPSHOT", "")
+    if snapshot:
+        manifest = json.loads((Path(snapshot) / "manifest.json").read_text())
+        state = manifest["initial_state"]
+        if manifest["map_frame"] != "odom" or len(state) != 15 or not all(math.isfinite(v) for v in state):
+            raise ValueError("Invalid saved mapping anchor")
+        local_parameters.append({"initial_state": [float(v) for v in state]})
+
     local_ekf = Node(
         package="robot_localization",
         executable="ekf_node",
         name="ekf_localization_node",
         namespace="leader",
-        parameters=[ekf_config],
+        parameters=local_parameters,
         remappings=[("odometry/filtered", "/leader/odometry/local")],
         output="screen",
     )

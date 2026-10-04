@@ -9,6 +9,8 @@ MAPPING_DOCKERFILE="${REPO_ROOT}/docker/vslam_mapping.Dockerfile"
 RUNTIME_ROOT="${XDG_RUNTIME_DIR:-/tmp}/damgc-vslam-mapping-${UID}"
 RUN_ID="$(date +%Y%m%d_%H%M%S)"
 MAPPING_MODE="${MAPPING_MODE:-3D}"
+MAPPING_SNAPSHOT="${MAPPING_SNAPSHOT:-}"
+CONTAINER_SNAPSHOT=""
 RUN_PREFIX="vslam_mapping"
 if [[ "${MAPPING_MODE}" == "2D" ]]; then RUN_PREFIX="mapping_2d"; fi
 LOG_DIR="${REPO_ROOT}/log/${RUN_PREFIX}_${RUN_ID}"
@@ -22,6 +24,20 @@ CONTAINER_BAG_DIR="/workspaces/isaac_ros-dev/data/${RUN_PREFIX}_${RUN_ID}"
 if [[ "${MAPPING_MODE}" != "2D" && "${MAPPING_MODE}" != "3D" ]]; then
   printf "MAPPING_MODE must be 2D or 3D.\n" >&2
   exit 1
+fi
+
+if [[ -n "${MAPPING_SNAPSHOT}" ]]; then
+  if [[ "${MAPPING_MODE}" != "3D" || "${VSLAM_ONLY:-0}" == "1" ]]; then
+    printf 'Saved map resume requires 3D nvblox mapping.\n' >&2
+    exit 1
+  fi
+  MAPPING_SNAPSHOT="$(realpath "${MAPPING_SNAPSHOT}")"
+  if [[ "${MAPPING_SNAPSHOT}" != "${REPO_ROOT}/"* || ! -s "${MAPPING_SNAPSHOT}/manifest.json" || ! -s "${MAPPING_SNAPSHOT}/map.nvblx" ]]; then
+    printf 'Snapshot must contain manifest.json and map.nvblx inside the repository.\n' >&2
+    exit 1
+  fi
+  CONTAINER_SNAPSHOT="/workspaces/isaac_ros-dev/${MAPPING_SNAPSHOT#"${REPO_ROOT}/"}"
+  MAPPING_INITIAL_SCAN=0
 fi
 
 HOST_PIDS=()
@@ -428,6 +444,8 @@ docker exec -d -u "${CONTAINER_USER}" \
   -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
   -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
   -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
+  -e DAMGC_MAPPING_RUN_ID="${RUN_ID}" \
+  -e DAMGC_MAPPING_SNAPSHOT="${CONTAINER_SNAPSHOT}" \
   -e DAMGC_MAPPING_MODE="${MAPPING_MODE}" \
   -e DAMGC_VSLAM_HEADLESS="${VSLAM_HEADLESS}" \
   -e DAMGC_VSLAM_ONLY="${VSLAM_ONLY}" \
@@ -441,6 +459,7 @@ docker exec -d -u "${CONTAINER_USER}" \
     export LD_LIBRARY_PATH="/opt/ros/humble/share/isaac_ros_gxf/gxf/lib:${LD_LIBRARY_PATH}"
     export LD_LIBRARY_PATH="/opt/ros/humble/share/isaac_ros_gxf/gxf/lib/serialization:${LD_LIBRARY_PATH}"
     export LD_LIBRARY_PATH="/opt/ros/humble/share/isaac_ros_gxf/gxf/lib/logger:${LD_LIBRARY_PATH}"
+    printf "%s" "${DAMGC_MAPPING_RUN_ID}" > /workspaces/isaac_ros-dev/data/.mapping_session_id
     echo "$$" > /tmp/damgc_vslam_mapping_vslam.pid
     if [[ "${DAMGC_MAPPING_MODE}" == "2D" ]]; then
       exec ros2 launch rescue_robot_bringup mapping_2d.launch.py >>"${log_path}" 2>&1
@@ -511,6 +530,19 @@ else
   wait_for_topic "/visual_slam/tracking/odometry" 120
 fi
 
+if [[ -n "${CONTAINER_SNAPSHOT}" ]]; then
+  printf 'Restoring saved nvblox map and anchored starting pose...\n'
+  docker exec -u "${CONTAINER_USER}" -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" \
+    -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
+    -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
+    -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
+    "${CONTAINER_NAME}" bash -lc '
+      source /opt/ros/humble/setup.bash
+      source /workspaces/isaac_ros-dev/install_docker/setup.bash
+      /usr/bin/python3 /workspaces/isaac_ros-dev/scripts/mapping_snapshot.py load "$1"
+    ' _ "${CONTAINER_SNAPSHOT}" >"${LOG_DIR}/map_restore.json" 2>"${LOG_DIR}/map_restore_error.log"
+fi
+
 if [[ "${VSLAM_ONLY}" != "1" ]]; then
   printf 'Checking Nav2 lifecycle readiness...\n'
   for nav2_node in planner_server controller_server behavior_server bt_navigator; do
@@ -552,6 +584,9 @@ docker exec -d -u "${CONTAINER_USER}" \
       /navigate_to_pose/_action/status \
       /leader/command_selector/request \
       /leader/cmd_vel \
+      /leader/mapping/control \
+      /leader/mapping/mode \
+      /leader/mapping/status \
       /leader/command_selector/status \
       /leader/system_state \
       /leader/stm32_rx/sequence_drops \
@@ -564,6 +599,16 @@ docker exec -d -u "${CONTAINER_USER}" \
       /local_costmap/costmap \
       /global_costmap/costmap \
       /nvblox_node/static_map_slice \
+      /cooperation/transport/control \
+      /cooperation/transport/leader \
+      /cooperation/transport/follower \
+      /cooperation/transport/leader/status \
+      /cooperation/transport/follower/status \
+      /cooperation/transport/leader/path \
+      /cooperation/transport/follower/path \
+      /leader/cooperation/cmd_vel \
+      /follower/mission/cmd_vel \
+      /follower/odom/raw \
       /plan \
       /received_global_plan \
       /lookahead_point \

@@ -1,6 +1,7 @@
 """Map with wheel/IMU odometry for Nav2 and VSLAM for visual mapping."""
 
 import os
+from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable
@@ -44,6 +45,11 @@ def generate_launch_description():
             "filter_enabled": LaunchConfiguration("filter_enabled"),
         }),
         _include("nvblox_nav2.launch.py"),
+        Node(package="cooperative_transport", executable="transport_peer",
+             namespace="leader", output="screen", parameters=[{"role": "leader"}]),
+        Node(package="rescue_robot_bringup", executable="mapping_mode_manager.py",
+             namespace="leader", output="screen", parameters=[os.path.join(
+                 get_package_share_directory("rescue_robot_bringup"), "config", "carrying_mode.yaml")]),
         Node(package="rescue_robot_bringup", executable="nvblox_slice_map.py",
              name="nvblox_slice_map", output="screen"),
         Node(

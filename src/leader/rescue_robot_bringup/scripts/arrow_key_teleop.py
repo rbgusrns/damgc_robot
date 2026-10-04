@@ -125,6 +125,14 @@ class ArrowKeyTeleop(Node):
             10,
         )
 
+        self._mapping_publisher = self.create_publisher(
+            String, "/leader/mapping/control", 10)
+        self._cooperative_controls = False
+        self._last_mapping_command = None
+        self._last_mapping_key_time = 0.0
+        self.create_subscription(String, "/leader/mapping/status",
+                                 lambda msg: print("Mapping: " + msg.data, flush=True), 10)
+
         self._source_publisher = self.create_publisher(
             String, "/leader/command_selector/request", 10
         )
@@ -187,7 +195,13 @@ class ArrowKeyTeleop(Node):
             " C               : lift up\n"
             " V               : lift down\n"
             "\n"
-            " SPACE           : stop everything\n"
+            " P               : carrying mode (pause depth mapping)\n"
+            " M               : resume normal mapping\n"
+            " H               : navigate to saved starting pose\n"
+            " L               : reload saved map, keep current pose\n"
+            " B               : prepare cooperative path (then NEW RViz goal)\n"
+            " N               : start BOTH robots after COOP READY\n"
+            " SPACE           : stop both cooperative peers\n"
             " Ctrl-C          : exit\n"
             "==========================================\n",
             flush=True,
@@ -201,12 +215,15 @@ class ArrowKeyTeleop(Node):
         )
 
         self._velocity_publisher.publish(velocity)
-        self._gripper_publisher.publish(
-            String(data=gripper_command)
-        )
+        if not self._cooperative_controls:
+            self._gripper_publisher.publish(String(data=gripper_command))
 
     def _set_motion(self, motion):
+        if self._cooperative_controls and motion in GRIPPER_KEYS.values():
+            print("COOP: gripper keys disabled; manual assembly", flush=True)
+            return
         if motion not in GRIPPER_KEYS.values():
+            self._mapping_publisher.publish(String(data="COOP_ABORT"))
             self._request_source("TELEOP")
         self._motion = motion
         self._last_motion_key_time = time.monotonic()
@@ -272,9 +289,25 @@ class ArrowKeyTeleop(Node):
             self._input_buffer = self._input_buffer[1:]
 
             if key == " ":
+                self._mapping_publisher.publish(String(data="COOP_ABORT"))
                 self._request_source("STOP")
                 self._motion = None
                 self._last_motion_key_time = 0.0
+                continue
+
+            mapping_command = {"p": "HOLD", "m": "MAPPING", "h": "HOME", "l": "LOAD_MAP", "b": "COOP_PREPARE", "n": "COOP_START"}.get(key)
+            if mapping_command:
+                if mapping_command == "COOP_PREPARE":
+                    self._cooperative_controls = True
+                elif mapping_command in ("MAPPING","HOLD","HOME","LOAD_MAP"):
+                    self._cooperative_controls = False
+                now = time.monotonic()
+                if mapping_command != self._last_mapping_command or now - self._last_mapping_key_time > 1.0:
+                    self._motion = None
+                    self._velocity_publisher.publish(Twist())
+                    self._mapping_publisher.publish(String(data=mapping_command))
+                self._last_mapping_command = mapping_command
+                self._last_mapping_key_time = now
                 continue
 
             speed_direction = SPEED_KEYS.get(key)
@@ -347,12 +380,12 @@ class ArrowKeyTeleop(Node):
         return velocity, gripper_command
 
     def stop(self):
+        self._mapping_publisher.publish(String(data="COOP_ABORT"))
         self._request_source("STOP")
         self._motion = None
         self._velocity_publisher.publish(Twist())
-        self._gripper_publisher.publish(
-            String(data="STOP")
-        )
+        if not self._cooperative_controls:
+            self._gripper_publisher.publish(String(data="STOP"))
 
     def restore_terminal(self):
         if self._terminal_configured:

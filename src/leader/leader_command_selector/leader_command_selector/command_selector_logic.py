@@ -13,6 +13,7 @@ class CommandSource(str, Enum):
     TELEOP = "TELEOP"
     APPROACH = "APPROACH"
     NAV2 = "NAV2"
+    COOPERATION = "COOPERATION"
 
 
 @dataclass(frozen=True)
@@ -57,7 +58,7 @@ class SelectorParameters:
             return self.teleop_timeout
         if source == CommandSource.APPROACH:
             return self.approach_timeout
-        if source == CommandSource.NAV2:
+        if source in (CommandSource.NAV2, CommandSource.COOPERATION):
             return self.nav2_timeout
         raise ValueError("STOP has no source timeout")
 

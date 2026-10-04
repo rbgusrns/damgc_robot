@@ -63,6 +63,10 @@ class CommandSelectorNode(Node):
         self.create_subscription(
             Twist, "/nav2/cmd_vel", self._on_nav2_command, COMMAND_QOS
         )
+        self.create_subscription(
+            Twist, "cooperation/cmd_vel",
+            lambda msg: self._on_command(CommandSource.COOPERATION, msg), COMMAND_QOS
+        )
         self.declare_parameter(
             "nav2_action_status_topic", "/navigate_to_pose/_action/status"
         )
@@ -117,6 +121,7 @@ class CommandSelectorNode(Node):
             CommandSource.TELEOP,
             CommandSource.APPROACH,
             CommandSource.NAV2,
+            CommandSource.COOPERATION,
         )
 
     def _declare_parameters(self) -> None:
@@ -137,7 +142,7 @@ class CommandSelectorNode(Node):
             self._source = CommandSource(source_value)
         except ValueError as error:
             raise ValueError(
-                "source_mode must be STOP, TELEOP, APPROACH, or NAV2"
+                "source_mode must be STOP, TELEOP, APPROACH, NAV2, or COOPERATION"
             ) from error
         self._publish_rate = float(self.get_parameter("publish_rate").value)
         self._shutdown_stop_count = int(
@@ -283,10 +288,15 @@ class CommandSelectorNode(Node):
         self, parameters: List[Parameter]
     ) -> SetParametersResult:
         """Accept only an explicit valid source change at runtime."""
+        if len(parameters) == 1 and parameters[0].name == "enable_nav2_goal_selection":
+            return SetParametersResult(
+                successful=parameters[0].type_ == Parameter.Type.BOOL,
+                reason="" if parameters[0].type_ == Parameter.Type.BOOL else "enable_nav2_goal_selection must be a bool",
+            )
         if len(parameters) != 1 or parameters[0].name != "source_mode":
             return SetParametersResult(
                 successful=False,
-                reason="only source_mode may be changed at runtime",
+                reason="only source_mode or enable_nav2_goal_selection may be changed at runtime",
             )
         parameter = parameters[0]
         if parameter.type_ != Parameter.Type.STRING:
@@ -298,7 +308,7 @@ class CommandSelectorNode(Node):
         except ValueError:
             return SetParametersResult(
                 successful=False,
-                reason="source_mode must be STOP, TELEOP, APPROACH, or NAV2",
+                reason="source_mode must be STOP, TELEOP, APPROACH, NAV2, or COOPERATION",
             )
 
         if source != self._source:

@@ -5,7 +5,8 @@ import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import qos_profile_sensor_data, QoSProfile, DurabilityPolicy
+from std_msgs.msg import String
 from sensor_msgs.msg import CameraInfo, Image
 from tf2_ros import Buffer, TransformListener
 
@@ -22,6 +23,9 @@ class RobotSelfFilter(Node):
         # This envelope includes fixed gripper geometry plus opening/lift sway.
         # Returns inside it are intentionally removed, including nearby objects.
         self.declare_parameter("gripper_bounds_m", [0.12, 0.38, -0.15, 0.15, 0.00, 0.16])
+        self._holding = False
+        self.create_subscription(String, "/leader/mapping/mode", self._mode_cb,
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.bridge = CvBridge()
         self.tf_buffer = Buffer()
         # Depth callbacks may wait briefly for the image-time transform. Give
@@ -162,7 +166,12 @@ class RobotSelfFilter(Node):
         )
         return geometry
 
+    def _mode_cb(self, message):
+        self._holding = message.data in ("HOLD", "LOADING")
+
     def _depth_cb(self, msg):
+        if self._holding:
+            return  # Do not integrate the carried object into the environment.
         if not bool(self.get_parameter("enabled").value):
             self.pub.publish(msg)
             return

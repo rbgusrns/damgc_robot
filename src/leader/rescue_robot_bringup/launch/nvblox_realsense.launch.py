@@ -38,8 +38,10 @@ def generate_launch_description():
             "map_clearing_frame_id": "base_link",
             # Preserve static surfaces for a full exploration session. The
             # upstream default (0.95 at 5 Hz) can deallocate old TSDF voxels
-            # after they leave the current camera view.
+            # after they leave the current camera view. Disable decay so a
+            # carrying-mode pause preserves the existing static map.
             "static_mapper.tsdf_decay_factor": 0.9999,
+            "decay_tsdf_rate_hz": 0.0,
             "static_mapper.exclude_last_view_from_decay": True,
             # The exploration area is a 2 m radius (4 m diameter); retain and
             # visualize the full area with a 1 m margin around its boundary.

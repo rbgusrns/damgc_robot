@@ -8,6 +8,7 @@ install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY docs DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY rviz DESTINATION share/${PROJECT_NAME})
 install(PROGRAMS
+  scripts/mapping_mode_manager.py
   scripts/imu_gyro_calibration.py
   scripts/nvblox_slice_map.py
   scripts/depth_obstacle_scan.py

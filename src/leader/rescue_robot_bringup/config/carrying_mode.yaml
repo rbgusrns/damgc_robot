@@ -1,0 +1,7 @@
+/leader/mapping_mode_manager:
+  ros__parameters:
+    # User measured: base_link to object front 0.40 m; object width 0.10 m.
+    # The manager clamps these extents to include the robot body (0.29 m wide).
+    # Zero means unknown: carrying-mode HOME is unavailable until configured.
+    payload_front_m: 0.40
+    payload_half_width_m: 0.05
