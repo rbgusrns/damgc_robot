@@ -3,7 +3,7 @@
 ## 문서 목적
 
 이 문서는 [개발 계획서](Plan.md)를 실행 상태로 변환한 관리 문서다. 최초 기준일은
-**2026년 7월 27일**이며, 현재 상태는 2026년 10월 3일까지 반영한다. AprilTag software
+**2026년 7월 27일**이며, 현재 상태는 2026년 10월 4일까지 반영한다. AprilTag software
 pipeline, Survivor Stage 1·3·4·5 실기 검증과 Stage 2 구현 상태를 아래
 관련 행에 반영했다.
 
@@ -23,7 +23,7 @@ pipeline, Survivor Stage 1·3·4·5 실기 검증과 Stage 2 구현 상태를 �
 | BNO055와 wheel odometry 보정 | 부분 완료 | 현재 장비는 STM32 IMU/wheel odometry와 dual EKF를 검증; BNO055 기반 계획 항목은 별도 미완료 |
 | 카메라 기반 생존자 탐지 | 완료 | survivor 전용 Docker GPU runtime과 YOLO11n pipeline 검증; 실제 D435에서 1/2/3명 검출, bbox/confidence, 좌→우 numbering 및 rqt debug image 확인 |
 | depth 기반 생존자 3차원 위치 | 완료(범위 내) | Stage 3 camera optical XYZ와 Stage 4 exact-timestamp TF2 map XYZ, `/leader/survivor/map_positions`를 실제 D435에서 검증 |
-| Nav2 자율주행 | 부분 완료 | VSLAM/nvblox·Nav2 경로 생성에 더해 2026-10-03 selector `NAV2`를 통한 실물 `NavigateToPose` 목표 2개 성공을 확인했다. 0.10 m/s 상한에서 active 구간 VSLAM 전진 약 0.71 m, lateral 0.014 m, 누적 yaw 약 -7.5°였고 각속도 보정 명령이 변했다. 좌우 모터별 telemetry가 없어 구동 편차 기여는 미분리; 반복성·도착 오차·장애물 정지·E-stop은 미검증 |
+| Nav2 자율주행 | 부분 완료 | 2026-10-03 DWB 기준선은 selector `NAV2`로 실물 `NavigateToPose` 목표 2개를 완료했다(상한 0.10 m/s, active 구간 VSLAM 전진 약 0.71 m, lateral 0.014 m, 누적 yaw 약 -7.5°; 좌우 모터별 편차 미분리). 2026-10-04 RPP goal은 collision-ahead로 abort됐고 사용자는 직진 후 정지, 약 45° 우회전하며 벽 쪽으로 향하는 것을 관찰해 로봇을 손으로 정렬했다. 이번 전체 bag의 wheel odom/VSLAM 누적값은 크게 불일치하나 setup·수동 재배치 구간이 포함되어 원인 판단에는 시간 구간 분석이 필요하다. RPP 반복 주행 중단; odometry·costmap·RPP 명령 동기 분석 후 재시험 필요 |
 | AprilTag 물품 인식·정밀 접근 | 부분 완료 | 양 로봇 camera/base alignment와 guarded software velocity 구현; 실제 접근·파지 검증 필요 |
 | 그리퍼 물품 파지 | 확인 필요 | URDF 형상만 있고 제어 코드·실물 시험 근거 없음 |
 | 경량 물품 단독 운반 | 미구현 | 접근·파지·주행 연결 없음 |

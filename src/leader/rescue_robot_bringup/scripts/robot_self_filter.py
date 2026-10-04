@@ -52,6 +52,116 @@ class RobotSelfFilter(Node):
         v = points
         return v + 2.0 * np.cross(qv, np.cross(qv, v) + qw * v)
 
+    @staticmethod
+    def _rotation_matrix(qx, qy, qz, qw):
+        return np.array([
+            [1.0 - 2.0 * (qy * qy + qz * qz), 2.0 * (qx * qy - qz * qw),
+             2.0 * (qx * qz + qy * qw)],
+            [2.0 * (qx * qy + qz * qw), 1.0 - 2.0 * (qx * qx + qz * qz),
+             2.0 * (qy * qz - qx * qw)],
+            [2.0 * (qx * qz - qy * qw), 2.0 * (qy * qz + qx * qw),
+             1.0 - 2.0 * (qx * qx + qy * qy)],
+        ], dtype=np.float32)
+
+    def _prepare_filter_geometry(self, msg, info, bounds):
+        key = (
+            msg.width, msg.height, msg.header.frame_id, msg.encoding,
+            tuple(float(value) for value in info.k), tuple(float(value) for value in bounds),
+        )
+        if key == getattr(self, "_geometry_key", None):
+            return self._filter_geometry
+
+        xmin, xmax, ymin, ymax, zmin, zmax = bounds
+        tf = self.tf_buffer.lookup_transform(
+            msg.header.frame_id,
+            str(self.get_parameter("base_frame").value),
+            rclpy.time.Time(),
+        )
+        q, t = tf.transform.rotation, tf.transform.translation
+        corners = np.array([
+            [x, y, z]
+            for x in (xmin, xmax)
+            for y in (ymin, ymax)
+            for z in (zmin, zmax)
+        ], dtype=np.float32)
+        camera_corners = self._quat_rotate(q.x, q.y, q.z, q.w, corners)
+        camera_translation = np.array([t.x, t.y, t.z], dtype=np.float32)
+        camera_corners += camera_translation
+        zc = camera_corners[:, 2]
+        valid_corners = zc > 0.02
+        if not np.any(valid_corners):
+            raise ValueError("gripper swept volume is behind the depth camera")
+
+        k = info.k
+        projected_u = k[0] * camera_corners[valid_corners, 0] / zc[valid_corners] + k[2]
+        projected_v = k[4] * camera_corners[valid_corners, 1] / zc[valid_corners] + k[5]
+        u0 = min(msg.width, max(0, int(np.floor(np.min(projected_u))) - 2))
+        u1 = min(msg.width, max(0, int(np.ceil(np.max(projected_u))) + 3))
+        v0 = min(msg.height, max(0, int(np.floor(np.min(projected_v))) - 2))
+        v1 = min(msg.height, max(0, int(np.ceil(np.max(projected_v))) + 3))
+        if u1 <= u0 or v1 <= v0:
+            geometry = {"roi": (u0, u1, v0, v1)}
+            self._geometry_key = key
+            self._filter_geometry = geometry
+            return geometry
+
+        # Precompute where each ROI pixel ray intersects the fixed gripper box.
+        # Depth values are camera Z, so rays use a Z component of exactly one.
+        pixel_u, pixel_v = np.meshgrid(
+            np.arange(u0, u1, dtype=np.float32),
+            np.arange(v0, v1, dtype=np.float32),
+        )
+        rays_camera = np.stack((
+            (pixel_u - np.float32(k[2])) / np.float32(k[0]),
+            (pixel_v - np.float32(k[5])) / np.float32(k[4]),
+            np.ones_like(pixel_u),
+        ), axis=-1)
+
+        rotation_camera_base = self._rotation_matrix(q.x, q.y, q.z, q.w)
+        rotation_base_camera = rotation_camera_base.T
+        camera_origin_base = -(rotation_base_camera @ camera_translation)
+        # For row vectors, camera rays map back to base with the matrix that
+        # maps base column vectors into camera coordinates.
+        rays_base = rays_camera @ rotation_camera_base
+        bounds_min = np.array([xmin, ymin, zmin], dtype=np.float32)
+        bounds_max = np.array([xmax, ymax, zmax], dtype=np.float32)
+
+        parallel = np.abs(rays_base) < 1.0e-7
+        origin_inside = (camera_origin_base >= bounds_min) & (camera_origin_base <= bounds_max)
+        parallel_inside = np.all(~parallel | origin_inside, axis=-1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            first = np.divide(
+                bounds_min - camera_origin_base,
+                rays_base,
+                out=np.full_like(rays_base, -np.inf),
+                where=~parallel,
+            )
+            second = np.divide(
+                bounds_max - camera_origin_base,
+                rays_base,
+                out=np.full_like(rays_base, np.inf),
+                where=~parallel,
+            )
+        entry = np.maximum(np.max(np.minimum(first, second), axis=-1), 0.02)
+        exit_distance = np.min(np.maximum(first, second), axis=-1)
+        intersects = parallel_inside & (exit_distance >= entry)
+
+        scale = 1000.0 if msg.encoding in ("16UC1", "mono16") else 1.0
+        geometry = {
+            "roi": (u0, u1, v0, v1),
+            "intersects": intersects,
+            "minimum_depth": entry * scale,
+            "maximum_depth": exit_distance * scale,
+            "scale": scale,
+        }
+        self._geometry_key = key
+        self._filter_geometry = geometry
+        self.get_logger().info(
+            f"Cached self-filter rays: ROI={u1 - u0}x{v1 - v0}, "
+            f"active pixels={int(np.count_nonzero(intersects))}"
+        )
+        return geometry
+
     def _depth_cb(self, msg):
         if not bool(self.get_parameter("enabled").value):
             self.pub.publish(msg)
@@ -60,71 +170,39 @@ class RobotSelfFilter(Node):
             return
         try:
             info = self.camera_info
-            # The camera is rigidly mounted on base_link. Use the latest static
-            # transform; depth timestamps are ahead of TF timestamps on this rig.
-            tf = self.tf_buffer.lookup_transform(
-                msg.header.frame_id, str(self.get_parameter("base_frame").value),
-                rclpy.time.Time()
-            )
             bounds = np.asarray(self.get_parameter("gripper_bounds_m").value, dtype=np.float64)
             if bounds.size != 6:
                 raise ValueError("gripper_bounds_m must contain xmin,xmax,ymin,ymax,zmin,zmax")
-            xmin, xmax, ymin, ymax, zmin, zmax = bounds
-            q, t = tf.transform.rotation, tf.transform.translation
-
-            # Project the swept-volume corners to limit per-frame work to the
-            # image region that can contain a gripper return.
-            corners = np.array([
-                [x, y, z] for x in (xmin, xmax) for y in (ymin, ymax) for z in (zmin, zmax)
-            ], dtype=np.float64)
-            camera_corners = self._quat_rotate(q.x, q.y, q.z, q.w, corners)
-            camera_corners += np.array([t.x, t.y, t.z])
-            zc = camera_corners[:, 2]
-            valid_corners = zc > 0.02
-            if not np.any(valid_corners):
-                raise ValueError("gripper swept volume is behind the depth camera")
-            k = info.k
-            depth = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
-            if msg.encoding in ("16UC1", "mono16"):
-                measured = depth.astype(np.float32) * 0.001
-            else:
-                measured = depth.astype(np.float32)
-
-            u = k[0] * camera_corners[valid_corners, 0] / zc[valid_corners] + k[2]
-            v = k[4] * camera_corners[valid_corners, 1] / zc[valid_corners] + k[5]
-            u0 = min(msg.width, max(0, int(np.floor(np.min(u))) - 2))
-            u1 = min(msg.width, max(0, int(np.ceil(np.max(u))) + 3))
-            v0 = min(msg.height, max(0, int(np.floor(np.min(v))) - 2))
-            v1 = min(msg.height, max(0, int(np.ceil(np.max(v))) + 3))
+            geometry = self._prepare_filter_geometry(msg, info, bounds)
+            u0, u1, v0, v1 = geometry["roi"]
             if u1 <= u0 or v1 <= v0:
                 self.pub.publish(msg)
                 return
 
-            yy, xx = np.indices((v1 - v0, u1 - u0), dtype=np.float64)
-            xx += u0
-            yy += v0
-            roi_depth = measured[v0:v1, u0:u1]
-            camera_points = np.stack((
-                (xx - k[2]) * roi_depth / k[0],
-                (yy - k[5]) * roi_depth / k[4],
-                roi_depth,
-            ), axis=-1)
-            translation = np.array([t.x, t.y, t.z])
-            base_points = self._quat_rotate(
-                -q.x, -q.y, -q.z, q.w, camera_points - translation
-            )
+            if msg.encoding in ("16UC1", "mono16"):
+                dtype = np.dtype(">u2" if msg.is_bigendian else "<u2")
+            else:
+                dtype = np.dtype(">f4" if msg.is_bigendian else "<f4")
+            row_stride = msg.step // dtype.itemsize
+            depth = np.frombuffer(msg.data, dtype=dtype).reshape(msg.height, row_stride)
+            depth_roi = depth[v0:v1, u0:u1]
             mask = (
-                (roi_depth > 0.02)
-                & (base_points[..., 0] >= xmin) & (base_points[..., 0] <= xmax)
-                & (base_points[..., 1] >= ymin) & (base_points[..., 1] <= ymax)
-                & (base_points[..., 2] >= zmin) & (base_points[..., 2] <= zmax)
+                geometry["intersects"]
+                & (depth_roi > 0)
+                & (depth_roi >= geometry["minimum_depth"])
+                & (depth_roi <= geometry["maximum_depth"])
             )
-            filtered = depth.copy()
-            filtered_roi = filtered[v0:v1, u0:u1]
-            filtered_roi[mask] = 0
-            out = self.bridge.cv2_to_imgmsg(filtered, encoding=msg.encoding)
-            out.header = msg.header
-            self.pub.publish(out)
+            if np.any(mask):
+                # This callback owns the received ROS message. Mutating its
+                # buffer avoids a full-frame copy at camera rate.
+                if not depth.flags.writeable:
+                    msg.data = bytearray(msg.data)
+                    depth = np.frombuffer(msg.data, dtype=dtype).reshape(
+                        msg.height, row_stride
+                    )
+                    depth_roi = depth[v0:v1, u0:u1]
+                depth_roi[mask] = 0
+            self.pub.publish(msg)
         except Exception as exc:
             now = self.get_clock().now()
             if (now - self.last_warn).nanoseconds > 5_000_000_000:

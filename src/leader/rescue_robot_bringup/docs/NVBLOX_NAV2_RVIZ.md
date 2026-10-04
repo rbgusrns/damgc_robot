@@ -7,6 +7,16 @@
 
 카메라가 이미 실행 중일 때 컨테이너에서 다음 launch를 사용한다.
 
+2026-10-04부터 전역 경로 생성은 NavFn을 유지하고 local controller를
+`RegulatedPurePursuitController`로 설정한다. RPP는 global path의 가까운 구간을 정리한 뒤
+lookahead 점을 따라 곡률 명령을 만들며, 속도·costmap 비용으로 선속도를 조절한다. 설정은
+`nvblox_nav2.yaml`에서 desired speed `0.10 m/s`, velocity-scaled lookahead `0.25..0.45 m`,
+goal XY tolerance `0.05 m`다. RPP의 전방 충돌 예측은 활성화되어 있다. 기존 DWB 주행 결과는
+이전 controller의 기록이며 RPP 실차 성능을 뜻하지 않는다. progress checker도 느린 로봇이
+목표 근처에서 `0.20 m` 추가 이동을 요구받지 않도록 required radius를 `0.05 m`로 맞췄다.
+mapping bag은 RPP 입력 경로와 추종점을 볼 수 있도록 `/nav2/cmd_vel`,
+`/received_global_plan`, `/lookahead_point`, `/lookahead_collision_arc`와 costmap을 기록한다.
+
 ```bash
 source /opt/ros/humble/setup.bash
 source /workspaces/isaac_ros-dev/install_docker/local_setup.bash
@@ -43,6 +53,27 @@ RViz의 Fixed Frame은 `odom`이고
 바퀴 브리지의 `/leader/cmd_vel`과 연결되지 않아 이 구성만으로 바퀴는 움직이지 않는다.
 `Nav2 Plan`은 메시 위에 그리도록 RViz에서 Z 오프셋 0.2 m로 설정했다.
 RViz를 이미 실행 중이었다면 변경된 `vslam_nvblox.rviz` 파일로 다시 실행한다.
+
+### 프론티어 목표와 수동 Nav2 목표 보기
+
+미지 공간 탐색은 먼저 자동 주행을 끄고 목표 선택을 화면에서 확인한다.
+다음 launch는 매핑 중인 slice의 프론티어 후보(청록색), 자동 선택 후보(빨간 화살표),
+시작점 기준 2m 경계(초록색)를 표시한다. `dry_run` 기본값은 `true`라 자동 목표를
+Nav2에 보내지 않는다. RViz의 `Nav2 Goal` 도구로 클릭한 목표는 경로와 계획을
+확인할 수 있다. 클릭한 목표가 활성화되면 frontier explorer가 selector를 `NAV2`로
+전환해 로봇을 움직이고, 액션이 성공·취소·실패로 끝나면 selector가 자동으로 `STOP`으로
+돌아간다. `dry_run`은 frontier 자동 목표에만 적용되며 RViz에서 클릭한 목표는 주행한다.
+RealSense depth의 `clip_distance`는 기본 4m다. 멀리 있는 depth를 nvblox 입력에서
+제외해 맵에 적분하는 점과 맵 메모리, GPU 작업량을 줄이는 데 도움이 된다. 카메라의
+해상도와 프레임 발행량은 그대로이고, VSLAM은 이 설정의 영향을 받지 않는 infrared
+stereo 영상을 사용한다.
+
+```bash
+source /opt/ros/humble/setup.bash
+source /workspaces/isaac_ros-dev/install_docker/local_setup.bash
+ros2 launch rescue_robot_bringup frontier_exploration.launch.py \
+  dry_run:=true start_rviz:=true
+```
 
 ```bash
 ros2 lifecycle get /planner_server
@@ -183,11 +214,27 @@ Nav2 경로 생성과 노드 활성 상태까지만 검증됐다.
 ## 다음 주행 시험: controller 실패 원인 분리
 
 현재 기록에는 실패 요약만 있고 당시 controller 로그 원문과 local costmap 수치가 없어
-원인을 특정할 수 없다. `robot_radius`를 줄이거나 DWB 설정을 바꾸기 전에 다음 자료를
+원인을 특정할 수 없다. `robot_radius`를 줄이거나 local controller 설정을 바꾸기 전에 다음 자료를
 같은 실패 시각에 모은다. 실제 모터 시험은 E-stop과 bridge watchdog을 확인하고 낮은
 속도의 짧은 목표부터 별도 안전 절차로 수행한다.
 
 ### 목표를 보내기 전
+
+#### RViz에서 클릭한 점으로 이동
+
+`frontier_exploration.launch.py`는 RViz의 Nav2 GoalTool과 `Navigation 2` 패널을
+함께 켠다. Humble의 GoalTool은 좌표를 패널에 전달하고 패널이 `/navigate_to_pose`
+action을 보내므로 둘 다 있어야 한다. Fixed Frame과 Nav2 global frame은 모두 `odom`이다.
+toolbar의 **Nav2 Goal**을 누르고 알려진 자유 공간을 클릭한 뒤 드래그해 도착 방향을
+정하고 놓으면 주행을 시작한다. 자동 frontier 주행은 launch 기본값 `dry_run:=true`로
+미리보기만 한다.
+
+`frontier_explorer`는 action status에서 새 목표가 accepted/executing 상태가 된 것을
+확인한 다음 `/leader/command_selector`의 `source_mode`를 `NAV2`로 전환한다. 목표가
+성공, 취소, abort되면 selector가 `STOP`으로 바뀌고 캐시된 속도 명령을 지운다.
+따라서 클릭 전에는 정지 상태이고, 한 번 클릭한 목표가 끝난 뒤에는 다음 목표를
+다시 클릭해야 한다. 처음에는 주변 costmap이 자유 공간으로 보이는 가까운 점을 고르고,
+selector 상태는 `/leader/command_selector/status`에서 확인한다.
 
 아래 항목을 저장해 controller가 실제 로봇 위치와 비용 지도를 어떻게 보고 있는지 확인한다.
 
@@ -218,7 +265,9 @@ Nav2의 “no valid trajectories” 메시지가 발생한 시각을 표시하�
    unknown인지 확인한다. 그렇다면 nvblox slice의 값/범위, inflation과 footprint 설정을
    검토한다.
 3. `/plan`이 있고 로봇에서 첫 경로 점까지 연결되는지 확인한다. 경로가 없으면 planner와
-   costmap을 조사하고, 경로는 있으나 controller만 실패하면 DWB 평가 결과를 조사한다.
+   costmap을 조사한다. RPP에서는 `/received_global_plan`, `/lookahead_point`,
+   `/lookahead_collision_arc`, `/nav2/cmd_vel`을 함께 확인해 lookahead와 정지 시점을 본다.
+   DWB 시험 기록을 재분석할 때는 해당 bag의 `/evaluation`을 확인한다.
 4. 장애물 없는 바닥에서 로봇 가까이의 짧은 목표로 재현한다. 목표 방향, 회전 필요 여부,
    로봇 전방 축과 `base_link` 축 일치 여부를 기록한다.
 5. 원인과 관측 자료가 일치할 때만 footprint/radius 또는 controller 파라미터를 조정하고

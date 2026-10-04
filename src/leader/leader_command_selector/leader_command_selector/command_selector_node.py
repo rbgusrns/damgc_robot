@@ -5,6 +5,7 @@ from math import isfinite
 from typing import Dict, List, Optional
 
 import rclpy
+from action_msgs.msg import GoalStatus, GoalStatusArray
 from geometry_msgs.msg import Twist
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.executors import ExternalShutdownException
@@ -60,6 +61,22 @@ class CommandSelectorNode(Node):
         )
         self.create_subscription(
             Twist, "/nav2/cmd_vel", self._on_nav2_command, COMMAND_QOS
+        )
+        self.declare_parameter(
+            "nav2_action_status_topic", "/navigate_to_pose/_action/status"
+        )
+        self._seen_nav2_terminal_ids = set()
+        self._active_nav2_goal_ids = set()
+        self.create_subscription(
+            GoalStatusArray,
+            str(self.get_parameter("nav2_action_status_topic").value),
+            self._on_nav2_action_status,
+            QoSProfile(
+                history=HistoryPolicy.KEEP_LAST,
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            ),
         )
 
         self._commands: Dict[CommandSource, Optional[PlanarCommand]] = {
@@ -136,6 +153,68 @@ class CommandSelectorNode(Node):
 
     def _on_nav2_command(self, message: Twist) -> None:
         self._on_command(CommandSource.NAV2, message)
+
+    def _on_nav2_action_status(self, message: GoalStatusArray) -> None:
+        """Fail closed when a Nav2 goal ends, even if cmd_vel keeps streaming."""
+        active_statuses = {
+            GoalStatus.STATUS_ACCEPTED,
+            GoalStatus.STATUS_EXECUTING,
+            GoalStatus.STATUS_CANCELING,
+        }
+        terminal_statuses = {
+            GoalStatus.STATUS_SUCCEEDED,
+            GoalStatus.STATUS_CANCELED,
+            GoalStatus.STATUS_ABORTED,
+        }
+        entries = [
+            (bytes(entry.goal_info.goal_id.uuid), int(entry.status))
+            for entry in message.status_list
+        ]
+        currently_active = {
+            goal_id for goal_id, status in entries if status in active_statuses
+        }
+        self._active_nav2_goal_ids.update(currently_active)
+
+        ended = [
+            (goal_id, status)
+            for goal_id, status in entries
+            if status in terminal_statuses
+        ]
+        trigger = None
+        if not currently_active:
+            trigger = next(
+                (
+                    (goal_id, status)
+                    for goal_id, status in ended
+                    if goal_id in self._active_nav2_goal_ids
+                    or goal_id not in self._seen_nav2_terminal_ids
+                ),
+                None,
+            )
+        self._seen_nav2_terminal_ids.update(goal_id for goal_id, _ in ended)
+        self._active_nav2_goal_ids.difference_update(goal_id for goal_id, _ in ended)
+
+        if self._source != CommandSource.NAV2 or trigger is None:
+            return
+
+        _terminal_id, terminal_status = trigger
+        status_name = {
+            GoalStatus.STATUS_SUCCEEDED: "SUCCEEDED",
+            GoalStatus.STATUS_CANCELED: "CANCELED",
+            GoalStatus.STATUS_ABORTED: "ABORTED",
+        }.get(terminal_status, str(terminal_status))
+        self.get_logger().error(
+            "Nav2 goal ended (%s); switching command source to STOP" % status_name
+        )
+        result = self.set_parameters([Parameter("source_mode", value="STOP")])[0]
+        if not result.successful:
+            self._source = CommandSource.STOP
+            self._clear_commands()
+            self._command_pub.publish(Twist())
+            self._publish_status("STOP")
+            self.get_logger().error(
+                "Could not update source_mode parameter; forced internal STOP"
+            )
 
     def _on_command(self, source: CommandSource, message: Twist) -> None:
         """Cache only a valid command from the currently selected source."""

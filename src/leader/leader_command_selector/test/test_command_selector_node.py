@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+from action_msgs.msg import GoalStatus, GoalStatusArray
 from geometry_msgs.msg import Twist
 from rclpy.parameter import Parameter
 
@@ -150,3 +151,61 @@ def test_twist_output_populates_only_planar_axes() -> None:
     assert message.angular.z == -0.4
     assert message.linear.y == message.linear.z == 0.0
     assert message.angular.x == message.angular.y == 0.0
+
+
+def test_nav2_terminal_status_forces_selector_to_stop() -> None:
+    harness = parameter_harness()
+    harness._seen_nav2_terminal_ids = set()
+    harness._active_nav2_goal_ids = set()
+    harness.get_logger = lambda: SimpleNamespace(
+        info=lambda message: None, error=lambda message: None
+    )
+    harness.set_parameters = lambda parameters: [
+        CommandSelectorNode._on_parameter_change(harness, parameters)
+    ]
+    CommandSelectorNode._on_parameter_change(
+        harness, [Parameter("source_mode", value="NAV2")]
+    )
+
+    goal_status = GoalStatus()
+    goal_status.goal_info.goal_id.uuid = [1] + [0] * 15
+    goal_status.status = GoalStatus.STATUS_EXECUTING
+    active = GoalStatusArray()
+    active.status_list = [goal_status]
+    CommandSelectorNode._on_nav2_action_status(harness, active)
+    assert harness._source == CommandSource.NAV2
+
+    goal_status.status = GoalStatus.STATUS_ABORTED
+    ended = GoalStatusArray()
+    ended.status_list = [goal_status]
+    CommandSelectorNode._on_nav2_action_status(harness, ended)
+
+    assert harness._source == CommandSource.STOP
+    assert harness._command_pub.messages[-1].linear.x == 0.0
+    assert harness._command_pub.messages[-1].angular.z == 0.0
+
+
+def test_previous_terminal_status_does_not_stop_a_later_nav2_goal() -> None:
+    harness = parameter_harness()
+    harness._source = CommandSource.STOP
+    harness._seen_nav2_terminal_ids = set()
+    harness._active_nav2_goal_ids = set()
+    harness.get_logger = lambda: SimpleNamespace(
+        info=lambda message: None, error=lambda message: None
+    )
+    harness.set_parameters = lambda parameters: [
+        CommandSelectorNode._on_parameter_change(harness, parameters)
+    ]
+
+    old_status = GoalStatus()
+    old_status.goal_info.goal_id.uuid = [2] + [0] * 15
+    old_status.status = GoalStatus.STATUS_ABORTED
+    old_end = GoalStatusArray()
+    old_end.status_list = [old_status]
+    CommandSelectorNode._on_nav2_action_status(harness, old_end)
+    CommandSelectorNode._on_parameter_change(
+        harness, [Parameter("source_mode", value="NAV2")]
+    )
+    CommandSelectorNode._on_nav2_action_status(harness, old_end)
+
+    assert harness._source == CommandSource.NAV2
