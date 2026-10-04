@@ -15,8 +15,8 @@
 | 새 목표의 plan만 채택 | B 이후 새 NavigateToPose goal status stamp와 plan stamp를 확인. 이전 goal 취소, 이전 plan 사용하지 않음. |
 | frame/시작 정렬 | 동일: leader odom frame, 시작 위치 5cm / heading 3° / 간격 8cm / 3–4000 pose. |
 | follower feasible 경로만 허용 | PR 기하 수학 사용, 80% 힌지 reserve, 비측방/전후진 일정 방향 검증. 실패하면 원인과 함께 WAIT_PLAN. 자동 대체 경로 생성은 미구현. |
-| 합체 회전반경을 Nav2에 반영 | B 준비 때 Smac Hybrid 최소 회전반경을 1.5m로 설정하고 협동 종료 때 0.20m로 복구. |
-| 협동 경로 회전반경 | B 준비 때 Smac Hybrid `GridBased.minimum_turning_radius`를 1.5m로 설정. 협동 모드를 나가면 0.20m로 복구. |
+| 합체 회전반경을 Nav2에 반영 | B 준비 때 Smac Hybrid 최소 회전반경을 3.0m로 설정하고 협동 종료 때 0.20m로 복구. |
+| 협동 경로 회전반경 | B 준비 때 Smac Hybrid `GridBased.minimum_turning_radius`를 3.0m로 설정. 협동 모드를 나가면 0.20m로 복구. |
 | FollowPath와 RPP gate | N 후 확정 경로를 FollowPath에 제출, 수락/ARM/COMMIT ACK 이후 공통 예정 시각까지 0 유지. RPP 유지, 실패 시 공동 STOP. |
 | costmap의 합체 외곽 확인 | leader odom global costmap + updates, unknown/범위 밖/장애물 거절. 샘플 사이도 촘촘하게 검사. 힌지 기울어진 chassis 모서리까지 포함. |
 

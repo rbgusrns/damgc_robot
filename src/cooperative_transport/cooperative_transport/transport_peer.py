@@ -26,7 +26,7 @@ from map_msgs.msg import OccupancyGridUpdate
 from std_msgs.msg import String
 
 from .motion import Pose2D, normalize_angle
-from .hinged_formation import HingeGeometry, leader_path_to_object_path, drive_direction
+from .hinged_formation import HingeGeometry, leader_path_to_object_path, drive_direction, path_curvatures
 from .path_tracking import compute_tracking_command
 
 TERMINAL = {'IDLE', 'STOPPED', 'DONE', 'ERROR'}
@@ -342,6 +342,11 @@ class TransportPeer(Node):
                 raise ValueError('path does not begin at current leader pose/heading')
             if any(math.hypot(b.x-a.x,b.y-a.y) > .08 for a,b in zip(points,points[1:])):
                 raise ValueError('path spacing exceeds 8cm')
+            nav_curvatures = path_curvatures(points)
+            nav_index = max(range(len(nav_curvatures)), key=lambda index: abs(nav_curvatures[index]))
+            self.get_logger().info(
+                'Nav2 path peak curvature %.4f 1/m at sample %d (x=%.3f, y=%.3f)'
+                % (nav_curvatures[nav_index], nav_index, points[nav_index].x, points[nav_index].y))
             obj, formation = leader_path_to_object_path(points, self.geometry, lateral_tolerance=.01)
             if abs(formation.leader_hinge_angles[0]) > math.radians(2):
                 raise ValueError('path must begin with neutral hinges; start with straight section')

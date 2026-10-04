@@ -158,11 +158,11 @@ class MappingModeManager(Node):
         self.source_pub.publish(String(data='STOP'))
         self.publish_state()
         planner_request = SetParameters.Request()
-        planner_request.parameters = [Parameter('GridBased.minimum_turning_radius', value=1.5).to_parameter_msg()]
+        planner_request.parameters = [Parameter('GridBased.minimum_turning_radius', value=3.0).to_parameter_msg()]
         def planner_configured(future):
             try:
                 if not future.result().results or not all(r.successful for r in future.result().results):
-                    raise RuntimeError('Nav2 planner rejected 1.5 m cooperative turning radius')
+                    raise RuntimeError('Nav2 planner rejected 3.0 m cooperative turning radius')
                 selector_request = SetParameters.Request()
                 selector_request.parameters = [Parameter('enable_nav2_goal_selection', value=False).to_parameter_msg()]
                 self.selector_parameters.call_async(selector_request).add_done_callback(locked)

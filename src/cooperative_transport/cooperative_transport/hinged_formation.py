@@ -293,12 +293,15 @@ def object_path_to_robot_paths(
     if not math.isfinite(lateral_tolerance) or lateral_tolerance < 0.0:
         raise ValueError("lateral_tolerance must be finite and non-negative")
     curvatures = path_curvatures(object_path)
-    max_curvature = max(abs(value) for value in curvatures)
+    max_index = max(range(len(curvatures)), key=lambda index: abs(curvatures[index]))
+    max_curvature = abs(curvatures[max_index])
     limit = geometry.curvature_limit(curvature_margin)
     if max_curvature > limit + 1e-6:
         raise ValueError(
-            "path curvature %.4f 1/m exceeds cooperative limit %.4f 1/m"
-            % (max_curvature, limit)
+            "path curvature %.4f 1/m at sample %d (x=%.3f, y=%.3f, yaw=%.1f deg) "
+            "exceeds cooperative limit %.4f 1/m"
+            % (max_curvature, max_index, object_path[max_index].x,
+               object_path[max_index].y, math.degrees(object_path[max_index].yaw), limit)
         )
 
     leader: List[Pose2D] = []
