@@ -30,6 +30,7 @@ VSLAM_HEADLESS="${VSLAM_HEADLESS:-0}"
 VSLAM_ONLY="${VSLAM_ONLY:-0}"
 SELF_FILTER_ENABLED="${SELF_FILTER_ENABLED:-1}"
 MAPPING_SOURCE_MODE="${MAPPING_SOURCE_MODE:-STOP}"
+MAPPING_INITIAL_SCAN="${MAPPING_INITIAL_SCAN:-1}"
 HOST_XAUTHORITY="${XAUTHORITY:-/run/user/${UID}/gdm/Xauthority}"
 DEPTH_CLIP_DISTANCE_M="${DEPTH_CLIP_DISTANCE_M:-4.0}"
 STM32_I2C_DEVICE="${STM32_I2C_DEVICE:-/dev/i2c-7}"
@@ -41,6 +42,10 @@ if [[ "${VSLAM_HEADLESS}" != "0" && "${VSLAM_HEADLESS}" != "1" ]] || \
   [[ "${SELF_FILTER_ENABLED}" != "0" && "${SELF_FILTER_ENABLED}" != "1" ]] || \
   [[ "${VSLAM_ONLY}" != "0" && "${VSLAM_ONLY}" != "1" ]]; then
   printf 'VSLAM_HEADLESS, SELF_FILTER_ENABLED, and VSLAM_ONLY must be 0 or 1.\n' >&2
+  exit 1
+fi
+if [[ "${MAPPING_INITIAL_SCAN}" != "0" && "${MAPPING_INITIAL_SCAN}" != "1" ]]; then
+  printf 'MAPPING_INITIAL_SCAN must be 0 or 1.\n' >&2
   exit 1
 fi
 if [[ "${VSLAM_ONLY}" == "1" && "${VSLAM_HEADLESS}" != "1" ]]; then
@@ -394,6 +399,7 @@ docker exec -d -u "${CONTAINER_USER}" \
   -e DAMGC_VSLAM_HEADLESS="${VSLAM_HEADLESS}" \
   -e DAMGC_VSLAM_ONLY="${VSLAM_ONLY}" \
   -e DAMGC_SELF_FILTER_ENABLED="${SELF_FILTER_ENABLED}" \
+  -e DAMGC_MAPPING_INITIAL_SCAN="${MAPPING_INITIAL_SCAN}" \
   "${CONTAINER_NAME}" bash -lc '
     log_path="$1"
     source /opt/ros/humble/setup.bash
@@ -408,7 +414,8 @@ docker exec -d -u "${CONTAINER_USER}" \
         publish_odom_to_base_tf:=true >>"${log_path}" 2>&1
     fi
     exec ros2 launch rescue_robot_bringup nvblox_vslam_realsense.launch.py \
-      filter_enabled:="${DAMGC_SELF_FILTER_ENABLED}" >>"${log_path}" 2>&1
+      filter_enabled:="${DAMGC_SELF_FILTER_ENABLED}" \
+      initial_scan:="${DAMGC_MAPPING_INITIAL_SCAN}" >>"${log_path}" 2>&1
   ' _ "${container_log_dir}/vslam_nvblox.log"
 
 if [[ "${VSLAM_HEADLESS}" == "1" ]]; then
@@ -451,6 +458,7 @@ wait_for_topic() {
 
 printf 'Waiting for the mapping data path...\n'
 wait_for_topic "/leader/odom/raw" 30
+wait_for_topic "/leader/odometry/local" 30
 wait_for_topic "/leader/camera/infra1/image_rect_raw" 45
 wait_for_topic "/visual_slam/tracking/odometry" 120
 
@@ -469,6 +477,7 @@ docker exec -d -u "${CONTAINER_USER}" \
     echo "$$" > /tmp/damgc_vslam_mapping_bag.pid
     exec ros2 bag record --output "${bag_path}" \
       /nav2/cmd_vel \
+      /spin/_action/status \
       /leader/cmd_vel \
       /leader/command_selector/status \
       /leader/system_state \
@@ -480,6 +489,7 @@ docker exec -d -u "${CONTAINER_USER}" \
       /leader/odometry/global \
       /local_costmap/costmap \
       /global_costmap/costmap \
+      /nvblox_node/static_map_slice \
       /plan \
       /received_global_plan \
       /lookahead_point \
@@ -513,6 +523,25 @@ sleep 5
 
 printf '[7/7] Starting arrow-key control. E/D changes speed; Space stops; Ctrl-C shuts everything down.\n'
 source_with_nounset_disabled "${REPO_ROOT}/install/setup.bash"
+if [[ "${MAPPING_INITIAL_SCAN}" == "1" ]]; then
+  printf 'Requesting the one-time 360-degree mapping scan...\n'
+  scan_service_deadline=$((SECONDS + 20))
+  until ros2 service list 2>/dev/null | grep -Fxq "/leader/initial_map_scan/start"; do
+    if (( SECONDS >= scan_service_deadline )); then
+      printf 'Initial scan service did not appear; see %s/vslam_nvblox.log\n' \
+        "${LOG_DIR}" >&2
+      break
+    fi
+    sleep 1
+  done
+  if (( SECONDS < scan_service_deadline )); then
+    ros2 service call /leader/initial_map_scan/start std_srvs/srv/Trigger "{}" \
+      >"${LOG_DIR}/initial_map_scan_trigger.log" 2>&1 || {
+        printf 'Initial scan request failed; see %s/initial_map_scan_trigger.log\n' \
+          "${LOG_DIR}" >&2
+      }
+  fi
+fi
 ros2 run rescue_robot_bringup arrow_key_teleop.py --ros-args \
   -p command_topic:=/leader/teleop/cmd_vel \
   -p linear_speed:=0.08 \

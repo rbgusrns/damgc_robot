@@ -1,19 +1,60 @@
 # nvblox 기반 Nav2 목표 확인
 
-현재 구성은 VSLAM이 `odom -> base_link`를 발행하고 nvblox가 `odom` 프레임의
-`/nvblox_node/static_map_slice`를 발행한다. Nav2 global/local costmap 모두 이 slice를
-사용한다. Nav2 자체는 `map` 프레임이나 AMCL을 요구하지 않는다. Survivor의
-장기 위치 등록에는 `map`이 필요하므로 VSLAM이 `map -> odom`도 발행한다.
+현재 Nav2 매핑 구성은 local `robot_localization` EKF가 `/leader/odom/raw`와
+`/leader/imu/data_raw`를 융합해 `odom -> base_link`를 발행하고, global EKF가 VSLAM pose를
+받아 `map -> odom`을 발행한다. VSLAM은 계속 stereo tracking과 시각 지도 출력을
+제공하지만 직접 TF를 발행하지 않는다. nvblox와 Nav2 costmap은 `odom` 프레임의
+`/nvblox_node/static_map_slice`를 사용하므로, 단거리 주행은 wheel/IMU EKF의 연속 자세를
+사용한다. VSLAM pose와 local EKF odometry는 rosbag에 함께 기록해 차이를 추적한다.
+
+### 지도 유지와 재부팅
+
+RViz의 `NvbloxMesh`는 `/nvblox_node/mesh`를 표시하고, Nav2는
+`/nvblox_node/static_map_slice`를 사용한다. 둘 다 nvblox 내부 TSDF에서 나온다.
+따라서 RViz mesh만 안 보이는 경우와 TSDF/map slice 데이터 자체가 줄어드는 경우를
+구분해야 한다. 직전 실행 로그에서는 `static_tsdf`였지만 기본
+`static_mapper.tsdf_decay_factor=0.95`, `decay_tsdf_rate_hz=5`,
+`exclude_last_view_from_decay=false`였다. 오래 재관측하지 않은 TSDF weight는
+감쇠되어 voxel이 제거될 수 있으므로 이 설정에서는 지나간 표면이 RViz뿐 아니라
+Nav2 지도에서도 사라질 수 있다. 또한 map clearing과 mesh 시각화는 로봇으로부터
+5 m 바깥을 지우거나 표시하지 않는 기본값이다.
+
+이번 실행부터 static mapper의 decay factor를 `0.9999`로 올리고 마지막 camera view는
+감쇠에서 제외한다. 이 값은 decay를 끄지는 않지만 기본값보다 훨씬 오래 과거 표면을
+유지한다. map clearing/mesh 표시 반경은 각각 5 m로 고정했다. 시작 위치 기준 2 m
+반경 탐색에서는 가장 먼 두 위치 사이도 약 4 m이므로 전체 탐색 구역을 포함한다.
+mapping rosbag은 `/nvblox_node/static_map_slice`도 기록해 다음 실행에서 지도 데이터가
+유지되는지 RViz 표시와 따로 확인할 수 있다.
+
+이 설정은 nvblox 프로세스가 살아 있는 동안의 유지 설정이다. nvblox 지도는 현재 GPU
+메모리에만 있고 `after_shutdown_map_save_path`나 시작 시 `load_map`을 설정하지 않았다.
+따라서 재부팅하면 실제 3D 지도도 초기화된다. rosbag은 전체 TSDF map 저장본이 아니며,
+VSLAM의 `odom` 원점도 재부팅 뒤에는 달라질 수 있으므로 이전 지도 자동 불러오기는
+별도의 저장 및 재현 위치 추정 작업으로 다뤄야 한다.
+
+새 매핑 세션은 기본적으로 Nav2가 준비되고 odometry pose가 1초 안정된 뒤,
+`/spin` behavior로 제자리 360도 초기 스캔을 한 번 수행한다. 이 동작은 주변 지형을
+먼저 관측하기 위한 것이며, 회전 충돌이 감지되거나 Nav2/odometry가 준비되지 않으면
+주행하지 않고 selector를 `STOP`으로 둔다. 시작 회전을 건너뛰려면
+`MAPPING_INITIAL_SCAN=0 ./scripts/run_vslam_mapping.sh`로 실행한다. 현재 실행 중인
+매핑 세션에는 이 시작 동작이 소급 적용되지 않는다.
 
 카메라가 이미 실행 중일 때 컨테이너에서 다음 launch를 사용한다.
 
-2026-10-04부터 전역 경로 생성은 NavFn을 유지하고 local controller를
-`RegulatedPurePursuitController`로 설정한다. RPP는 global path의 가까운 구간을 정리한 뒤
-lookahead 점을 따라 곡률 명령을 만들며, 속도·costmap 비용으로 선속도를 조절한다. 설정은
-`nvblox_nav2.yaml`에서 desired speed `0.10 m/s`, velocity-scaled lookahead `0.25..0.45 m`,
-goal XY tolerance `0.05 m`다. RPP의 전방 충돌 예측은 활성화되어 있다. 기존 DWB 주행 결과는
-이전 controller의 기록이며 RPP 실차 성능을 뜻하지 않는다. progress checker도 느린 로봇이
-목표 근처에서 `0.20 m` 추가 이동을 요구받지 않도록 required radius를 `0.05 m`로 맞췄다.
+2026-10-04부터 전역 경로는 `SmacPlannerHybrid`의 Reeds-Shepp 모드로 생성한다. 이 방식은
+로봇의 방향과 전진·후진 구간을 고려해 경로를 계획한다. local controller는
+`RegulatedPurePursuitController`이며, 전역 경로의 방향 전환 지점(cusp)에 따라 전진과
+후진을 추종한다. RPP는 `allow_reversing: true`일 때 `use_rotate_to_heading: false`가
+필요하므로, 방향 전환은 planner가 만든 경로에 맡긴다. RPP 속도 상한은 `0.10 m/s`,
+velocity-scaled lookahead는 `0.25..0.45 m`, goal XY tolerance는 `0.05 m`다. 충돌 예측은
+계속 활성화되어 있다. Hybrid-A* 탐색의 최소 회전 반경은 초기값 `0.20 m`이며 실차 경로로
+조정해야 한다. progress checker는 느린 로봇이 목표 근처에서 `0.20 m` 추가 이동을 요구받지
+않도록 required radius를 `0.05 m`로 맞췄다.
+
+실행 중 controller 로그에 `detected collision ahead`가 반복되면 planner의 경로가 있어도
+RPP가 local costmap에서 즉시 실행할 충돌 없는 속도 명령을 찾지 못해 목표를 중단할 수 있다.
+그 경우 RViz에서 global path와 local costmap을 확인한다. 기존 DWB 주행 결과는 이전
+controller의 기록이며 RPP 또는 후진 포함 설정의 실차 성능을 뜻하지 않는다.
 mapping bag은 RPP 입력 경로와 추종점을 볼 수 있도록 `/nav2/cmd_vel`,
 `/received_global_plan`, `/lookahead_point`, `/lookahead_collision_arc`와 costmap을 기록한다.
 
@@ -22,7 +63,14 @@ source /opt/ros/humble/setup.bash
 source /workspaces/isaac_ros-dev/install_docker/local_setup.bash
 export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0 RMW_IMPLEMENTATION=rmw_fastrtps_cpp FASTDDS_BUILTIN_TRANSPORTS=UDPv4 DAMGC_VSLAM_HEADLESS=1
 ros2 pkg prefix rescue_robot_bringup
-ros2 launch rescue_robot_bringup nvblox_vslam_realsense.launch.py
+ros2 launch rescue_robot_bringup nvblox_vslam_realsense.launch.py initial_scan:=true
+```
+
+직접 launch한 경우 rosbag 준비 후 다른 터미널에서 아래 service를 한 번 호출해 초기 스캔을
+시작한다. `run_vslam_mapping.sh`는 rosbag의 stationary baseline을 기록한 뒤 자동 호출한다.
+
+```bash
+ros2 service call /leader/initial_map_scan/start std_srvs/srv/Trigger {}
 ```
 
 `ros2 pkg prefix` 결과가 `/workspaces/isaac_ros-dev/install_docker/rescue_robot_bringup`인지
@@ -106,16 +154,16 @@ ros2 topic hz /costmap/costmap
 
 ## Survivor와 함께 실행할 때: TF 및 depth 동기화
 
-2026-09-26의 Nav2 통합(`1b201a8`)에서 전용 VSLAM launch의
-`publish_map_to_odom_tf`가 `true`에서 `false`로 바뀌었다. 전용 실행 경로에는
-global EKF가 없어 `map` 프레임 자체가 사라졌고, Survivor Stage 4의 영상 시각
-`camera -> map` 조회가 실패했다. Stage 5 marker와 Stage 6 registry도 따라서
-비어 있었다. 전용 VSLAM launch에서 `map -> odom`을 다시 켰으며 소유권은
-`map -> odom`: VSLAM, `odom -> base_link`: VSLAM,
-`base_link -> camera_link`: robot_state_publisher의 고정 관절,
-`camera_link -> optical frame`: RealSense이다. Nav2와 nvblox의 `odom` 설정 및
-RViz Fixed Frame은 유지한다. 다른 VSLAM/EKF launch를 동시에 실행하지 않는다.
-VSLAM TF는 영상 처리 시점에 간헐적으로 늦게 도착한다. 실측 328개 sample에서
+Survivor Stage 4처럼 `map` 프레임을 요구하는 perception pipeline은 별도
+`visual_slam_nvblox_realsense.launch.py`를 사용한다. 이를 Nav2 전용
+`nvblox_vslam_realsense.launch.py`와 동시에 실행하면 안 된다. 2026-10-04의 Nav2
+회전 비교 뒤 통합 launch는 dual EKF를 포함한다. TF 소유권은 `map -> odom`이 global
+EKF, `odom -> base_link`가 wheel/IMU local EKF, `base_link -> camera_link`가
+robot_state_publisher의 고정 관절, `camera_link -> optical frame`이 RealSense다.
+VSLAM TF 발행은 꺼 두고, VSLAM pose 입력을 covariance adapter를 거쳐 global EKF에
+제공한다. Nav2와 nvblox의 `odom` 설정 및 RViz Fixed Frame은 유지한다. VSLAM tracking
+pose는 local EKF와 계속 비교할 수 있도록 기록한다. VSLAM TF는 영상 처리 시점에
+간헐적으로 늦게 도착한다. 실측 328개 sample에서
 영상 stamp 대비 `odom` TF 지연은 95백분위 133 ms, 99백분위 300 ms,
 최대 467 ms였다. Stage 4는 같은 영상 stamp의 TF를 최대 0.6초 기다린다.
 lookup timestamp를 0으로 바꾸거나 `odom` 좌표를 `map`으로 간주하지 않는다.

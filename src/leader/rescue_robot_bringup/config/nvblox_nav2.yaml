@@ -15,10 +15,24 @@ planner_server:
     expected_planner_frequency: 1.0
     planner_plugins: [GridBased]
     GridBased:
-      plugin: nav2_navfn_planner/NavfnPlanner
+      plugin: nav2_smac_planner/SmacPlannerHybrid
       tolerance: 0.25
-      use_astar: false
       allow_unknown: true
+      motion_model_for_search: REEDS_SHEPP
+      # Differential drive can turn in place. This small radius lets the
+      # planner produce tight forward/reverse arcs while checking the full
+      # robot footprint against the costmap.
+      minimum_turning_radius: 0.20
+      angle_quantization_bins: 72
+      # Keep the cached Reeds-Shepp heuristic bounded; the exploration area
+      # is only 4 m across, so the default lookup window is unnecessarily large.
+      lookup_table_size: 3.0
+      reverse_penalty: 1.5
+      change_penalty: 0.2
+      non_straight_penalty: 1.2
+      cost_penalty: 2.0
+      analytic_expansion_ratio: 3.5
+      analytic_expansion_max_length: 1.0
 
 controller_server:
   ros__parameters:
@@ -57,12 +71,31 @@ controller_server:
       cost_scaling_dist: 0.30
       cost_scaling_gain: 0.50
       inflation_cost_scaling_factor: 10.0
-      use_rotate_to_heading: true
       rotate_to_heading_min_angle: 0.785
       rotate_to_heading_angular_vel: 0.20
       max_angular_accel: 0.30
-      allow_reversing: false
+      # RPP cannot combine rotate-to-heading with reverse path cusps. Hybrid-A*
+      # supplies the heading-aware forward/reverse path instead.
+      use_rotate_to_heading: false
+      allow_reversing: true
       use_interpolation: true
+
+behavior_server:
+  ros__parameters:
+    use_sim_time: false
+    costmap_topic: local_costmap/costmap_raw
+    footprint_topic: local_costmap/published_footprint
+    cycle_frequency: 10.0
+    behavior_plugins: [spin]
+    spin:
+      plugin: nav2_behaviors/Spin
+    global_frame: odom
+    robot_base_frame: base_link
+    transform_tolerance: 0.3
+    simulate_ahead_time: 2.0
+    max_rotational_vel: 0.20
+    min_rotational_vel: 0.10
+    rotational_acc_lim: 0.20
 
 global_costmap:
   global_costmap:

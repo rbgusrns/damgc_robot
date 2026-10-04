@@ -37,6 +37,14 @@ def generate_launch_description():
             remappings=[("cmd_vel", "/nav2/cmd_vel")],
         ),
         Node(
+            package="nav2_behaviors",
+            executable="behavior_server",
+            name="behavior_server",
+            output="screen",
+            parameters=[params_file],
+            remappings=[("cmd_vel", "/nav2/cmd_vel")],
+        ),
+        Node(
             package="nav2_bt_navigator",
             executable="bt_navigator",
             name="bt_navigator",
@@ -55,7 +63,12 @@ def generate_launch_description():
                 "use_sim_time": False,
                 "autostart": True,
                 "bond_timeout": 0.0,
-                "node_names": ["planner_server", "controller_server", "bt_navigator"],
+                "node_names": [
+                    "planner_server",
+                    "controller_server",
+                    "behavior_server",
+                    "bt_navigator",
+                ],
             }],
         ),
     ]

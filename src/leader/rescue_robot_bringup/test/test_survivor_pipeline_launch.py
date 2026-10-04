@@ -169,7 +169,7 @@ def test_image_view_switch_only_controls_gui():
         assert gui.condition.evaluate(context) is (enabled == "true")
 
 
-def test_integrated_mapping_has_one_vslam_tf_owner_and_no_ekf():
+def test_integrated_mapping_uses_ekfs_for_vslam_and_wheel_imu_tf():
     path = LAUNCH_FILE.with_name("nvblox_vslam_realsense.launch.py")
     spec = importlib.util.spec_from_file_location("mapping_launch", path)
     module = importlib.util.module_from_spec(spec)
@@ -178,7 +178,7 @@ def test_integrated_mapping_has_one_vslam_tf_owner_and_no_ekf():
         entity for entity in module.generate_launch_description().entities
         if isinstance(entity, IncludeLaunchDescription)
     ]
-    assert len(includes) == 3
+    assert len(includes) == 4
     for entity in includes:
         entity.launch_description_source.get_launch_description(LaunchContext())
     assert sorted(
@@ -189,6 +189,10 @@ def test_integrated_mapping_has_one_vslam_tf_owner_and_no_ekf():
         "nvblox_realsense.launch.py",
         "nvblox_nav2.launch.py",
     ])
+    assert "localization.launch.py" in {
+        Path(entity.launch_description_source.location).name
+        for entity in includes
+    }
     vslam = next(entity for entity in includes if entity.launch_arguments)
-    assert dict(vslam.launch_arguments)["publish_map_to_odom_tf"] == "true"
-    assert dict(vslam.launch_arguments)["publish_odom_to_base_tf"] == "true"
+    assert dict(vslam.launch_arguments)["publish_map_to_odom_tf"] == "false"
+    assert dict(vslam.launch_arguments)["publish_odom_to_base_tf"] == "false"

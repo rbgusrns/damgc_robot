@@ -11,6 +11,7 @@ install(PROGRAMS
   scripts/arrow_key_teleop.py
   scripts/costmap_topic_alias.py
   scripts/frontier_explorer.py
+  scripts/initial_map_scan.py
   scripts/robot_self_filter.py
   scripts/vslam_covariance_adapter.py
   DESTINATION lib/${PROJECT_NAME}

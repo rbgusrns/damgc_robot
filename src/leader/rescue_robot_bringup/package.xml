@@ -10,6 +10,7 @@
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>action_msgs</exec_depend>
   <exec_depend>apriltag_ros</exec_depend>
+  <exec_depend>builtin_interfaces</exec_depend>
   <exec_depend>realsense2_camera</exec_depend>
   <exec_depend>isaac_ros_visual_slam</exec_depend>
   <exec_depend>nvblox_ros</exec_depend>
@@ -27,8 +28,9 @@
   <exec_depend>nav2_planner</exec_depend>
   <exec_depend>nav2_controller</exec_depend>
   <exec_depend>nav2_bt_navigator</exec_depend>
+  <exec_depend>nav2_behaviors</exec_depend>
   <exec_depend>nav2_msgs</exec_depend>
-  <exec_depend>nav2_navfn_planner</exec_depend>
+  <exec_depend>nav2_smac_planner</exec_depend>
   <exec_depend>nav2_regulated_pure_pursuit_controller</exec_depend>
   <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>nvblox_nav2</exec_depend>
@@ -36,6 +38,7 @@
   <exec_depend>rcl_interfaces</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>visualization_msgs</exec_depend>
   <exec_depend>robot_localization</exec_depend>

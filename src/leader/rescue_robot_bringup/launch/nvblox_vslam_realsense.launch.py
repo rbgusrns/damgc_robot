@@ -1,8 +1,4 @@
-"""Map with the existing D435 stream and VSLAM as the odom TF source.
-
-Use this when wheel odometry/local EKF is unavailable. Do not run it alongside
-the dual-EKF launch, which also publishes odom -> base_link and map -> odom.
-"""
+"""Map with wheel/IMU odometry for Nav2 and VSLAM for visual mapping."""
 
 import os
 
@@ -10,6 +6,8 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def _include(name, arguments=None):
@@ -33,15 +31,33 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument("filter_enabled", default_value="true"),
+        DeclareLaunchArgument("initial_scan", default_value="false"),
         SetEnvironmentVariable("FASTDDS_BUILTIN_TRANSPORTS", "UDPv4"),
         SetEnvironmentVariable("LD_LIBRARY_PATH", os.pathsep.join(gxf_library_paths)),
+        _include("localization.launch.py"),
         _include("visual_slam_realsense.launch.py", {
-            "publish_odom_to_base_tf": "true",
-            "publish_map_to_odom_tf": "true",
+            "publish_odom_to_base_tf": "false",
+            "publish_map_to_odom_tf": "false",
             "image_jitter_threshold_ms": "50.0",
         }),
         _include("nvblox_realsense.launch.py", {
             "filter_enabled": LaunchConfiguration("filter_enabled"),
         }),
         _include("nvblox_nav2.launch.py"),
+        Node(
+            package="rescue_robot_bringup",
+            executable="initial_map_scan.py",
+            name="initial_map_scan",
+            output="screen",
+            parameters=[{
+                "enabled": ParameterValue(
+                    LaunchConfiguration("initial_scan"), value_type=bool
+                ),
+                "odometry_topic": "/leader/odometry/local",
+                "selector_node": "/leader/command_selector",
+                "spin_action": "/spin",
+                "target_yaw": 6.2831853,
+                "startup_timeout": 300.0,
+            }],
+        ),
     ])

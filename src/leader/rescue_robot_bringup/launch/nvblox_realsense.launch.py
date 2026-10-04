@@ -36,6 +36,15 @@ def generate_launch_description():
 	    "static_mapper.esdf_slice_min_height": 0.01,
 	    "static_mapper.esdf_slice_max_height": 0.30,
             "map_clearing_frame_id": "base_link",
+            # Preserve static surfaces for a full exploration session. The
+            # upstream default (0.95 at 5 Hz) can deallocate old TSDF voxels
+            # after they leave the current camera view.
+            "static_mapper.tsdf_decay_factor": 0.9999,
+            "static_mapper.exclude_last_view_from_decay": True,
+            # The exploration area is a 2 m radius (4 m diameter); retain and
+            # visualize the full area with a 1 m margin around its boundary.
+            "map_clearing_radius_m": 5.0,
+            "layer_visualization_exclusion_radius_m": 5.0,
             "esdf_slice_bounds_visualization_attachment_frame_id": "base_link",
             "workspace_height_bounds_type": "unbounded",
             "input_qos": "SENSOR_DATA",
