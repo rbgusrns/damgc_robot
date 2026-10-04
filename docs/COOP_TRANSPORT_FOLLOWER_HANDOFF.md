@@ -132,7 +132,7 @@ path_hash = hashlib.sha256(canonical.encode()).hexdigest()
 }
 ```
 
-- `leader`: **원래 Nav2 차축 경로** `[x metres, y metres, yaw radians]` 배열.
+- `leader`: **Nav2 차축 경로를 최대 5cm 간격으로 보간한 경로** `[x metres, y metres, yaw radians]` 배열.
 - `follower`: 리더가 협동 기하로 생성한 팔로워 차축 경로. **리더 odom 좌표**.
 - `frame`: 리더 경로의 좌표계. 팔로워 자기 odom과 같다는 의미가 아님.
 - `geometry`: axle→hinge, hinge→contact, centre→contact (m), hinge limit (rad).
@@ -344,3 +344,22 @@ STOP 원인이 남아야 합니다. rosbag 항목은 리더 launcher에 추가�
 - `scripts/run_manual_cooperative_transport.sh`: domain 0 실행 wrapper.
 - `src/leader/rescue_robot_bringup/scripts/mapping_mode_manager.py`: B/N와 지도 모드 연동.
 - `src/leader/leader_command_selector`: 독립 COOPERATION 명령 입력.
+
+### 2026-10-04 경로 간격 보간
+
+리더는 Nav2 경로의 각 선분을 최대 5cm 간격으로 나눕니다. 원래 점과 끝점은 보존하고 yaw는 최단 각도 방향으로 보간합니다. 합체 변환 전에 보간하므로 `body.leader`를 기준으로 팔로워가 독립 검증하면 됩니다. 4000 pose 제한과 기존 기하·방향·충돌 검증은 유지합니다. START는 사용자가 N으로 요청합니다.
+
+
+협동 B 준비 중 리더의 Smac Hybrid `GridBased.minimum_turning_radius`를 1.5m로 설정합니다. 기본 0.20m에서 생성된 급회전 경로가 합체 경로변환에서 거절되는 문제를 줄이기 위한 계획값입니다. 경로는 계속 기하, 방향, 장애물 검증을 거칩니다.
+
+### 2026-10-04 리더→물체 경로 역변환 수정 (팔로워 반영 필요)
+
+기존 반복 역산은 리더 차축 곡률을 초기 물체 곡률로 놓아 곡률 전이가 있는 경로에서 발산했습니다. 새 계산은 리더 곡률 `kL`에서 힌지각을 직접 구합니다. `a=axle_to_hinge`, `b=hinge_to_contact+object_center_to_contact`일 때:
+
+```text
+q = atan(kL*a) + asin(kL*b / sqrt(1 + (kL*a)^2))
+object_yaw = leader_yaw + q
+object_xy = leader_xy + a*unit(leader_yaw) + b*unit(object_yaw)
+```
+
+리더는 5cm 샘플에서 약 0.5m 폭으로 곡률을 평활화한 뒤 이 식을 적용합니다. 팔로워 `hinged_formation.py`의 `leader_path_to_object_path`도 같은 식과 평활 폭으로 바꿔야 PREPARE 독립검증의 follower 경로가 일치합니다. 기존 곡률/힌지/측방이동/round-trip 검증은 유지합니다. 이 변경이 팔로워 peer에 배포되기 전까지 READY가 오지 않을 수 있습니다.

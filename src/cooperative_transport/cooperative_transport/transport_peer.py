@@ -43,6 +43,22 @@ def pose(p):
 def digest(body):
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
+def densify_path(points):
+    """Preserve Nav2 segments and endpoints with at most 5cm sample spacing."""
+    result = [points[0]]
+    for a, b in zip(points, points[1:]):
+        count = max(1, math.ceil(math.hypot(b.x-a.x, b.y-a.y)/.05))
+        if len(result)+count > 4000:
+            raise ValueError('densified path exceeds 4000 poses')
+        delta_yaw = normalize_angle(b.yaw-a.yaw)
+        for index in range(1, count):
+            fraction = index/count
+            result.append(Pose2D(a.x+(b.x-a.x)*fraction,
+                                 a.y+(b.y-a.y)*fraction,
+                                 normalize_angle(a.yaw+delta_yaw*fraction)))
+        result.append(b)
+    return tuple(result)
+
 def map_pose(p, source, destination):
     a = normalize_angle(destination.yaw-source.yaw)
     dx, dy = p.x-source.x, p.y-source.y
@@ -195,6 +211,11 @@ class TransportPeer(Node):
                 return
 
     def takeover(self, msg):
+        # Preparation intentionally selects STOP. Its topic notification can
+        # arrive after PREPARE across publishers; keyboard Space also sends
+        # explicit ABORT, which continues to cancel preparation.
+        if msg.data == 'STOP' and self.state == 'LOCKING':
+            return
         if msg.data in ('STOP', 'TELEOP') and self.state not in TERMINAL:
             self.stop('keyboard takeover', selector_stop=False)
 
@@ -313,7 +334,7 @@ class TransportPeer(Node):
             self.local_check(stationary=True)
             if msg.header.frame_id != self.odom_frame or len(msg.poses) < 3 or len(msg.poses) > 4000:
                 raise ValueError('path needs 3..4000 poses in leader odometry frame')
-            points = tuple(pose(p.pose) for p in msg.poses)
+            points = densify_path(tuple(pose(p.pose) for p in msg.poses))
             first = points[0]
             if math.hypot(points[-1].x-self.robot.x,points[-1].y-self.robot.y) <= .075:
                 raise ValueError('goal is already within cooperative arrival tolerance')

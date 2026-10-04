@@ -15,6 +15,8 @@
 | 새 목표의 plan만 채택 | B 이후 새 NavigateToPose goal status stamp와 plan stamp를 확인. 이전 goal 취소, 이전 plan 사용하지 않음. |
 | frame/시작 정렬 | 동일: leader odom frame, 시작 위치 5cm / heading 3° / 간격 8cm / 3–4000 pose. |
 | follower feasible 경로만 허용 | PR 기하 수학 사용, 80% 힌지 reserve, 비측방/전후진 일정 방향 검증. 실패하면 원인과 함께 WAIT_PLAN. 자동 대체 경로 생성은 미구현. |
+| 합체 회전반경을 Nav2에 반영 | B 준비 때 Smac Hybrid 최소 회전반경을 1.5m로 설정하고 협동 종료 때 0.20m로 복구. |
+| 협동 경로 회전반경 | B 준비 때 Smac Hybrid `GridBased.minimum_turning_radius`를 1.5m로 설정. 협동 모드를 나가면 0.20m로 복구. |
 | FollowPath와 RPP gate | N 후 확정 경로를 FollowPath에 제출, 수락/ARM/COMMIT ACK 이후 공통 예정 시각까지 0 유지. RPP 유지, 실패 시 공동 STOP. |
 | costmap의 합체 외곽 확인 | leader odom global costmap + updates, unknown/범위 밖/장애물 거절. 샘플 사이도 촘촘하게 검사. 힌지 기울어진 chassis 모서리까지 포함. |
 
@@ -42,7 +44,7 @@ peer가 public과 internal control을 동시에 받아 B를 중복 처리하지 
 
 ## 경로/속도/상태 세부 확정
 
-- `body.leader`는 **원래 Nav2 경로**. 변환한 leader 경로를 다시 invert하는
+- `body.leader`는 **Nav2 경로를 최대 5cm 간격으로 보간한 경로**. 변환한 leader 경로를 다시 invert하는
   double conversion을 하지 않습니다. 양쪽 같은 원본으로 formation을 계산.
 - `body.follower`는 이 원본에서 생성한 follower axle path, leader odom 좌표.
 - 최초 독립 검증 후 follower SE(2) 기준을 **한 번만** 고정.
@@ -80,3 +82,7 @@ mission/gripper 파일은 이번 리더 변경에 포함하지 않습니다. 팔
 먼저 두 로봇을 정지 상태로 두고 B→새 RViz goal→READY를 확인하는 흐름에
 동의합니다. N은 작업자가 양쪽 준비를 확인한 뒤 명시적으로 누르는 키입니다.
 소프트웨어 scheduling을 물리적 동시 출발 보장으로 표현하지 않습니다.
+
+### 2026-10-04 경로 간격 보간
+
+리더는 Nav2 경로의 각 선분을 최대 5cm 간격으로 나눕니다. 원래 점과 끝점은 보존하고 yaw는 최단 각도 방향으로 보간합니다. 합체 변환 전에 보간하므로 `body.leader`를 기준으로 팔로워가 독립 검증하면 됩니다. 4000 pose 제한과 기존 기하·방향·충돌 검증은 유지합니다. START는 사용자가 N으로 요청합니다.

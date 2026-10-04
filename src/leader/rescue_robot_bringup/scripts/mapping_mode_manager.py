@@ -24,11 +24,13 @@ class MappingModeManager(Node):
         self.declare_parameter('anchor_directory', os.environ.get('DAMGC_MAPPING_SNAPSHOT') or '/workspaces/isaac_ros-dev/data/maps/latest')
         self.declare_parameter('mapping_session_id', os.environ.get('DAMGC_MAPPING_RUN_ID',''))
         self.declare_parameter('cooperative_on_startup', False)
+        self.declare_parameter('manual_mapping_only', os.environ.get('DAMGC_MAPPING_MANUAL_ONLY') == '1')
         self.declare_parameter('payload_front_m', 0.0)
         self.declare_parameter('payload_half_width_m', 0.0)
         self.selection_value = None
         self.selection_future = None
         self.selector_parameters = self.create_client(SetParameters, '/leader/command_selector/set_parameters')
+        self.planner_parameters = self.create_client(SetParameters, '/planner_server/set_parameters')
         self.loading = False
         self.cooperation = bool(self.get_parameter('cooperative_on_startup').value)
         self.coop_pending = False
@@ -65,7 +67,7 @@ class MappingModeManager(Node):
         return (front,half) if math.isfinite(front) and math.isfinite(half) and front > 0 and half > 0 else None
 
     def refresh_goal_selection(self):
-        enabled = not self.loading and not self.cooperation and (self.mode != 'HOLD' or self.payload_dimensions() is not None)
+        enabled = not self.get_parameter('manual_mapping_only').value and not self.loading and not self.cooperation and (self.mode != 'HOLD' or self.payload_dimensions() is not None)
         if self.selection_value == enabled or self.selection_future is not None or not self.selector_parameters.service_is_ready():
             return
         request = SetParameters.Request()
@@ -124,6 +126,10 @@ class MappingModeManager(Node):
             self.coop_pub.publish(String(data='ABORT'))
             self.cooperation = False
             self.coop_pending = False
+            if self.planner_parameters.service_is_ready():
+                request = SetParameters.Request()
+                request.parameters = [Parameter('GridBased.minimum_turning_radius', value=0.20).to_parameter_msg()]
+                self.planner_parameters.call_async(request)
         if command in ('HOLD','MAPPING'):
             self.source_pub.publish(String(data='STOP'))
             self.mode = command
@@ -143,13 +149,26 @@ class MappingModeManager(Node):
         if not self.selector_parameters.service_is_ready():
             self.status('COOP unavailable: selector service missing')
             return
+        if not self.planner_parameters.service_is_ready():
+            self.status('COOP unavailable: Nav2 planner parameter service missing')
+            return
         self.cooperation = True
         self.coop_pending = True
         self.mode = 'HOLD'
         self.source_pub.publish(String(data='STOP'))
         self.publish_state()
-        request = SetParameters.Request()
-        request.parameters = [Parameter('enable_nav2_goal_selection', value=False).to_parameter_msg()]
+        planner_request = SetParameters.Request()
+        planner_request.parameters = [Parameter('GridBased.minimum_turning_radius', value=1.5).to_parameter_msg()]
+        def planner_configured(future):
+            try:
+                if not future.result().results or not all(r.successful for r in future.result().results):
+                    raise RuntimeError('Nav2 planner rejected 1.5 m cooperative turning radius')
+                selector_request = SetParameters.Request()
+                selector_request.parameters = [Parameter('enable_nav2_goal_selection', value=False).to_parameter_msg()]
+                self.selector_parameters.call_async(selector_request).add_done_callback(locked)
+            except Exception as error:
+                self.cooperation = False
+                self.status('COOP prepare failed: '+str(error))
         def locked(future):
             self.coop_pending = False
             try:
@@ -161,7 +180,7 @@ class MappingModeManager(Node):
                     self.status('COOP: B accepted; wait WAIT_PLAN, then select NEW RViz goal. No motion until READY and N.')
             except Exception as error:
                 self.status('COOP prepare failed: '+str(error))
-        self.selector_parameters.call_async(request).add_done_callback(locked)
+        self.planner_parameters.call_async(planner_request).add_done_callback(planner_configured)
 
     def read_snapshot(self):
         directory = Path(str(self.get_parameter('anchor_directory').value)).resolve()
