@@ -132,12 +132,19 @@ def path_curvatures(path: Sequence[Pose2D]) -> Tuple[float, ...]:
             first, second = path[-2], path[-1]
         else:
             first, second = path[index - 1], path[index + 1]
-        distance = math.hypot(second.x - first.x, second.y - first.y)
+        dx, dy = second.x - first.x, second.y - first.y
+        distance = math.hypot(dx, dy)
         if distance <= 1e-9:
             values.append(0.0)
             continue
         delta_yaw = normalize_angle(second.yaw - first.yaw)
-        values.append(delta_yaw / distance)
+        yaw_mid = first.yaw + 0.5 * delta_yaw
+        signed_distance = math.cos(yaw_mid) * dx + math.sin(yaw_mid) * dy
+        if abs(signed_distance) <= 1e-9:
+            raise ValueError("path has no forward/reverse distance along robot heading")
+        # Curvature is angular change per signed axle travel. Dividing by
+        # unsigned Euclidean distance reverses the hinge sign on reverse paths.
+        values.append(delta_yaw / signed_distance)
     return tuple(values)
 
 

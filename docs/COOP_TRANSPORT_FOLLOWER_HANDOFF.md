@@ -363,3 +363,5 @@ object_xy = leader_xy + a*unit(leader_yaw) + b*unit(object_yaw)
 ```
 
 리더는 5cm 샘플에서 약 0.5m 폭으로 곡률을 평활화한 뒤 이 식을 적용합니다. 팔로워 `hinged_formation.py`의 `leader_path_to_object_path`도 같은 식과 평활 폭으로 바꿔야 PREPARE 독립검증의 follower 경로가 일치합니다. 기존 곡률/힌지/측방이동/round-trip 검증은 유지합니다. 이 변경이 팔로워 peer에 배포되기 전까지 READY가 오지 않을 수 있습니다.
+
+추가로 `path_curvatures`는 yaw 변화량을 로봇 전후축으로 투영한 **부호 있는 이동거리**로 나눠야 합니다. 후진 구간에 유클리드 거리(항상 양수)를 쓰면 곡률과 힌지각 부호가 뒤집히므로, 리더와 팔로워 양쪽에서 같은 계산으로 갱신해야 합니다.
