@@ -38,6 +38,14 @@
   - 디스크 부족으로 recorder가 종료됐었음.
   - `ros2 bag reindex` 완료, `metadata.yaml` 복구.
   - 이후 새 협동 준비를 전부 기록한 rosbag이라고 간주하면 안 됨.
+  - 정상 종료 처리에서 `analysis.md` 생성 완료.
+
+종료 후 leader/follower의 cooperative peer, selector, guard, STM32 bridge 프로세스가
+남아 있지 않은 것을 확인했습니다. 기존 실행 중이던 launcher는 종료 시
+`unexpected EOF`를 기록했지만 cleanup은 `Stopped`까지 완료했습니다. 실행 중인
+스크립트를 수정한 상황이었으며, 현재 저장소의 launcher와 saved-map wrapper는
+`bash -n` 구문 확인을 통과했습니다. 새 옵션으로 전체 stack을 재실행하는 것은
+배터리 교체 후 진행할 항목입니다.
 
 지도 archive와 rosbag은 로컬 데이터이며 소스 GitHub 커밋에 큰 바이너리로
 넣지 않았습니다. `.bak` 등 다른 작업 파일과 팔로워의 기존 미커밋 변경도 보존합니다.
