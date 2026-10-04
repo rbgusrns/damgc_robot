@@ -188,6 +188,7 @@ def test_integrated_mapping_uses_ekfs_for_vslam_and_wheel_imu_tf():
         "visual_slam_realsense.launch.py",
         "nvblox_realsense.launch.py",
         "nvblox_nav2.launch.py",
+        "localization.launch.py",
     ])
     assert "localization.launch.py" in {
         Path(entity.launch_description_source.location).name

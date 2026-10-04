@@ -38,6 +38,8 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        Node(package="rescue_robot_bringup", executable="imu_gyro_calibration.py",
+             namespace="leader", output="screen"),
         local_ekf,
         vslam_covariance_adapter,
         global_ekf,

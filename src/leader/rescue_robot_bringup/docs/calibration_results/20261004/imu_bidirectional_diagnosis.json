@@ -1,0 +1,31 @@
+{
+  "reference": "User manually returned to starting heading, visual reference",
+  "calibration_applied": true,
+  "turns": [
+    {
+      "file": "calibrated_manual_turn",
+      "reference_deg": -360,
+      "wheel_deg": -359.72758270549184,
+      "imu_deg": -371.7171872563573,
+      "scale_estimate": 0.9684782203835076,
+      "stationary_gyro_median_deg_s": 0.0,
+      "stationary_samples": 3681
+    },
+    {
+      "file": "imu_opposite_turn",
+      "reference_deg": 360,
+      "wheel_deg": 364.8852277725536,
+      "imu_deg": 375.55190803146144,
+      "scale_estimate": 0.9585891918031246,
+      "stationary_gyro_median_deg_s": 0.0,
+      "stationary_samples": 2431
+    }
+  ],
+  "combined_scale_estimate": 0.9635083325942767,
+  "applied_gyro_z_scale": 0.9684782203835076,
+  "applied_bias_rad_s": 0.0,
+  "calibration_reference": "First manually indicated 360-degree turn, IMU 371.717 degrees",
+  "output_topic": "/leader/imu/data_calibrated",
+  "raw_topic": "/leader/imu/data_raw",
+  "local_ekf_uses_calibrated_imu": false
+}

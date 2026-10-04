@@ -58,6 +58,7 @@ class ArrowKeyTeleop(Node):
             "gripper_command_topic",
             "/leader/gripper/manual_command",
         )
+        self.declare_parameter("select_command_source", False)
         self.declare_parameter("linear_speed", 0.12)
         self.declare_parameter("angular_speed", 0.35)
         self.declare_parameter("linear_speed_step", 0.02)
@@ -124,6 +125,10 @@ class ArrowKeyTeleop(Node):
             10,
         )
 
+        self._source_publisher = self.create_publisher(
+            String, "/leader/command_selector/request", 10
+        )
+
         self._gripper_publisher = self.create_publisher(
             String,
             gripper_topic,
@@ -162,6 +167,8 @@ class ArrowKeyTeleop(Node):
         print(
             "\n"
             "============= LEADER CONTROL =============\n"
+            " Driving keys    : select TELEOP and cancel Nav2 goal\n"
+            " RViz Nav2 Goal  : select NAV2 automatically\n"
             " UP              : forward\n"
             " DOWN            : reverse\n"
             " LEFT            : rotate left\n"
@@ -199,8 +206,14 @@ class ArrowKeyTeleop(Node):
         )
 
     def _set_motion(self, motion):
+        if motion not in GRIPPER_KEYS.values():
+            self._request_source("TELEOP")
         self._motion = motion
         self._last_motion_key_time = time.monotonic()
+
+    def _request_source(self, source):
+        if self.get_parameter("select_command_source").value:
+            self._source_publisher.publish(String(data=source))
 
     def _change_speed(self, direction):
         self._linear_speed = min(
@@ -259,6 +272,7 @@ class ArrowKeyTeleop(Node):
             self._input_buffer = self._input_buffer[1:]
 
             if key == " ":
+                self._request_source("STOP")
                 self._motion = None
                 self._last_motion_key_time = 0.0
                 continue
@@ -333,6 +347,7 @@ class ArrowKeyTeleop(Node):
         return velocity, gripper_command
 
     def stop(self):
+        self._request_source("STOP")
         self._motion = None
         self._velocity_publisher.publish(Twist())
         self._gripper_publisher.publish(

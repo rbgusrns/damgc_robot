@@ -26,6 +26,7 @@ def generate_launch_description() -> LaunchDescription:
                 choices=["STOP", "TELEOP", "APPROACH", "NAV2"],
                 description="Initial Leader velocity command source",
             ),
+            DeclareLaunchArgument("enable_nav2_goal_selection", default_value="false"),
             Node(
                 package="leader_command_selector",
                 executable="command_selector_node",
@@ -34,6 +35,9 @@ def generate_launch_description() -> LaunchDescription:
                 parameters=[
                     LaunchConfiguration("selector_config"),
                     {
+                        "enable_nav2_goal_selection": ParameterValue(
+                            LaunchConfiguration("enable_nav2_goal_selection"), value_type=bool
+                        ),
                         "source_mode": ParameterValue(
                             LaunchConfiguration("source_mode"),
                             value_type=str,

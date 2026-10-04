@@ -8,6 +8,9 @@ install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY docs DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY rviz DESTINATION share/${PROJECT_NAME})
 install(PROGRAMS
+  scripts/imu_gyro_calibration.py
+  scripts/nvblox_slice_map.py
+  scripts/depth_obstacle_scan.py
   scripts/arrow_key_teleop.py
   scripts/costmap_topic_alias.py
   scripts/frontier_explorer.py
@@ -30,6 +33,10 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_nav2_controller_config
     test/test_nav2_controller_config.py
+  )
+  ament_add_pytest_test(
+    test_depth_obstacle_scan
+    test/test_depth_obstacle_scan.py
   )
   ament_add_pytest_test(
     test_robot_self_filter

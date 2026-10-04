@@ -1,0 +1,99 @@
+Panels:
+- Class: rviz_common/Displays
+  Name: Displays
+- Class: rviz_common/Tool Properties
+  Name: Tool Properties
+- Class: nav2_rviz_plugins/Navigation 2
+  Name: Navigation 2
+Visualization Manager:
+  Class: ''
+  Global Options:
+    Fixed Frame: odom
+    Frame Rate: 10
+    Background Color: 40; 40; 40
+  Displays:
+  - Class: rviz_default_plugins/Grid
+    Name: Grid
+    Enabled: true
+    Cell Size: 1.0
+    Plane: XY
+    Reference Frame: <Fixed Frame>
+  - Class: rviz_default_plugins/Map
+    Name: 3D projected obstacles
+    Enabled: true
+    Alpha: 0.85
+    Color Scheme: map
+    Topic:
+      Value: /mapping/projected_map
+      Durability Policy: Transient Local
+      Reliability Policy: Reliable
+      Depth: 1
+  - Class: rviz_default_plugins/Path
+    Name: Nav2 path
+    Enabled: true
+    Color: 255; 150; 0
+    Line Style: Lines
+    Topic:
+      Value: /plan
+      Reliability Policy: Reliable
+      Depth: 1
+  - Class: rviz_default_plugins/Odometry
+    Name: Robot position
+    Enabled: true
+    Keep: 1
+    Position Tolerance: 0.0
+    Angle Tolerance: 0.0
+    Covariance:
+      Value: false
+    Shape:
+      Value: Arrow
+      Color: 50; 220; 255
+      Alpha: 1.0
+      Head Length: 0.15
+      Head Radius: 0.08
+      Shaft Length: 0.2
+      Shaft Radius: 0.025
+    Topic:
+      Value: /leader/odometry/local
+      Durability Policy: Volatile
+      Reliability Policy: Reliable
+      Depth: 1
+  - Class: rviz_default_plugins/Polygon
+    Name: Robot footprint
+    Enabled: true
+    Color: 50; 220; 255
+    Alpha: 1.0
+    Topic:
+      Value: /local_costmap/published_footprint
+      Durability Policy: Volatile
+      Reliability Policy: Reliable
+      Depth: 1
+  - Class: rviz_default_plugins/Pose
+    Name: Planned goal
+    Enabled: true
+    Color: 255; 80; 80
+    Shape: Arrow
+    Arrow Length: 0.35
+    Arrow Shaft Diameter: 0.04
+    Arrow Head Diameter: 0.12
+    Topic:
+      Value: /mapping/planned_goal
+      Durability Policy: Transient Local
+      Reliability Policy: Reliable
+      Depth: 1
+  Tools:
+  - Class: rviz_default_plugins/Interact
+  - Class: rviz_default_plugins/MoveCamera
+  - Class: nav2_rviz_plugins/GoalTool
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: Top down
+      Scale: 80
+      X: 0
+      Y: 0
+      Angle: 0
+      Target Frame: odom
+Window Geometry:
+  Width: 1100
+  Height: 780

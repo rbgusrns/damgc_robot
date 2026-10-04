@@ -1,0 +1,23 @@
+{
+  "common_interval_s": 60.40563440322876,
+  "track_width_m": 0.2453246,
+  "independent_measured_deg": null,
+  "samples": {
+    "wheel": 2834,
+    "local": 1772,
+    "imu": 6377
+  },
+  "wheel_deg": -359.72758270549184,
+  "local_deg": -359.7275827054917,
+  "imu_deg": -371.7171872563573,
+  "wheel_minus_imu_deg": 11.989604550865465,
+  "max_header_gap_ms": {
+    "wheel": 62.29686737060547,
+    "local": 91.48693084716797,
+    "imu": 55.07349967956543
+  },
+  "reference_rotation_deg": -360.0,
+  "reference_source": "User manually returned to marked starting heading; visual reference, not instrument ground truth",
+  "wheel_reference_error_deg": 0.2724172945081591,
+  "imu_reference_error_deg": -11.717187256357306
+}

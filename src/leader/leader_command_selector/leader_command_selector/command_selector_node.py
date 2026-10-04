@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 
 import rclpy
 from action_msgs.msg import GoalStatus, GoalStatusArray
+from action_msgs.srv import CancelGoal
 from geometry_msgs.msg import Twist
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.executors import ExternalShutdownException
@@ -65,6 +66,14 @@ class CommandSelectorNode(Node):
         self.declare_parameter(
             "nav2_action_status_topic", "/navigate_to_pose/_action/status"
         )
+        self._goal_selection_started = self.get_clock().now().nanoseconds
+        self._seen_nav2_goal_ids = set()
+        self._cancel_nav2_client = self.create_client(
+            CancelGoal, "/navigate_to_pose/_action/cancel_goal"
+        )
+        self.create_subscription(
+            String, "command_selector/request", self._on_source_request, COMMAND_QOS
+        )
         self._seen_nav2_terminal_ids = set()
         self._active_nav2_goal_ids = set()
         self.create_subscription(
@@ -113,6 +122,7 @@ class CommandSelectorNode(Node):
     def _declare_parameters(self) -> None:
         """Declare startup configuration and runtime source mode."""
         self.declare_parameter("source_mode", CommandSource.STOP.value)
+        self.declare_parameter("enable_nav2_goal_selection", False)
         self.declare_parameter("publish_rate", 50.0)
         self.declare_parameter("teleop_timeout", 0.30)
         self.declare_parameter("approach_timeout", 0.35)
@@ -173,6 +183,16 @@ class CommandSelectorNode(Node):
         currently_active = {
             goal_id for goal_id, status in entries if status in active_statuses
         }
+        new_goals = [
+            entry for entry in message.status_list
+            if int(entry.status) in active_statuses
+            and bytes(entry.goal_info.goal_id.uuid) not in self._seen_nav2_goal_ids
+            and (entry.goal_info.stamp.sec * 1_000_000_000
+                 + entry.goal_info.stamp.nanosec) >= self._goal_selection_started
+        ]
+        self._seen_nav2_goal_ids.update(goal_id for goal_id, _ in entries)
+        if new_goals and self.get_parameter("enable_nav2_goal_selection").value:
+            self.set_parameters([Parameter("source_mode", value="NAV2")])
         self._active_nav2_goal_ids.update(currently_active)
 
         ended = [
@@ -215,6 +235,24 @@ class CommandSelectorNode(Node):
             self.get_logger().error(
                 "Could not update source_mode parameter; forced internal STOP"
             )
+
+    def _on_source_request(self, message: String) -> None:
+        if message.data not in {"TELEOP", "STOP"}:
+            return
+        was_nav2 = self._source == CommandSource.NAV2
+        self.set_parameters([Parameter("source_mode", value=message.data)])
+        if was_nav2 and self._cancel_nav2_client.service_is_ready():
+            future = self._cancel_nav2_client.call_async(CancelGoal.Request())
+            future.add_done_callback(self._on_cancel_result)
+
+    def _on_cancel_result(self, future) -> None:
+        try:
+            result = future.result()
+            self.get_logger().info(
+                f"Keyboard takeover: Nav2 cancellation code {result.return_code}"
+            )
+        except Exception as exc:
+            self.get_logger().error(f"Nav2 cancellation failed: {exc}")
 
     def _on_command(self, source: CommandSource, message: Twist) -> None:
         """Cache only a valid command from the currently selected source."""

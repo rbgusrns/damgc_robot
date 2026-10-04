@@ -153,7 +153,7 @@ def analyze(bag_dir: Path, true_distance: float | None, true_yaw_deg: float | No
         first_time = timestamp if first_time is None else min(first_time, timestamp)
         last_time = timestamp if last_time is None else max(last_time, timestamp)
         counts[topic] = counts.get(topic, 0) + 1
-        if topic not in message_types:
+        if topic not in odometry and topic not in (STATUS_TOPIC, CMD_TOPIC, "/leader/imu/data_raw", *TF_TOPICS):
             continue
         message = deserialize_message(raw, message_types[topic])
 

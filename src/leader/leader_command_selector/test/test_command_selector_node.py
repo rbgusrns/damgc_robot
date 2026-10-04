@@ -155,6 +155,9 @@ def test_twist_output_populates_only_planar_axes() -> None:
 
 def test_nav2_terminal_status_forces_selector_to_stop() -> None:
     harness = parameter_harness()
+    harness._goal_selection_started = 0
+    harness._seen_nav2_goal_ids = set()
+    harness.get_parameter = lambda name: SimpleNamespace(value=False)
     harness._seen_nav2_terminal_ids = set()
     harness._active_nav2_goal_ids = set()
     harness.get_logger = lambda: SimpleNamespace(
@@ -188,6 +191,9 @@ def test_nav2_terminal_status_forces_selector_to_stop() -> None:
 def test_previous_terminal_status_does_not_stop_a_later_nav2_goal() -> None:
     harness = parameter_harness()
     harness._source = CommandSource.STOP
+    harness._goal_selection_started = 0
+    harness._seen_nav2_goal_ids = set()
+    harness.get_parameter = lambda name: SimpleNamespace(value=False)
     harness._seen_nav2_terminal_ids = set()
     harness._active_nav2_goal_ids = set()
     harness.get_logger = lambda: SimpleNamespace(

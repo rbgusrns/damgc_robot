@@ -8,13 +8,21 @@ MAPPING_IMAGE="${ISAAC_MAPPING_IMAGE:-damgc-vslam-mapping:humble}"
 MAPPING_DOCKERFILE="${REPO_ROOT}/docker/vslam_mapping.Dockerfile"
 RUNTIME_ROOT="${XDG_RUNTIME_DIR:-/tmp}/damgc-vslam-mapping-${UID}"
 RUN_ID="$(date +%Y%m%d_%H%M%S)"
-LOG_DIR="${REPO_ROOT}/log/vslam_mapping_${RUN_ID}"
+MAPPING_MODE="${MAPPING_MODE:-3D}"
+RUN_PREFIX="vslam_mapping"
+if [[ "${MAPPING_MODE}" == "2D" ]]; then RUN_PREFIX="mapping_2d"; fi
+LOG_DIR="${REPO_ROOT}/log/${RUN_PREFIX}_${RUN_ID}"
 LAUNCHER_PID_FILE="${RUNTIME_ROOT}/launcher.pid"
 CONTAINER_VSLAM_PID_FILE="/tmp/damgc_vslam_mapping_vslam.pid"
 CONTAINER_RVIZ_PID_FILE="/tmp/damgc_vslam_mapping_rviz.pid"
 CONTAINER_BAG_PID_FILE="/tmp/damgc_vslam_mapping_bag.pid"
-BAG_DIR="${REPO_ROOT}/data/vslam_mapping_${RUN_ID}"
-CONTAINER_BAG_DIR="/workspaces/isaac_ros-dev/data/vslam_mapping_${RUN_ID}"
+BAG_DIR="${REPO_ROOT}/data/${RUN_PREFIX}_${RUN_ID}"
+CONTAINER_BAG_DIR="/workspaces/isaac_ros-dev/data/${RUN_PREFIX}_${RUN_ID}"
+
+if [[ "${MAPPING_MODE}" != "2D" && "${MAPPING_MODE}" != "3D" ]]; then
+  printf "MAPPING_MODE must be 2D or 3D.\n" >&2
+  exit 1
+fi
 
 HOST_PIDS=()
 CONTAINER_STARTED_BY_US=0
@@ -30,7 +38,7 @@ VSLAM_HEADLESS="${VSLAM_HEADLESS:-0}"
 VSLAM_ONLY="${VSLAM_ONLY:-0}"
 SELF_FILTER_ENABLED="${SELF_FILTER_ENABLED:-1}"
 MAPPING_SOURCE_MODE="${MAPPING_SOURCE_MODE:-STOP}"
-MAPPING_INITIAL_SCAN="${MAPPING_INITIAL_SCAN:-1}"
+MAPPING_INITIAL_SCAN="${MAPPING_INITIAL_SCAN:-0}"
 HOST_XAUTHORITY="${XAUTHORITY:-/run/user/${UID}/gdm/Xauthority}"
 DEPTH_CLIP_DISTANCE_M="${DEPTH_CLIP_DISTANCE_M:-4.0}"
 STM32_I2C_DEVICE="${STM32_I2C_DEVICE:-/dev/i2c-7}"
@@ -266,6 +274,23 @@ setsid bash -lc "
 " >"${LOG_DIR}/stm32_bridge.log" 2>&1 &
 HOST_PIDS+=("$!")
 
+if [[ "${MAPPING_MODE}" == "2D" ]]; then
+printf '[2/7] Starting depth-only RealSense...\n'
+setsid bash -lc "
+  export ROS_DOMAIN_ID='${ROS_DOMAIN_ID}' ROS_LOCALHOST_ONLY='${ROS_LOCALHOST_ONLY}'
+  export RMW_IMPLEMENTATION='${RMW_IMPLEMENTATION}' FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+  source /opt/ros/humble/setup.bash
+  exec ros2 launch realsense2_camera rs_launch.py \\
+    camera_namespace:=leader camera_name:=camera \\
+    enable_color:=false enable_depth:=true \\
+    enable_infra:=false enable_infra1:=false enable_infra2:=false \\
+    enable_sync:=false align_depth.enable:=false \\
+    depth_module.depth_profile:=424x240x15 \\
+    clip_distance:='${DEPTH_CLIP_DISTANCE_M}' \\
+    enable_gyro:=false enable_accel:=false publish_tf:=true tf_publish_rate:=0.0
+" >"${LOG_DIR}/realsense.log" 2>&1 &
+HOST_PIDS+=("$!")
+else
 printf '[2/7] Starting RealSense...\n'
 setsid bash -lc "
   export ROS_DOMAIN_ID='${ROS_DOMAIN_ID}'
@@ -285,6 +310,8 @@ setsid bash -lc "
 " >"${LOG_DIR}/realsense.log" 2>&1 &
 HOST_PIDS+=("$!")
 
+fi
+
 printf '[3/7] Starting Leader command selector in %s mode...\n' "${MAPPING_SOURCE_MODE}"
 setsid bash -lc "
   export ROS_DOMAIN_ID='${ROS_DOMAIN_ID}'
@@ -294,7 +321,8 @@ setsid bash -lc "
   source /opt/ros/humble/setup.bash
   source '${REPO_ROOT}/install/setup.bash'
   exec ros2 launch leader_command_selector command_selector.launch.py \\
-    source_mode:='${MAPPING_SOURCE_MODE}'
+    source_mode:='${MAPPING_SOURCE_MODE}' \
+    enable_nav2_goal_selection:=true
 " >"${LOG_DIR}/leader_command_selector.log" 2>&1 &
 HOST_PIDS+=("$!")
 
@@ -369,12 +397,16 @@ while [[ -z "${CONTAINER_USER}" ]]; do
 done
 printf '  container user: %s\n' "${CONTAINER_USER}"
 
-if ! docker exec -u "${CONTAINER_USER}" "${CONTAINER_NAME}" bash -lc '
+if ! docker exec -u "${CONTAINER_USER}" -e DAMGC_MAPPING_MODE="${MAPPING_MODE}" "${CONTAINER_NAME}" bash -lc '
   source /opt/ros/humble/setup.bash
   source /workspaces/isaac_ros-dev/install_docker/setup.bash
   ros2 pkg prefix rescue_robot_bringup >/dev/null
-  ros2 pkg prefix isaac_ros_visual_slam >/dev/null
-  ros2 pkg prefix nvblox_ros >/dev/null
+  if [[ "${DAMGC_MAPPING_MODE}" == "2D" ]]; then
+    ros2 pkg prefix slam_toolbox >/dev/null
+  else
+    ros2 pkg prefix isaac_ros_visual_slam >/dev/null
+    ros2 pkg prefix nvblox_ros >/dev/null
+  fi
 '; then
   printf 'The container is missing a required ROS package or install_docker overlay.\n' >&2
   exit 1
@@ -390,12 +422,13 @@ if [[ "${VSLAM_ONLY}" != "1" ]] && ! docker exec -u "${CONTAINER_USER}" "${CONTA
   exit 1
 fi
 
-container_log_dir="/workspaces/isaac_ros-dev/log/vslam_mapping_${RUN_ID}"
+container_log_dir="/workspaces/isaac_ros-dev/log/${RUN_PREFIX}_${RUN_ID}"
 docker exec -d -u "${CONTAINER_USER}" \
   -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" \
   -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
   -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
   -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
+  -e DAMGC_MAPPING_MODE="${MAPPING_MODE}" \
   -e DAMGC_VSLAM_HEADLESS="${VSLAM_HEADLESS}" \
   -e DAMGC_VSLAM_ONLY="${VSLAM_ONLY}" \
   -e DAMGC_SELF_FILTER_ENABLED="${SELF_FILTER_ENABLED}" \
@@ -409,6 +442,9 @@ docker exec -d -u "${CONTAINER_USER}" \
     export LD_LIBRARY_PATH="/opt/ros/humble/share/isaac_ros_gxf/gxf/lib/serialization:${LD_LIBRARY_PATH}"
     export LD_LIBRARY_PATH="/opt/ros/humble/share/isaac_ros_gxf/gxf/lib/logger:${LD_LIBRARY_PATH}"
     echo "$$" > /tmp/damgc_vslam_mapping_vslam.pid
+    if [[ "${DAMGC_MAPPING_MODE}" == "2D" ]]; then
+      exec ros2 launch rescue_robot_bringup mapping_2d.launch.py >>"${log_path}" 2>&1
+    fi
     if [[ "${DAMGC_VSLAM_ONLY}" == "1" ]]; then
       exec ros2 launch rescue_robot_bringup visual_slam_realsense.launch.py \
         publish_odom_to_base_tf:=true >>"${log_path}" 2>&1
@@ -426,6 +462,8 @@ if [[ "${VSLAM_HEADLESS}" == "1" ]]; then
   fi
 else
   printf '[5/7] Starting RViz...\n'
+  rviz_config="${MAPPING_RVIZ_CONFIG:-nvblox_2d_view.rviz}"
+  if [[ "${MAPPING_MODE}" == "2D" ]]; then rviz_config="mapping_2d.rviz"; fi
   docker exec -d -u "${CONTAINER_USER}" \
     -e DISPLAY="${DISPLAY:-:0}" \
     -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" \
@@ -437,8 +475,11 @@ else
       source /opt/ros/humble/setup.bash
       source /workspaces/isaac_ros-dev/install_docker/setup.bash
       echo "$$" > /tmp/damgc_vslam_mapping_rviz.pid
-      exec rviz2 -d /workspaces/isaac_ros-dev/rviz/vslam_nvblox.rviz >>"${log_path}" 2>&1
-    ' _ "${container_log_dir}/rviz.log"
+      exec rviz2 -d "$2" --ros-args \
+        -r /lifecycle_manager_navigation/is_active:=/lifecycle_manager_nvblox_nav2/is_active \
+        -r /lifecycle_manager_navigation/manage_nodes:=/lifecycle_manager_nvblox_nav2/manage_nodes \
+        >>"${log_path}" 2>&1
+    ' _ "${container_log_dir}/rviz.log" "/workspaces/isaac_ros-dev/rviz/${rviz_config}"
 fi
 
 wait_for_topic() {
@@ -459,8 +500,32 @@ wait_for_topic() {
 printf 'Waiting for the mapping data path...\n'
 wait_for_topic "/leader/odom/raw" 30
 wait_for_topic "/leader/odometry/local" 30
-wait_for_topic "/leader/camera/infra1/image_rect_raw" 45
-wait_for_topic "/visual_slam/tracking/odometry" 120
+recording_ready_topic="/visual_slam/tracking/odometry"
+if [[ "${MAPPING_MODE}" == "2D" ]]; then
+  recording_ready_topic="/scan"
+  wait_for_topic "/leader/camera/depth/image_rect_raw" 45
+  wait_for_topic "/scan" 60
+  wait_for_topic "/map" 60
+else
+  wait_for_topic "/leader/camera/infra1/image_rect_raw" 45
+  wait_for_topic "/visual_slam/tracking/odometry" 120
+fi
+
+if [[ "${VSLAM_ONLY}" != "1" ]]; then
+  printf 'Checking Nav2 lifecycle readiness...\n'
+  for nav2_node in planner_server controller_server behavior_server bt_navigator; do
+    nav2_state="$(timeout 15 ros2 lifecycle get "/${nav2_node}" 2>/dev/null || true)"
+    if [[ "${nav2_state}" == "inactive [2]" ]]; then
+      timeout 15 ros2 lifecycle set "/${nav2_node}" activate
+      nav2_state="$(timeout 15 ros2 lifecycle get "/${nav2_node}" 2>/dev/null || true)"
+    fi
+    if [[ "${nav2_state}" != "active [3]" ]]; then
+      printf 'Nav2 node %s is not active (%s); see %s/vslam_nvblox.log\n' \
+        "${nav2_node}" "${nav2_state}" "${LOG_DIR}" >&2
+      exit 1
+    fi
+  done
+fi
 
 printf '[6/7] Starting metrics rosbag...\n'
 docker exec "${CONTAINER_NAME}" rm -f "${CONTAINER_BAG_PID_FILE}" >/dev/null 2>&1 || true
@@ -476,8 +541,16 @@ docker exec -d -u "${CONTAINER_USER}" \
     source /workspaces/isaac_ros-dev/install_docker/setup.bash
     echo "$$" > /tmp/damgc_vslam_mapping_bag.pid
     exec ros2 bag record --output "${bag_path}" \
+      --include-hidden-topics \
+      /scan \
+      /map \
+      /map_metadata \
+      /mapping/projected_map \
+      /mapping/planned_goal \
       /nav2/cmd_vel \
       /spin/_action/status \
+      /navigate_to_pose/_action/status \
+      /leader/command_selector/request \
       /leader/cmd_vel \
       /leader/command_selector/status \
       /leader/system_state \
@@ -485,6 +558,7 @@ docker exec -d -u "${CONTAINER_USER}" \
       /leader/stm32_rx/crc_errors \
       /leader/odom/raw \
       /leader/imu/data_raw \
+      /leader/imu/data_calibrated \
       /leader/odometry/local \
       /leader/odometry/global \
       /local_costmap/costmap \
@@ -506,7 +580,7 @@ BAG_STARTED=1
 bag_deadline=$((SECONDS + 15))
 until container_process_running "${CONTAINER_BAG_PID_FILE}" && \
   grep -Fq 'Recording...' "${LOG_DIR}/rosbag.log" 2>/dev/null && \
-  grep -Fq "Subscribed to topic '/visual_slam/tracking/odometry'" \
+  grep -Fq "Subscribed to topic '${recording_ready_topic}'" \
     "${LOG_DIR}/rosbag.log" 2>/dev/null; do
   if (( SECONDS >= bag_deadline )); then
     printf 'Rosbag failed to start. Check %s/rosbag.log\n' "${LOG_DIR}" >&2
@@ -544,5 +618,6 @@ if [[ "${MAPPING_INITIAL_SCAN}" == "1" ]]; then
 fi
 ros2 run rescue_robot_bringup arrow_key_teleop.py --ros-args \
   -p command_topic:=/leader/teleop/cmd_vel \
+  -p select_command_source:=true \
   -p linear_speed:=0.08 \
   -p angular_speed:=0.25

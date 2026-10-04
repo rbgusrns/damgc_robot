@@ -31,9 +31,10 @@ class Stm32Bridge(Node):
         self.declare_parameter("imu_frame_id", "imu_link")
         # Physical constants from m4_firmware/DAMGC/ORIN_UART_PROTOCOL.md:
         # 127 mm wheel diameter, 5131 encoder ticks/revolution, and
-        # 230 mm wheel contact-center separation.
+        # 230 mm nominal wheel contact-center separation. Effective separation
+        # below is calibrated from a manually referenced full turn (2026-10-04).
         self.declare_parameter("wheel_radius_m", 0.0635)
-        self.declare_parameter("wheel_separation_m", 0.23)
+        self.declare_parameter("wheel_separation_m", 0.2453246)
         self.declare_parameter("ticks_per_revolution", 5131)
         self.declare_parameter("cmd_timeout_ms", 200)
         self.declare_parameter("reconnect_period_s", 1.0)

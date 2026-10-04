@@ -6,18 +6,25 @@ The controller output stays on /nav2/cmd_vel, away from the wheel bridge.
 import os
 
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
     config_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "config"))
-    params_file = os.path.join(config_dir, "nvblox_nav2.yaml")
+    default_params_file = os.path.join(config_dir, "nvblox_nav2.yaml")
+    params_file = LaunchConfiguration("params_file")
     tree_file = os.path.join(config_dir, "navigate_to_pose_nvblox.xml")
     through_tree_file = os.path.join(config_dir, "navigate_through_poses_nvblox.xml")
     nodes = [
+        DeclareLaunchArgument("params_file", default_value=default_params_file),
+        DeclareLaunchArgument("costmap_alias", default_value="true"),
         Node(
             package="rescue_robot_bringup",
             executable="costmap_topic_alias.py",
+            condition=IfCondition(LaunchConfiguration("costmap_alias")),
             name="costmap_topic_alias",
             output="screen",
         ),

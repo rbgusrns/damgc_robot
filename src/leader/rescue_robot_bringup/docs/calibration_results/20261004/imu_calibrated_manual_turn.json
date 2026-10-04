@@ -1,0 +1,24 @@
+{
+  "imu_topic": "/leader/imu/data_calibrated",
+  "common_interval_s": 71.54291820526123,
+  "track_width_m": 0.2453246,
+  "independent_measured_deg": null,
+  "samples": {
+    "wheel": 3088,
+    "local": 1844,
+    "imu": 6702
+  },
+  "wheel_deg": -358.383689272525,
+  "local_deg": -358.383689272525,
+  "imu_deg": -360.54310074502035,
+  "wheel_minus_imu_deg": 2.1594114724953783,
+  "max_header_gap_ms": {
+    "wheel": 156.28600120544434,
+    "local": 226.5036106109619,
+    "imu": 84.03325080871582
+  },
+  "reference_rotation_deg": -360.0,
+  "reference_source": "User manually aligned with starting heading; visual reference",
+  "imu_reference_error_deg": -0.5431007450203538,
+  "wheel_reference_error_deg": 1.6163107274750246
+}

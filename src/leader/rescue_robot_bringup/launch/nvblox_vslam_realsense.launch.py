@@ -44,6 +44,8 @@ def generate_launch_description():
             "filter_enabled": LaunchConfiguration("filter_enabled"),
         }),
         _include("nvblox_nav2.launch.py"),
+        Node(package="rescue_robot_bringup", executable="nvblox_slice_map.py",
+             name="nvblox_slice_map", output="screen"),
         Node(
             package="rescue_robot_bringup",
             executable="initial_map_scan.py",

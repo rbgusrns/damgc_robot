@@ -32,12 +32,17 @@ mapping rosbag은 `/nvblox_node/static_map_slice`도 기록해 다음 실행에�
 VSLAM의 `odom` 원점도 재부팅 뒤에는 달라질 수 있으므로 이전 지도 자동 불러오기는
 별도의 저장 및 재현 위치 추정 작업으로 다뤄야 한다.
 
-새 매핑 세션은 기본적으로 Nav2가 준비되고 odometry pose가 1초 안정된 뒤,
-`/spin` behavior로 제자리 360도 초기 스캔을 한 번 수행한다. 이 동작은 주변 지형을
-먼저 관측하기 위한 것이며, 회전 충돌이 감지되거나 Nav2/odometry가 준비되지 않으면
-주행하지 않고 selector를 `STOP`으로 둔다. 시작 회전을 건너뛰려면
-`MAPPING_INITIAL_SCAN=0 ./scripts/run_vslam_mapping.sh`로 실행한다. 현재 실행 중인
-매핑 세션에는 이 시작 동작이 소급 적용되지 않는다.
+기본 개발 흐름은 사용자가 키보드로 주변을 관측하고 RViz의 `Nav2 Goal`로 위치와 도착
+방향을 지정하는 수동 매핑이다. 자동 탐색은 실행하지 않고 시작 시 자동 회전도 기본으로
+끄며, 필요한 경우에만 `MAPPING_INITIAL_SCAN=1`로 켠다. 방향키/Q/W/A/S를 누르면
+selector가 `TELEOP`으로 전환하면서 진행 중인 Nav2 목표를 취소한다. 키를 놓으면
+키보드 속도가 0이 된다. RViz에서 새 목표를 보내면 selector가 `NAV2`로 전환한다.
+Space는 selector를 `STOP`으로 바꾸고 목표를 취소하며, 목표 성공/취소/실패 시에도
+selector가 `STOP`으로 전환한다. 운전 키는 실행 터미널에 포커스를 두고 사용한다.
+
+```bash
+./scripts/run_vslam_mapping.sh
+```
 
 카메라가 이미 실행 중일 때 컨테이너에서 다음 launch를 사용한다.
 
@@ -493,3 +498,38 @@ odometry 변화는 대략 `(+0.82,-0.054) m`, yaw `-0.02° → -5.81°`였다. �
 다음 검증은 각속도 0인 짧은 직진으로 구동계 편향을 분리하고, 좌우 encoder/속도 telemetry를
 기록하는 것이다. 이후 반복 직진·회전, 장애물 정지, cancel/failure 정지 동작을 확인한다.
 E-stop 및 bridge watchdog은 아직 실물 시험하지 않았다.
+
+## 3D 매핑 + 2D 화면 (2026-10-04)
+
+`./scripts/run_vslam_mapping.sh`는 이제 기본 RViz 화면을 `rviz/nvblox_2d_view.rviz`로
+연다. nvblox/VSLAM/dual EKF 및 Nav2의 3D 매핑 구성은 유지하고, 화면만 odom 기준
+정사영으로 바꾼다. `/mapping/projected_map`은 nvblox가 로봇 충돌 높이 범위에서
+추출한 원본 2D slice를 OccupancyGrid로 바꾼 것이다. 미관측 셀은 -1, 관측된
+빈 공간은 0, 장애물까지 거리 5cm 이하인 셀은 100으로 표시한다. 화면에는 이 지도,
+`/plan`, 경로 끝점의 도착 방향(`/mapping/planned_goal`), local EKF 로봇 위치,
+footprint만 표시하며 mesh/영상/점군/전체 TF/RobotModel을 구독하지 않는다.
+RViz frame rate는 10으로 설정한다. 이는 렌더링 부하 감소를 위한 설정이며 VSLAM과
+nvblox의 처리 부하 및 추적 오차를 해결하는 변경은 아니다.
+
+기존 3D 화면은 `MAPPING_RVIZ_CONFIG=vslam_nvblox.rviz ./scripts/run_vslam_mapping.sh`로
+선택할 수 있다. 별도 순수 2D 매핑은 `./scripts/run_2d_mapping.sh`로 보존한다.
+
+RViz 프로필에는 `nav2_rviz_plugins/Navigation 2` 패널을 포함해야 한다. Humble의
+Nav2 Goal 도구는 GoalUpdater로 패널에 위치를 전달하며 패널이 action을 전송한다.
+도구만 추가하면 화살표를 그려도 `/navigate_to_pose` 목표가 전송되지 않는다.
+
+실행 `vslam_mapping_20261004_151348`에서 원본 투영 지도(odom, 208x192 셀)를
+수신했고 미관측/빈 공간/장애물 셀이 각각 구분됨을 확인했다. Navigation 2 패널을
+추가하고 패널의 lifecycle 서비스 이름을 실제 `lifecycle_manager_nvblox_nav2`로
+remap했다. 패널 추가 후 사용자가 클릭한 최초 두 목표는 starting point in lethal
+space로 중단됐으나, 수동 위치 조정 후 현재 odom (-0.44, -0.32)에서 목표
+(-0.59, -1.16)로 약 9.5초 만에 SUCCEEDED가 기록됐다. selector의 ACTIVE_NAV2와
+목표 종료 후 STOP 전환도 확인했다. 실차 로그와 rosbag은 해당 실행 폴더에 기록 중이다.
+
+연속 목표 중 일부는 ComputePathToPose/FollowPath 목표 접수 ACK timeout으로
+100ms 내외에 중단됐다. runtime 기본 `default_server_timeout=20` ms,
+`bt_loop_duration=10` ms를 확인했고, 3D 실행의 처리 지연을 고려해 각각
+1000 ms, 50 ms로 변경했다. BT odom_topic도 `/leader/odometry/local`로 일치시켰다.
+진행 중 남은 FollowPath 목표를 취소하고 BT navigator만 deactivate/cleanup/
+configure/activate해 실행에 반영했다. 매핑은 유지했다. 이 설정은 목표 접수
+대기시간이며 장애물 충돌 판정이나 실제 경로 추종 성공을 보장하는 변경은 아니다.

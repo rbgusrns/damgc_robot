@@ -1,0 +1,19 @@
+{
+  "common_interval_s": 49.28736138343811,
+  "track_width_m": 0.2453246,
+  "independent_measured_deg": null,
+  "samples": {
+    "wheel": 2301,
+    "local": 1457,
+    "imu": 5192
+  },
+  "wheel_deg": 364.8852277725536,
+  "local_deg": 364.8852277725537,
+  "imu_deg": 375.55190803146144,
+  "wheel_minus_imu_deg": -10.666680258907832,
+  "max_header_gap_ms": {
+    "wheel": 76.69401168823242,
+    "local": 89.4935131072998,
+    "imu": 51.753997802734375
+  }
+}

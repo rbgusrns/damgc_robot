@@ -11,16 +11,19 @@
     world_frame: odom
 
     odom0: /leader/odom/raw
-    odom0_config: [true, true, false,
-                   false, false, true,
-                   true, false, false,
+    # Fuse wheel velocities; avoid pinning yaw to integrated wheel pose.
+    # Lateral velocity is zero for the differential-drive kinematic model.
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true, true, false,
                    false, false, true,
                    false, false, false]
     odom0_differential: false
     odom0_relative: false
     odom0_queue_size: 5
 
-    imu0: /leader/imu/data_raw
+    # Calibrated gyro yaw rate only; do not fuse uncalibrated orientation.
+    imu0: /leader/imu/data_calibrated
     imu0_config: [false, false, false,
                   false, false, false,
                   false, false, false,

@@ -1,34 +1,28 @@
 bt_navigator:
   ros__parameters:
     use_sim_time: false
-    global_frame: odom
+    global_frame: map
     robot_base_frame: base_link
     odom_topic: /leader/odometry/local
-    # Goal acknowledgement can be delayed by stereo/3D mapping load. Units: ms.
+    plugin_lib_names:
+    - nav2_compute_path_to_pose_action_bt_node
+    - nav2_compute_path_through_poses_action_bt_node
+    - nav2_follow_path_action_bt_node
     default_server_timeout: 1000
     bt_loop_duration: 50
-    plugin_lib_names:
-      - nav2_compute_path_to_pose_action_bt_node
-      - nav2_compute_path_through_poses_action_bt_node
-      - nav2_follow_path_action_bt_node
-
 planner_server:
   ros__parameters:
     use_sim_time: false
     expected_planner_frequency: 1.0
-    planner_plugins: [GridBased]
+    planner_plugins:
+    - GridBased
     GridBased:
       plugin: nav2_smac_planner/SmacPlannerHybrid
       tolerance: 0.25
       allow_unknown: true
       motion_model_for_search: REEDS_SHEPP
-      # Differential drive can turn in place. This small radius lets the
-      # planner produce tight forward/reverse arcs while checking the full
-      # robot footprint against the costmap.
-      minimum_turning_radius: 0.20
+      minimum_turning_radius: 0.2
       angle_quantization_bins: 72
-      # Keep the cached Reeds-Shepp heuristic bounded; the exploration area
-      # is only 4 m across, so the default lookup window is unnecessarily large.
       lookup_table_size: 3.0
       reverse_penalty: 1.5
       change_penalty: 0.2
@@ -36,18 +30,16 @@ planner_server:
       cost_penalty: 2.0
       analytic_expansion_ratio: 3.5
       analytic_expansion_max_length: 1.0
-
 controller_server:
   ros__parameters:
     use_sim_time: false
     controller_frequency: 10.0
-    odom_topic: /leader/odometry/local
-    # Goal acknowledgement can be delayed by stereo/3D mapping load. Units: ms.
-    default_server_timeout: 1000
-    bt_loop_duration: 50
+    odom_topic: /visual_slam/tracking/odometry
     progress_checker_plugin: progress_checker
-    goal_checker_plugins: [general_goal_checker]
-    controller_plugins: [FollowPath]
+    goal_checker_plugins:
+    - general_goal_checker
+    controller_plugins:
+    - FollowPath
     progress_checker:
       plugin: nav2_controller::SimpleProgressChecker
       required_movement_radius: 0.05
@@ -59,8 +51,8 @@ controller_server:
       stateful: true
     FollowPath:
       plugin: nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController
-      desired_linear_vel: 0.10
-      lookahead_dist: 0.30
+      desired_linear_vel: 0.1
+      lookahead_dist: 0.3
       min_lookahead_dist: 0.25
       max_lookahead_dist: 0.45
       lookahead_time: 2.5
@@ -71,66 +63,77 @@ controller_server:
       use_collision_detection: true
       max_allowed_time_to_collision_up_to_carrot: 1.0
       use_regulated_linear_velocity_scaling: true
-      regulated_linear_scaling_min_radius: 0.50
+      regulated_linear_scaling_min_radius: 0.5
       regulated_linear_scaling_min_speed: 0.05
       use_cost_regulated_linear_velocity_scaling: true
-      cost_scaling_dist: 0.30
-      cost_scaling_gain: 0.50
+      cost_scaling_dist: 0.3
+      cost_scaling_gain: 0.5
       inflation_cost_scaling_factor: 10.0
       rotate_to_heading_min_angle: 0.785
-      rotate_to_heading_angular_vel: 0.20
-      max_angular_accel: 0.30
-      # RPP cannot combine rotate-to-heading with reverse path cusps. Hybrid-A*
-      # supplies the heading-aware forward/reverse path instead.
+      rotate_to_heading_angular_vel: 0.2
+      max_angular_accel: 0.3
       use_rotate_to_heading: false
       allow_reversing: true
       use_interpolation: true
-
 behavior_server:
   ros__parameters:
     use_sim_time: false
     costmap_topic: local_costmap/costmap_raw
     footprint_topic: local_costmap/published_footprint
     cycle_frequency: 10.0
-    behavior_plugins: [spin]
+    behavior_plugins:
+    - spin
     spin:
       plugin: nav2_behaviors/Spin
     global_frame: odom
     robot_base_frame: base_link
     transform_tolerance: 0.3
     simulate_ahead_time: 2.0
-    max_rotational_vel: 0.20
-    min_rotational_vel: 0.10
-    rotational_acc_lim: 0.20
-
+    max_rotational_vel: 0.2
+    min_rotational_vel: 0.1
+    rotational_acc_lim: 0.2
 global_costmap:
   global_costmap:
     ros__parameters:
       use_sim_time: false
-      global_frame: odom
+      global_frame: map
       robot_base_frame: base_link
-      rolling_window: true
+      rolling_window: false
       width: 10
       height: 10
       resolution: 0.05
       update_frequency: 2.0
       publish_frequency: 1.0
       transform_tolerance: 0.3
-      footprint: "[[-0.060, -0.145], [0.060, -0.145], [0.3175, -0.070], [0.3175, 0.070], [0.060, 0.145], [-0.060, 0.145]]"
+      footprint: '[[-0.060, -0.145], [0.060, -0.145], [0.3175, -0.070], [0.3175, 0.070],
+        [0.060, 0.145], [-0.060, 0.145]]'
       footprint_padding: 0.01
-      plugins: [nvblox_layer, inflation_layer]
-      nvblox_layer:
-        plugin: nvblox::nav2::NvbloxCostmapLayer
-        enabled: true
-        nav2_costmap_global_frame: odom
-        nvblox_map_slice_topic: /nvblox_node/static_map_slice
-        convert_to_binary_costmap: true
+      plugins:
+      - static_layer
+      - obstacle_layer
+      - inflation_layer
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
         inflation_radius: 0.3
         cost_scaling_factor: 10.0
-
+      obstacle_layer:
+        plugin: nav2_costmap_2d::ObstacleLayer
+        observation_sources: depth_scan
+        depth_scan:
+          topic: /scan
+          data_type: LaserScan
+          marking: true
+          clearing: true
+          inf_is_valid: false
+          obstacle_max_range: 4.0
+          obstacle_min_range: 0.2
+          raytrace_max_range: 4.0
+          raytrace_min_range: 0.2
+      static_layer:
+        plugin: nav2_costmap_2d::StaticLayer
+        map_subscribe_transient_local: true
+        subscribe_to_updates: true
 local_costmap:
   local_costmap:
     ros__parameters:
@@ -145,17 +148,27 @@ local_costmap:
       publish_frequency: 2.0
       always_send_full_costmap: true
       transform_tolerance: 0.3
-      footprint: "[[-0.060, -0.145], [0.060, -0.145], [0.3175, -0.070], [0.3175, 0.070], [0.060, 0.145], [-0.060, 0.145]]"
+      footprint: '[[-0.060, -0.145], [0.060, -0.145], [0.3175, -0.070], [0.3175, 0.070],
+        [0.060, 0.145], [-0.060, 0.145]]'
       footprint_padding: 0.01
-      plugins: [nvblox_layer, inflation_layer]
-      nvblox_layer:
-        plugin: nvblox::nav2::NvbloxCostmapLayer
-        enabled: true
-        nav2_costmap_global_frame: odom
-        nvblox_map_slice_topic: /nvblox_node/static_map_slice
-        convert_to_binary_costmap: true
+      plugins:
+      - obstacle_layer
+      - inflation_layer
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
         inflation_radius: 0.3
         cost_scaling_factor: 10.0
+      obstacle_layer:
+        plugin: nav2_costmap_2d::ObstacleLayer
+        observation_sources: depth_scan
+        depth_scan:
+          topic: /scan
+          data_type: LaserScan
+          marking: true
+          clearing: true
+          inf_is_valid: false
+          obstacle_max_range: 4.0
+          obstacle_min_range: 0.2
+          raytrace_max_range: 4.0
+          raytrace_min_range: 0.2
