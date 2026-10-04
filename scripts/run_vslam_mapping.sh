@@ -55,6 +55,9 @@ VSLAM_ONLY="${VSLAM_ONLY:-0}"
 SELF_FILTER_ENABLED="${SELF_FILTER_ENABLED:-1}"
 MAPPING_SOURCE_MODE="${MAPPING_SOURCE_MODE:-STOP}"
 MAPPING_INITIAL_SCAN="${MAPPING_INITIAL_SCAN:-0}"
+MAPPING_COOPERATIVE_ON_STARTUP="${MAPPING_COOPERATIVE_ON_STARTUP:-0}"
+NAV2_GOAL_SELECTION_ARG="true"
+if [[ "${MAPPING_COOPERATIVE_ON_STARTUP}" == "1" ]]; then NAV2_GOAL_SELECTION_ARG="false"; fi
 HOST_XAUTHORITY="${XAUTHORITY:-/run/user/${UID}/gdm/Xauthority}"
 DEPTH_CLIP_DISTANCE_M="${DEPTH_CLIP_DISTANCE_M:-4.0}"
 STM32_I2C_DEVICE="${STM32_I2C_DEVICE:-/dev/i2c-7}"
@@ -86,6 +89,10 @@ if [[ "${MAPPING_SOURCE_MODE}" != "STOP" && \
   "${MAPPING_SOURCE_MODE}" != "APPROACH" && \
   "${MAPPING_SOURCE_MODE}" != "NAV2" ]]; then
   printf 'MAPPING_SOURCE_MODE must be STOP, TELEOP, APPROACH, or NAV2.\n' >&2
+  exit 1
+fi
+if [[ "${MAPPING_COOPERATIVE_ON_STARTUP}" != "0" && "${MAPPING_COOPERATIVE_ON_STARTUP}" != "1" ]]; then
+  printf "MAPPING_COOPERATIVE_ON_STARTUP must be 0 or 1.\n" >&2
   exit 1
 fi
 STM32_I2C_WRITE_ARG="false"
@@ -338,7 +345,7 @@ setsid bash -lc "
   source '${REPO_ROOT}/install/setup.bash'
   exec ros2 launch leader_command_selector command_selector.launch.py \\
     source_mode:='${MAPPING_SOURCE_MODE}' \
-    enable_nav2_goal_selection:=true
+    enable_nav2_goal_selection:='${NAV2_GOAL_SELECTION_ARG}'
 " >"${LOG_DIR}/leader_command_selector.log" 2>&1 &
 HOST_PIDS+=("$!")
 
@@ -444,6 +451,7 @@ docker exec -d -u "${CONTAINER_USER}" \
   -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
   -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
   -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
+  -e DAMGC_COOPERATIVE_ON_STARTUP="${MAPPING_COOPERATIVE_ON_STARTUP}" \
   -e DAMGC_MAPPING_RUN_ID="${RUN_ID}" \
   -e DAMGC_MAPPING_SNAPSHOT="${CONTAINER_SNAPSHOT}" \
   -e DAMGC_MAPPING_MODE="${MAPPING_MODE}" \

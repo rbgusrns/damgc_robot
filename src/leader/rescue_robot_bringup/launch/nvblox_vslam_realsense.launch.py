@@ -33,6 +33,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("filter_enabled", default_value="true"),
         DeclareLaunchArgument("initial_scan", default_value="false"),
+        DeclareLaunchArgument("cooperative_on_startup", default_value=(
+            "true" if os.environ.get("DAMGC_COOPERATIVE_ON_STARTUP") == "1" else "false")),
         SetEnvironmentVariable("FASTDDS_BUILTIN_TRANSPORTS", "UDPv4"),
         SetEnvironmentVariable("LD_LIBRARY_PATH", os.pathsep.join(gxf_library_paths)),
         _include("localization.launch.py"),
@@ -49,7 +51,8 @@ def generate_launch_description():
              namespace="leader", output="screen", parameters=[{"role": "leader"}]),
         Node(package="rescue_robot_bringup", executable="mapping_mode_manager.py",
              namespace="leader", output="screen", parameters=[os.path.join(
-                 get_package_share_directory("rescue_robot_bringup"), "config", "carrying_mode.yaml")]),
+                 get_package_share_directory("rescue_robot_bringup"), "config", "carrying_mode.yaml"), {"cooperative_on_startup": ParameterValue(
+                     LaunchConfiguration("cooperative_on_startup"), value_type=bool)}]),
         Node(package="rescue_robot_bringup", executable="nvblox_slice_map.py",
              name="nvblox_slice_map", output="screen"),
         Node(

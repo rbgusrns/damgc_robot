@@ -40,6 +40,9 @@ READY alone never start motion. Pressing N before READY is rejected.
 ## Launch
 
 The 3D mapping launch starts the leader peer automatically, dormant until B.
+Use `MAPPING_COOPERATIVE_ON_STARTUP=1` with the mapping launcher to start in
+HOLD with automatic Nav2 drive selection disabled.
+See [battery resume notes](../../docs/COOP_TRANSPORT_BATTERY_RESUME.md).
 Build the package and its workspace dependencies in the container first:
 
 ```bash

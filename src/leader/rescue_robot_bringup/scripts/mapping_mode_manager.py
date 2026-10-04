@@ -23,17 +23,18 @@ class MappingModeManager(Node):
         super().__init__('mapping_mode_manager')
         self.declare_parameter('anchor_directory', os.environ.get('DAMGC_MAPPING_SNAPSHOT') or '/workspaces/isaac_ros-dev/data/maps/latest')
         self.declare_parameter('mapping_session_id', os.environ.get('DAMGC_MAPPING_RUN_ID',''))
+        self.declare_parameter('cooperative_on_startup', False)
         self.declare_parameter('payload_front_m', 0.0)
         self.declare_parameter('payload_half_width_m', 0.0)
         self.selection_value = None
         self.selection_future = None
         self.selector_parameters = self.create_client(SetParameters, '/leader/command_selector/set_parameters')
         self.loading = False
-        self.cooperation = False
+        self.cooperation = bool(self.get_parameter('cooperative_on_startup').value)
         self.coop_pending = False
         self.coop_pub = self.create_publisher(String, "/cooperation/transport/control", 10)
         self.load_client = self.create_client(FilePath, '/nvblox_node/load_map')
-        self.mode = 'MAPPING'
+        self.mode = 'HOLD' if self.cooperation else 'MAPPING'
         self.pending = False
         self.odom_received = None
         self.odom = None

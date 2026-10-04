@@ -17,7 +17,8 @@
 - 파지/합체는 작업자가 수동으로 준비; 이번 흐름은 Dynamixel을 실행하지 않습니다.
 - [팔로워 구현 계약](docs/COOP_TRANSPORT_FOLLOWER_HANDOFF.md),
   [팔로워 인계 문서에 대한 리더 응답](docs/COOP_TRANSPORT_LEADER_RESPONSE.md),
-  [참고 패키지 및 실행 방법](src/cooperative_transport/README.md).
+  [참고 패키지 및 실행 방법](src/cooperative_transport/README.md),
+  [배터리 교체 후 재시작 인계](docs/COOP_TRANSPORT_BATTERY_RESUME.md).
 - 리더 RPP / 팔로워 역주행 pure pursuit, session/hash와 예정 출발 gate 구현.
   빌드는 완료했으며 양쪽 loaded 주행과 출발 시간차는 미검증입니다.
 
