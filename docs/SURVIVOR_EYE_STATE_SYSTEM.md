@@ -300,7 +300,7 @@ python3 tools/eye_state/fetch_yunet_model.py \
 ```bash
 cd ~/damgc_robot
 source /opt/ros/humble/setup.bash
-colcon build --packages-select rescue_robot_eye_state
+colcon build --packages-up-to rescue_robot_eye_state
 ```
 
 이 package의 isolated install prefix는 보통 `install/rescue_robot_eye_state`다. Jetson host에 Ultralytics/PyTorch가 없는 현재 환경에서는 검증된 `damgc-survivor-yolo:humble` runtime에서 node를 실행한다. 기존 YOLO runtime image의 torch/torchvision/Ultralytics를 upgrade하지 않는다.
@@ -332,30 +332,9 @@ ros2 topic hz /leader/camera/color/image_raw
 
 ### 3. Eye State node 실행
 
-두 번째 container에서 ROS와 image를 연결하려면 기존 프로젝트의 Fast DDS 환경과 ROS domain을 맞춘다. 아래 mount의 model/YuNet 경로와 isolated install prefix를 장비 경로에 맞춘다.
+Stage 2 Docker node와 Stage 3 temporal node의 실제 mount, ROS/Python interface 환경, launch 명령은 아래 [Terminal 2와 Terminal 3 전체 절차](#5-stage-2--stage-3-debug-image를-수동으로-확인하는-전체-절차)를 사용한다. 이 구성은 custom `rescue_robot_interfaces` message와 colcon isolated install의 build symlink를 함께 전달한다.
 
-```bash
-cd ~/damgc_robot
-docker run --rm -it --runtime=nvidia --network host --ipc=host \
-  -e ROS_DOMAIN_ID=0 -e ROS_LOCALHOST_ONLY=0 \
-  -e RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
-  -e FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
-  -e YOLO_CONFIG_DIR=/tmp \
-  -v "$PWD/install/rescue_robot_eye_state:/eye_state_install/rescue_robot_eye_state:ro" \
-  -v "$HOME/eye_state_runs/eye_state/baseline/weights/eye_state_best.pt:/models/eye_state_best.pt:ro" \
-  -v "$PWD/data/eye_state_models/face_detection_yunet_2022mar.onnx:/models/yunet.onnx:ro" \
-  --entrypoint bash damgc-survivor-yolo:humble -lc '
-    source /opt/ros/humble/setup.bash
-    export AMENT_PREFIX_PATH=/eye_state_install/rescue_robot_eye_state:/opt/ros/humble
-    ros2 launch rescue_robot_eye_state survivor_eye_state.launch.py \
-      image_topic:=/leader/camera/color/image_raw \
-      model_path:=/models/eye_state_best.pt \
-      yunet_model_path:=/models/yunet.onnx \
-      inference_rate_hz:=5.0 preprocess_mode:=gray device:=cpu
-  '
-```
-
-이 절의 실행 예시는 camera-only 검증에 사용한 구조다. 별도 YOLO runtime container에서 CPU와 GPU device 0을 실행했고 GPU 실행은 성공했다. 짧은 단독 시험은 `inference_rate_hz=2.0`으로 측정됐다. 이후 Stage 3 Goal 4에서는 VSLAM·Survivor와 GPU 병렬 실행을 수 분간 확인했으며, 처리율과 자원 사용량은 아래 Goal 4 기록에 남겼다. 기본 5 Hz 장시간 운용은 검증하지 않았다.
+검증에서는 `damgc-survivor-yolo:humble`에서 CUDA device 0과 `inference_rate_hz=2.0`으로 실행했고, 기본 5 Hz 장시간 운용은 확인하지 않았다. VSLAM·Survivor와의 짧은 병렬 시험 결과와 자원 사용량은 아래 Goal 4 기록에 있다.
 
 ### 4. topic, node, image 확인
 
@@ -368,6 +347,142 @@ ros2 topic hz /leader/survivor/eye_state/debug_image
 ros2 run rqt_image_view rqt_image_view --ros-args \
   -r image:=/leader/survivor/eye_state/debug_image
 ```
+
+### 5. Stage 2 + Stage 3 debug image를 수동으로 확인하는 전체 절차
+
+아래 절차는 VSLAM, Nav2, nvblox 및 기존 Survivor pipeline을 실행하지 않고 D435 RGB와 Eye State node만 실행한다. D435는 Terminal 1에서 한 번만 시작한다. 각 terminal은 같은 ROS domain과 Fast DDS 설정을 사용한다. 모델과 YuNet 파일 경로가 기본 경로와 다르면 mount 경로를 실제 파일 위치로 바꾼다.
+
+먼저 필요한 package를 build한다. `rescue_robot_interfaces` custom message가 포함되므로 `--packages-up-to`로 interface dependency도 함께 build한다.
+
+```bash
+cd ~/damgc_robot
+source /opt/ros/humble/setup.bash
+colcon build --packages-up-to rescue_robot_eye_state
+```
+
+#### Terminal 1 — D435 RGB camera
+
+```bash
+source /opt/ros/humble/setup.bash
+export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+ros2 launch realsense2_camera rs_launch.py \
+  camera_namespace:=leader camera_name:=camera \
+  enable_color:=true rgb_camera.color_profile:=640,480,30 \
+  enable_depth:=false enable_infra:=false \
+  enable_infra1:=false enable_infra2:=false publish_tf:=false
+```
+
+이 terminal은 검증이 끝날 때까지 실행 상태로 둔다. Ctrl+C로 종료한다.
+
+#### Terminal 2 — Stage 2 face/ROI/classifier node
+
+```bash
+cd ~/damgc_robot
+export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+docker run --rm -it --runtime=nvidia --network host --ipc=host \
+  -e ROS_DOMAIN_ID -e ROS_LOCALHOST_ONLY \
+  -e RMW_IMPLEMENTATION -e FASTDDS_BUILTIN_TRANSPORTS \
+  -e YOLO_CONFIG_DIR=/tmp \
+  -v "$PWD/build:$PWD/build:ro" \
+  -v "$PWD/install/rescue_robot_interfaces:/eye_state_install/rescue_robot_interfaces:ro" \
+  -v "$PWD/install/rescue_robot_eye_state:/eye_state_install/rescue_robot_eye_state:ro" \
+  -v "$HOME/eye_state_runs/eye_state/baseline/weights/eye_state_best.pt:/models/eye_state_best.pt:ro" \
+  -v "$PWD/data/eye_state_models/face_detection_yunet_2022mar.onnx:/models/yunet.onnx:ro" \
+  --entrypoint bash damgc-survivor-yolo:humble -lc '
+    source /opt/ros/humble/setup.bash
+    export AMENT_PREFIX_PATH=/eye_state_install/rescue_robot_eye_state:/eye_state_install/rescue_robot_interfaces:$AMENT_PREFIX_PATH
+    export PYTHONPATH=/eye_state_install/rescue_robot_interfaces/local/lib/python3.10/dist-packages:$PYTHONPATH
+    export LD_LIBRARY_PATH=/eye_state_install/rescue_robot_interfaces/lib:$LD_LIBRARY_PATH
+    ros2 launch rescue_robot_eye_state survivor_eye_state.launch.py \
+      image_topic:=/leader/camera/color/image_raw \
+      model_path:=/models/eye_state_best.pt \
+      yunet_model_path:=/models/yunet.onnx \
+      inference_rate_hz:=2.0 preprocess_mode:=gray device:=0
+  '
+```
+
+Stage 2는 RGB image에서 face/landmark/ROI와 좌우 raw 분류를 처리해 `/leader/survivor/eye_state/debug_image` 및 `/leader/survivor/eye_state/raw`를 publish한다. classifier는 Jetson 부담을 낮추기 위해 이 안내에서는 최대 2 Hz와 CUDA device 0을 사용한다. 다른 조건을 확인하려면 launch argument를 조정한다.
+
+#### Terminal 3 — Stage 3 temporal node
+
+```bash
+cd ~/damgc_robot
+export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+docker run --rm -it --runtime=nvidia --network host --ipc=host \
+  -e ROS_DOMAIN_ID -e ROS_LOCALHOST_ONLY \
+  -e RMW_IMPLEMENTATION -e FASTDDS_BUILTIN_TRANSPORTS \
+  -e YOLO_CONFIG_DIR=/tmp \
+  -v "$PWD/build:$PWD/build:ro" \
+  -v "$PWD/install/rescue_robot_interfaces:/eye_state_install/rescue_robot_interfaces:ro" \
+  -v "$PWD/install/rescue_robot_eye_state:/eye_state_install/rescue_robot_eye_state:ro" \
+  --entrypoint bash damgc-survivor-yolo:humble -lc '
+    source /opt/ros/humble/setup.bash
+    export AMENT_PREFIX_PATH=/eye_state_install/rescue_robot_eye_state:/eye_state_install/rescue_robot_interfaces:$AMENT_PREFIX_PATH
+    export PYTHONPATH=/eye_state_install/rescue_robot_interfaces/local/lib/python3.10/dist-packages:$PYTHONPATH
+    export LD_LIBRARY_PATH=/eye_state_install/rescue_robot_interfaces/lib:$LD_LIBRARY_PATH
+    ros2 launch rescue_robot_eye_state survivor_eye_state_temporal.launch.py
+  '
+```
+
+이 node는 Stage 2 raw topic을 받아 `/leader/survivor/eye_state/stable`과 `/leader/survivor/eye_state/temporal_debug_image`를 publish한다. camera를 시작하지 않는다.
+
+#### Terminal 4 — rqt_image_view
+
+```bash
+source /opt/ros/humble/setup.bash
+export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+ros2 run rqt_image_view rqt_image_view
+```
+
+rqt 창의 image topic 선택 메뉴에서 아래 topic을 선택해 확인한다. rqt는 한 번에 한 image topic을 표시하므로 Stage 2와 Stage 3 화면을 번갈아 선택한다.
+
+| 표시할 내용 | rqt에서 선택할 topic |
+| --- | --- |
+| Face bbox, landmark, 좌우 eye ROI, raw OPEN/CLOSED 및 confidence | `/leader/survivor/eye_state/debug_image` |
+| EyeTrack ID, raw/stable 좌우 state, combined state와 history | `/leader/survivor/eye_state/temporal_debug_image` |
+
+각 화면을 동시에 비교하려면 아래 명령을 별도 terminal 두 개에서 실행해 rqt 창을 각각 연다.
+
+```bash
+# Stage 2 raw face/eye 결과 창
+source /opt/ros/humble/setup.bash
+export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+ros2 run rqt_image_view rqt_image_view --ros-args \
+  -r image:=/leader/survivor/eye_state/debug_image
+```
+
+```bash
+# Stage 3 temporal 결과 창 (다른 terminal에서 실행)
+source /opt/ros/humble/setup.bash
+export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+ros2 run rqt_image_view rqt_image_view --ros-args \
+  -r image:=/leader/survivor/eye_state/temporal_debug_image
+```
+
+#### Terminal 5 — 연결 상태와 publish 확인 (선택)
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/damgc_robot/install/setup.bash
+export ROS_DOMAIN_ID=0 ROS_LOCALHOST_ONLY=0
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+ros2 topic list -t | grep -E 'camera/color/image_raw|eye_state/(raw|stable|debug_image|temporal_debug_image)'
+ros2 topic hz /leader/survivor/eye_state/debug_image
+ros2 topic hz /leader/survivor/eye_state/temporal_debug_image
+```
+
+각 `ros2 topic hz` 명령은 별도 terminal에서 실행하면 해당 topic의 주기를 볼 수 있다. 검증 후 Terminal 3, Terminal 2, Terminal 1 순으로 Ctrl+C를 눌러 종료한다. rqt 창은 창을 닫아 종료한다. 모델 파일이 없으면 학습을 반복하지 말고 Stage 1 checkpoint 경로를 확인한다. 얼굴이 화면에 없거나 ROI가 너무 작으면 debug image에 `NO_FACE`/`INVALID`가 표시되며 이는 classifier의 OPEN/CLOSED 결과가 아니다.
 
 ## J. 성능 및 자원 측정
 
