@@ -102,6 +102,7 @@ class TransportPeer(Node):
         self.guard = self.create_client(SetBool, '/follower/velocity_guard/enable') if not self.leader else None
         self.follow_handle = None
         self.rpp_command, self.rpp_time = Twist(), 0.
+        self.last_command = Twist()
         self.peer_speed_ratio = 0.
         if self.leader:
             from rclpy.action import ActionClient
@@ -116,6 +117,8 @@ class TransportPeer(Node):
         self.index, self.progress, self.peer_progress = 0, 0., 0.
         self.peer_time, self.peer_state = 0., 'IDLE'
         self.packet = None
+        self.straight_test = False
+        self.auto_start_on_ready = False
         self.pending = False
         self.generation = 0
         self.ready_deadline = 0.
@@ -135,7 +138,7 @@ class TransportPeer(Node):
             self.create_subscription(OccupancyGridUpdate, '/global_costmap/costmap_updates', self.costmap_update, 10)
         self.create_timer(.05, self.tick)
         self.create_timer(.1, self.communicate)
-        self.report('IDLE', 'B=prepare, RViz goal, wait READY, N=start; manual grasp only')
+        self.report('IDLE', 'G=synchronized 1m straight test; B=prepare Nav2 path; N=start; manual grasp only')
 
     def p(self, key):
         return float(self.get_parameter(key).value)
@@ -170,7 +173,7 @@ class TransportPeer(Node):
             raise ValueError('command selector unavailable')
         if self.guard and not self.guard.service_is_ready():
             raise ValueError('follower velocity guard unavailable')
-        if self.leader and not self.follow.server_is_ready():
+        if self.leader and not self.straight_test and not self.follow.server_is_ready():
             raise ValueError('Nav2 FollowPath action unavailable')
         if self.count_publishers(self.command_topic) != 1:
             raise ValueError('another publisher owns '+self.command_topic)
@@ -214,15 +217,19 @@ class TransportPeer(Node):
         # Preparation intentionally selects STOP. Its topic notification can
         # arrive after PREPARE across publishers; keyboard Space also sends
         # explicit ABORT, which continues to cancel preparation.
-        if msg.data == 'STOP' and self.state == 'LOCKING':
+        if msg.data == 'STOP' and self.state in ('LOCKING', 'WAIT_PLAN'):
             return
         if msg.data in ('STOP', 'TELEOP') and self.state not in TERMINAL:
             self.stop('keyboard takeover', selector_stop=False)
 
     def control(self, msg):
-        if msg.data == 'PREPARE':
+        if self.leader and msg.data == 'STRAIGHT_TEST':
+            self.begin_straight_test()
+        elif msg.data == 'PREPARE':
             self.stop('new preparation')
             self.generation += 1
+            self.straight_test = False
+            self.auto_start_on_ready = False
             self.session, self.path_hash = uuid.uuid4().hex, ''
             self.path, self.object_path, self.packet = (), (), None
             self.start_pose, self.start_mono, self.offset = None, None, None
@@ -237,7 +244,8 @@ class TransportPeer(Node):
                 if self.state != 'READY' or self.peer_state != 'READY' or time.monotonic()-self.peer_time > .3:
                     raise ValueError('both peers must report READY first')
                 self.local_check(stationary=True)
-                self.check_collision()
+                if not self.straight_test:
+                    self.check_collision()
                 if self.offset is None or self.clock_rtt is None or self.clock_rtt > .2:
                     raise ValueError('clock handshake unavailable/too slow')
                 self.report('ARMING', 'N received; opening selectors with zero commands')
@@ -247,6 +255,45 @@ class TransportPeer(Node):
                 self.report(self.state, 'START rejected: '+str(error))
         elif msg.data == 'ABORT':
             self.stop('operator abort')
+
+    def begin_straight_test(self):
+        if not self.leader:
+            return
+        if self.state not in TERMINAL:
+            self.stop('new straight test')
+        self.generation += 1
+        self.session, self.path_hash = uuid.uuid4().hex, ''
+        self.path, self.object_path, self.packet = (), (), None
+        self.start_pose, self.start_mono, self.offset = None, None, None
+        self.peer_time, self.clock_rtt = 0., None
+        self.pings = {}
+        self.straight_test, self.auto_start_on_ready = True, True
+        self.report('LOCKING', 'preparing synchronized 1m straight test; leader forward, follower reverse')
+        self.ready_deadline = time.monotonic()+8
+        self.parameter('enable_nav2_goal_selection', False,
+                       lambda: self.source('STOP', self.make_straight_test_path))
+
+    def make_straight_test_path(self):
+        try:
+            self.local_check(stationary=True)
+            msg = Path()
+            msg.header.frame_id = self.odom_frame
+            msg.header.stamp = self.get_clock().now().to_msg()
+            for index in range(21):
+                distance = index * .05
+                ps = PoseStamped()
+                ps.header = msg.header
+                ps.pose.position.x = self.robot.x + distance*math.cos(self.robot.yaw)
+                ps.pose.position.y = self.robot.y + distance*math.sin(self.robot.yaw)
+                ps.pose.orientation.z = math.sin(self.robot.yaw/2)
+                ps.pose.orientation.w = math.cos(self.robot.yaw/2)
+                msg.poses.append(ps)
+            self.plan_gate_ns = 0
+            self.new_goal_ns = msg.header.stamp.sec*1_000_000_000+msg.header.stamp.nanosec
+            self.state = 'WAIT_PLAN'
+            self.plan(msg)
+        except (ValueError, TypeError) as error:
+            self.stop('straight test preparation failed: '+str(error))
 
     def costmap(self, msg):
         self.grid = msg
@@ -354,7 +401,8 @@ class TransportPeer(Node):
                 if drive_direction(path) not in ('FORWARD','REVERSE'):
                     raise ValueError('mixed forward/reverse or lateral paths unsupported')
             self.path, self.object_path = formation.leader, obj
-            self.check_collision()
+            if not self.straight_test:
+                self.check_collision()
             self.start_pose = self.robot
             d = 2*(self.geometry.axle_to_hinge+self.geometry.longitudinal_offset)
             expected = Pose2D(self.robot.x+d*math.cos(self.robot.yaw), self.robot.y+d*math.sin(self.robot.yaw), normalize_angle(self.robot.yaw+math.pi))
@@ -376,7 +424,10 @@ class TransportPeer(Node):
                 self.cancel.call_async(CancelGoal.Request())
         except (ValueError, TypeError) as error:
             self.path, self.object_path = (), ()
-            self.report('WAIT_PLAN', 'path rejected: '+str(error)+'; choose another RViz goal')
+            if self.straight_test:
+                self.stop('straight test path rejected: '+str(error))
+            else:
+                self.report('WAIT_PLAN', 'path rejected: '+str(error)+'; choose another RViz goal')
 
     def publish_path(self):
         msg = Path()
@@ -446,16 +497,21 @@ class TransportPeer(Node):
                 self.peer_time, self.peer_state = time.monotonic(), 'READY'
                 if self.state != 'READY':
                     self.local_check(stationary=True)
-                    self.report('READY', 'both paths verified, motors stopped. Manual assembly must already match neutral opposite-facing geometry. Press N to start.')
+                    self.report('READY', 'both paths verified, motors stopped. Manual assembly must already match neutral opposite-facing geometry.' + (' Starting synchronized 1m test now.' if self.auto_start_on_ready else ' Press N to start.'))
+                    if self.auto_start_on_ready:
+                        self.control(String(data='START'))
             elif not self.leader and kind == 'ARM' and self.state == 'READY':
                 self.local_check(stationary=True)
                 self.report('ARMING', 'start key received; arming with zero commands')
                 self.ready_deadline = time.monotonic()+5
                 self.source('COOPERATION', self.arm_guard)
             elif self.leader and kind == 'ARM_ACK' and self.state == 'WAIT_ARM':
-                self.report('ARM_CONTROLLER', 'follower armed; submitting frozen path to Nav2 RPP behind zero gate')
-                self.ready_deadline = time.monotonic()+5
-                self.start_controller()
+                if self.straight_test:
+                    self.schedule_start('follower armed for synchronized straight test')
+                else:
+                    self.report('ARM_CONTROLLER', 'follower armed; submitting frozen path to Nav2 RPP behind zero gate')
+                    self.ready_deadline = time.monotonic()+5
+                    self.start_controller()
             elif not self.leader and kind == 'COMMIT' and self.state in ('ARMED','SCHEDULED'):
                 deadline = float(p['start'])+float(p['offset'])
                 if self.state == 'ARMED':
@@ -508,8 +564,7 @@ class TransportPeer(Node):
                     raise ValueError('Nav2 rejected cooperative FollowPath')
                 self.follow_handle = handle
                 handle.get_result_async().add_done_callback(finished)
-                self.start_wall, self.start_mono = time.time()+2., time.monotonic()+2.
-                self.report('WAIT_COMMIT', 'Nav2 RPP accepted; scheduling common gate in 2 seconds')
+                self.schedule_start('Nav2 RPP accepted; scheduling common gate in 2 seconds')
             except Exception as error:
                 if generation == self.generation:
                     self.stop(str(error))
@@ -527,6 +582,11 @@ class TransportPeer(Node):
             except Exception as error:
                 self.stop(str(error))
         self.follow.send_goal_async(goal).add_done_callback(accepted)
+
+    def schedule_start(self, detail):
+        self.start_wall, self.start_mono = time.time()+2., time.monotonic()+2.
+        self.ready_deadline = time.monotonic()+5
+        self.report('WAIT_COMMIT', detail)
 
     def prepare_follower(self, p, t2):
         if self.state not in TERMINAL and p.get('session') != self.session:
@@ -602,7 +662,10 @@ class TransportPeer(Node):
     def communicate(self):
         if not self.session:
             return
-        ratio = min(1., abs(self.rpp_command.linear.x)/self.p('speed')) if self.leader and time.monotonic()-self.rpp_time < .5 and self.follow_handle else 0.
+        ratio = (min(1., abs(self.last_command.linear.x)/self.p('speed'))
+                 if self.leader and self.straight_test and self.state == 'RUNNING' else
+                 min(1., abs(self.rpp_command.linear.x)/self.p('speed'))
+                 if self.leader and time.monotonic()-self.rpp_time < .5 and self.follow_handle else 0.)
         self.send('HB', state=self.state, progress=self.progress, speed_ratio=ratio)
         if self.leader and self.packet and self.state in ('WAIT_READY','READY') and time.monotonic()-self.last_prepare_send >= .5:
             self.last_prepare_send = time.monotonic()
@@ -650,7 +713,7 @@ class TransportPeer(Node):
                 result = compute_tracking_command(self.path, self.robot, self.index,
                                                   max_path_error=self.p('max_path_error'),
                                                   max_linear_speed=self.p('speed') if self.leader else self.speed,
-                                                  max_angular_speed=.2, goal_tolerance=.05)
+                                                  max_angular_speed=.2, goal_tolerance=.02 if self.straight_test else .05)
                 self.index = result.progress_index
                 self.progress = self.index/max(1,len(self.path)-1)
                 if result.reached_goal:
@@ -664,13 +727,17 @@ class TransportPeer(Node):
                     factor = max(0., min(1., 1.-10*max(0.,self.progress-self.peer_progress-.02)))
                     factor *= min(1., max(0., (now-self.start_mono)/.2))
                     if self.leader:
-                        if now-self.rpp_time > .5:
-                            raise ValueError('Nav2 RPP command stream stale')
-                        raw = self.rpp_command
-                        scale = min(1., self.p('speed')/max(abs(raw.linear.x),1e-6))*factor
-                        command.linear.x, command.angular.z = raw.linear.x*scale, raw.angular.z*scale
-                        if abs(command.linear.x) < 1e-5 and abs(command.angular.z) > 1e-5:
-                            raise ValueError('RPP requested in-place rotation while coupled')
+                        if self.straight_test:
+                            command.linear.x = max(-self.p('speed'), min(self.p('speed'), result.command.linear_x))*factor
+                            command.angular.z = max(-.2, min(.2, result.command.angular_z))*factor
+                        else:
+                            if now-self.rpp_time > .5:
+                                raise ValueError('Nav2 RPP command stream stale')
+                            raw = self.rpp_command
+                            scale = min(1., self.p('speed')/max(abs(raw.linear.x),1e-6))*factor
+                            command.linear.x, command.angular.z = raw.linear.x*scale, raw.angular.z*scale
+                            if abs(command.linear.x) < 1e-5 and abs(command.angular.z) > 1e-5:
+                                raise ValueError('RPP requested in-place rotation while coupled')
                     else:
                         factor *= self.peer_speed_ratio
                         command.linear.x = result.command.linear_x*factor
@@ -682,6 +749,7 @@ class TransportPeer(Node):
             self.stop(str(error))
         # Idle peer must not stream zeros into another owner's topic.
         if self.state not in TERMINAL:
+            self.last_command = command
             self.cmd.publish(command)
 
     def stop(self, detail, notify=True, state='STOPPED', selector_stop=True):

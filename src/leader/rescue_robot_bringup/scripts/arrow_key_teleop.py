@@ -201,6 +201,7 @@ class ArrowKeyTeleop(Node):
             " L               : reload saved map, keep current pose\n"
             " B               : prepare cooperative path (then NEW RViz goal)\n"
             " N               : start BOTH robots after COOP READY\n"
+            " G               : synchronized 1m straight test (leader forward, follower reverse)\n"
             " SPACE           : stop both cooperative peers\n"
             " Ctrl-C          : exit\n"
             "==========================================\n",
@@ -295,9 +296,9 @@ class ArrowKeyTeleop(Node):
                 self._last_motion_key_time = 0.0
                 continue
 
-            mapping_command = {"p": "HOLD", "m": "MAPPING", "h": "HOME", "l": "LOAD_MAP", "b": "COOP_PREPARE", "n": "COOP_START"}.get(key)
+            mapping_command = {"p": "HOLD", "m": "MAPPING", "h": "HOME", "l": "LOAD_MAP", "b": "COOP_PREPARE", "n": "COOP_START", "g": "COOP_STRAIGHT_TEST"}.get(key)
             if mapping_command:
-                if mapping_command == "COOP_PREPARE":
+                if mapping_command in ("COOP_PREPARE", "COOP_STRAIGHT_TEST"):
                     self._cooperative_controls = True
                 elif mapping_command in ("MAPPING","HOLD","HOME","LOAD_MAP"):
                     self._cooperative_controls = False

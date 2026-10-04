@@ -112,6 +112,9 @@ class MappingModeManager(Node):
         if command == 'COOP_PREPARE':
             self.prepare_cooperation()
             return
+        if command == 'COOP_STRAIGHT_TEST':
+            self.prepare_cooperation(straight_test=True)
+            return
         if command == 'COOP_START':
             if self.cooperation and not self.coop_pending:
                 self.coop_pub.publish(String(data='START'))
@@ -143,7 +146,7 @@ class MappingModeManager(Node):
         elif command == 'LOAD_MAP':
             self.load_map()
 
-    def prepare_cooperation(self):
+    def prepare_cooperation(self, straight_test=False):
         if self.coop_pending:
             return
         if not self.selector_parameters.service_is_ready():
@@ -176,8 +179,11 @@ class MappingModeManager(Node):
                     raise RuntimeError('Nav2 automatic selection was not disabled')
                 self.selection_value = False
                 if self.cooperation:
-                    self.coop_pub.publish(String(data='PREPARE'))
-                    self.status('COOP: B accepted; wait WAIT_PLAN, then select NEW RViz goal. No motion until READY and N.')
+                    self.coop_pub.publish(String(data='STRAIGHT_TEST' if straight_test else 'PREPARE'))
+                    if straight_test:
+                        self.status('COOP: preparing synchronized 1m straight test; leader forward, follower reverse. Starts after both READY.')
+                    else:
+                        self.status('COOP: B accepted; wait WAIT_PLAN, then select NEW RViz goal. No motion until READY and N.')
             except Exception as error:
                 self.status('COOP prepare failed: '+str(error))
         self.planner_parameters.call_async(planner_request).add_done_callback(planner_configured)

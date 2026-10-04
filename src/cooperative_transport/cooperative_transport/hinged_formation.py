@@ -368,13 +368,14 @@ def object_path_to_robot_paths(
         leader_angles.append(q)
         follower_angles.append(q_follower)
 
-    lateral_ratio = max(
-        _max_lateral_ratio(leader), _max_lateral_ratio(follower)
-    )
+    leader_lateral_ratio = _max_lateral_ratio(leader)
+    follower_lateral_ratio = _max_lateral_ratio(follower)
+    lateral_ratio = max(leader_lateral_ratio, follower_lateral_ratio)
     if lateral_ratio > lateral_tolerance:
         raise ValueError(
-            "discrete robot path needs lateral motion ratio %.5f (limit %.5f)"
-            % (lateral_ratio, lateral_tolerance)
+            "discrete robot paths need lateral ratios leader=%.5f follower=%.5f "
+            "(limit %.5f)"
+            % (leader_lateral_ratio, follower_lateral_ratio, lateral_tolerance)
         )
 
     return FormationPath(
