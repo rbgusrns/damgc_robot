@@ -19,6 +19,7 @@ from rclpy.qos import (
     ReliabilityPolicy,
 )
 from sensor_msgs.msg import CameraInfo, Image
+from std_srvs.srv import Trigger
 
 from rescue_robot_survivor.detection_logic import (
     Detection,
@@ -92,6 +93,16 @@ class PersonDetectorNode(Node):
         self._inference_hz = float(
             self.declare_parameter("inference_hz", 2.0).value
         )
+        self._checkpoint_mode = bool(self.declare_parameter("checkpoint_mode", False).value)
+        self._checkpoint_lock = threading.Lock()
+        self._checkpoint_remaining = 0
+        self._checkpoint_done = threading.Event()
+        self._checkpoint_started_ns = 0
+        self._checkpoint_busy = False
+        self._checkpoint_failed = False
+        self._checkpoint_service = self.create_service(
+            Trigger, "/leader/person_detector/checkpoint", self._checkpoint_request,
+            callback_group=MutuallyExclusiveCallbackGroup())
         self._requested_device = str(
             self.declare_parameter("device", "auto").value
         ).strip()
@@ -226,13 +237,45 @@ class PersonDetectorNode(Node):
 
     def destroy_node(self):
         self._worker_shutdown.set()
+        self._checkpoint_done.set()
         self._image_event.set()
         self._depth_event.set()
         self._worker.join(timeout=2.0)
         return super().destroy_node()
 
+    def _checkpoint_request(self, request, response):
+        if not self._checkpoint_mode:
+            response.success = False
+            response.message = "Detector is not in checkpoint mode"
+            return response
+        with self._checkpoint_lock:
+            if self._checkpoint_busy:
+                response.success = False
+                response.message = "Checkpoint already active"
+                return response
+            self._checkpoint_busy = True
+            self._checkpoint_remaining = 3
+            self._checkpoint_failed = False
+            self._checkpoint_started_ns = time.time_ns()
+            self._checkpoint_last_stamp = self._checkpoint_started_ns
+            self._checkpoint_done.clear()
+        finished = self._checkpoint_done.wait(timeout=12.0)
+        with self._checkpoint_lock:
+            response.success = (finished and self._checkpoint_remaining == 0
+                                and not self._checkpoint_failed
+                                and not self._worker_shutdown.is_set())
+            response.message = ("Processed 3 fresh frames" if response.success
+                                else "Checkpoint failed or timed out; no valid three-frame result")
+            self._checkpoint_remaining = 0
+            self._checkpoint_busy = False
+        return response
+
     def _enqueue_image_callback(self, message: Image) -> None:
         stamp = self._stamp_to_nanoseconds(message)
+        if getattr(self, "_checkpoint_mode", False):
+            with self._checkpoint_lock:
+                if self._checkpoint_remaining <= 0 or stamp <= self._checkpoint_started_ns:
+                    return
         # DDS may deliver an old RGB after a temporary CPU/GPU stall. Skip it
         # before inference rather than pairing it with a newer depth frame.
         if stamp and time.time_ns() - stamp > 250_000_000:
@@ -256,7 +299,20 @@ class PersonDetectorNode(Node):
                 if now - last_inference_at < self._inference_period_sec:
                     continue
                 last_inference_at = now
-                self._image_callback(message)
+                if getattr(self, "_checkpoint_mode", False):
+                    with self._checkpoint_lock:
+                        if (self._checkpoint_remaining <= 0 or
+                                self._stamp_to_nanoseconds(message) <= self._checkpoint_last_stamp):
+                            continue
+                        self._checkpoint_last_stamp = self._stamp_to_nanoseconds(message)
+                    valid = self._image_callback(message)
+                    with self._checkpoint_lock:
+                        self._checkpoint_failed |= not bool(valid)
+                        self._checkpoint_remaining = max(0, self._checkpoint_remaining - 1)
+                        if self._checkpoint_remaining == 0:
+                            self._checkpoint_done.set()
+                else:
+                    self._image_callback(message)
 
     def _validate_parameters(self) -> None:
         if not self._image_topic:
@@ -574,7 +630,7 @@ class PersonDetectorNode(Node):
             positions.poses.append(pose)
         self._positions_publisher.publish(positions)
 
-    def _image_callback(self, message: Image) -> None:
+    def _image_callback(self, message: Image) -> bool:
         camera_points: Dict[int, Optional[CameraPoint]] = {}
         # Pair at callback entry, before YOLO can outlast the five-frame cache.
         depth_message = self._wait_for_matching_depth(message)
@@ -627,8 +683,10 @@ class PersonDetectorNode(Node):
                 f"Person frame processing failed: {error}",
                 throttle_duration_sec=5.0,
             )
+            return False
         self._publish_positions(camera_points, message)
         self._publish_image(image, message)
+        return True
 
 
 def main(args=None) -> None:

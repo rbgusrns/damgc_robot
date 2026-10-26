@@ -83,6 +83,10 @@ def make_harness(confirm_min_hits=1):
             confirm_min_duration_sec=0.0,
             confirm_min_hits=confirm_min_hits,
         )),
+        _message_stamp_ns=SurvivorRegistryNode._message_stamp_ns,
+        _camera_distances_lock=threading.Lock(),
+        _camera_distances_by_stamp={},
+        _near_confirm_distance_m=2.0,
         _registry_lock=threading.Lock(),
         _publisher=Mock(),
         get_clock=Mock(return_value=SimpleNamespace(
@@ -175,6 +179,8 @@ def test_qos_matches_upstream_and_late_subscriber_contract():
 
 def test_invalid_ros_parameters_are_rejected():
     valid = dict(
+        _camera_positions_topic="/leader/survivor/camera_positions",
+        _near_confirm_distance_m=2.0,
         _input_topic="/leader/survivor/map_positions",
         _tracks_topic="/leader/survivor/tracks",
         _reset_service_name="/leader/survivor/registry/reset",

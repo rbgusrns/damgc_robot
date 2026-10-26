@@ -23,6 +23,7 @@ from std_srvs.srv import Trigger
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src/leader/rescue_robot_bringup/scripts'))
 from frontier_explorer import FrontierExplorer
+from mapping_recovery import VideoRecovery
 
 
 class LiveInputs(Node):
@@ -51,8 +52,11 @@ class LiveInputs(Node):
         self.scan = self.create_client(Trigger, '/leader/initial_map_scan/start')
 
     def record(self, key, msg):
-        self.counts[key] += 1
-        self.latest[key] = (time.monotonic(), msg.header.stamp)
+        stamp = msg.header.stamp
+        previous = self.latest.get(key)
+        if previous is None or (stamp.sec, stamp.nanosec) > (previous[1].sec, previous[1].nanosec):
+            self.counts[key] += 1
+        self.latest[key] = (time.monotonic(), stamp)
 
     def on_map(self, msg):
         self.record('map', msg)
@@ -61,8 +65,10 @@ class LiveInputs(Node):
     def on_status(self, msg):
         self.mission_status = msg.data
 
-    def problems(self, explorer):
+    def problems(self, explorer, image_age_limit=None):
         problems = []
+        if explorer.checkpoint_detection and not explorer.detection_client.service_is_ready():
+            problems.append('checkpoint detector: waiting for model/service')
         now = time.monotonic()
         ros_now = self.get_clock().now().nanoseconds
         for key in ('depth', 'filtered_depth', 'visual_odometry', 'local_odometry', 'map'):
@@ -71,7 +77,8 @@ class LiveInputs(Node):
                 continue
             received, stamp = self.latest[key]
             age = (ros_now - stamp.sec * 10**9 - stamp.nanosec) / 1e9
-            limit = self.image_timeout_sec if key in ('depth', 'filtered_depth') else 5.0
+            image_limit = self.image_timeout_sec if image_age_limit is None else image_age_limit
+            limit = image_limit if key in ('depth', 'filtered_depth') else 5.0
             if now-received > limit or not -0.5 <= age <= limit:
                 problems.append(f'{key}: age={age:.2f}s, received={now-received:.2f}s ago')
         if self.known_cells == 0:
@@ -88,6 +95,8 @@ class LiveInputs(Node):
         now = time.monotonic()
         ros_now = self.get_clock().now().nanoseconds
         for key in ('depth', 'filtered_depth'):
+            if key not in self.latest:
+                return f'{key} unavailable: no frames received'
             received, stamp = self.latest[key]
             age = (ros_now-stamp.sec*10**9-stamp.nanosec)/1e9
             if now-received > self.image_timeout_sec or age > self.image_timeout_sec:
@@ -106,12 +115,17 @@ def main():
                     '-p', 'minimum_goal_distance_m:=0.45',
                     '-p', 'minimum_cluster_cells:=3',
                     '-p', 'minimum_unknown_area_m2:=0.05',
-                    '-p', 'goal_timeout_sec:=120.0'],
+                    '-p', 'goal_timeout_sec:=120.0',
+                    '-p', 'checkpoint_detection:=' + ('true' if os.environ.get('MAPPING_CHECKPOINT_DETECTION') == '1' else 'false')],
                 signal_handler_options=SignalHandlerOptions.NO)
     if not 0 < args.image_timeout_sec < 300:
         raise ValueError('Image timeout must be positive and below 300 seconds')
     monitor = LiveInputs(args.image_timeout_sec)
     explorer = FrontierExplorer()
+    delivery = None
+    if os.environ.get('MAPPING_SOLO_DELIVERY') == '1':
+        from solo_delivery import SoloDelivery
+        delivery = SoloDelivery()
     saved_pose_file = os.environ.get('MAPPING_START_POSE_FILE', '')
     if saved_pose_file:
         saved_pose = json.loads(Path(saved_pose_file).read_text())
@@ -126,6 +140,8 @@ def main():
     executor = SingleThreadedExecutor()
     executor.add_node(monitor)
     executor.add_node(explorer)
+    if delivery is not None:
+        executor.add_node(delivery)
 
     def spin(seconds=0.1):
         executor.spin_once(timeout_sec=seconds)
@@ -181,18 +197,20 @@ def main():
         explorer.set_parameters([Parameter('dry_run', value=False)])
         explorer.dry_run = False
         monitor.get_logger().info('EXPLORING: 3m forward × 3m right; return to the saved start pose on completion')
+        recovery = VideoRecovery()
         last_status = ''
         while rclpy.ok():
             spin()
-            video_outage = monitor.video_outage()
-            if video_outage and not explorer.stopped:
-                explorer._stop(video_outage)
-                monitor.stop_pub.publish(String(data='STOP'))
+            recovery.poll(monitor, explorer, time.monotonic())
             if monitor.mission_status != last_status:
                 last_status = monitor.mission_status
                 monitor.get_logger().info(last_status)
-            if last_status.startswith(('COMPLETE:', 'STOPPED:')):
-                monitor.stop_pub.publish(String(data='STOP'))
+            if (explorer.stopped and not explorer.paused
+                    and last_status.startswith(('COMPLETE:', 'STOPPED:'))):
+                if delivery is not None and explorer.completed_return:
+                    delivery.run(executor, explorer, mapping_log.parent)
+                else:
+                    monitor.stop_pub.publish(String(data='STOP'))
                 monitor.get_logger().info('MISSION HOLD: map and RViz remain available; Ctrl-C shuts down')
                 while rclpy.ok():
                     spin()
@@ -210,6 +228,9 @@ def main():
             monitor.stop_pub.publish(String(data='STOP'))
             for _ in range(3):
                 spin()
+        if delivery is not None:
+            executor.remove_node(delivery)
+            delivery.destroy_node()
         executor.remove_node(explorer)
         executor.remove_node(monitor)
         explorer.destroy_node()

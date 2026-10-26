@@ -5,6 +5,9 @@ from copy import deepcopy
 import rclpy
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from std_msgs.msg import String
+from std_srvs.srv import Trigger
+from rclpy.qos import QoSProfile, DurabilityPolicy
 
 
 class VslamCovarianceAdapter(Node):
@@ -22,6 +25,11 @@ class VslamCovarianceAdapter(Node):
         self.declare_parameter("yaw_stddev_rad", 0.05)
         self.declare_parameter("unmeasured_variance", 1000000.0)
 
+        self._visual_held = False
+        self._source_pub = self.create_publisher(String, '/leader/localization/source',
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        self.create_service(Trigger, '/leader/localization/hold_visual', self._hold_visual)
+
         input_topic = self.get_parameter("input_topic").value
         output_topic = self.get_parameter("output_topic").value
         self._publisher = self.create_publisher(Odometry, output_topic, 10)
@@ -37,7 +45,17 @@ class VslamCovarianceAdapter(Node):
             f"{input_topic} -> {output_topic}"
         )
 
+    def _hold_visual(self, request, response):
+        self._visual_held = True
+        self._source_pub.publish(String(data='WHEEL_IMU_ONLY: visual corrections held; odom not reset'))
+        response.success = True
+        response.message = 'Visual corrections disabled until next fresh mapping session'
+        self.get_logger().info(response.message)
+        return response
+
     def _callback(self, message):
+        if self._visual_held:
+            return
         output = deepcopy(message)
         position_variance = float(
             self.get_parameter("position_stddev_m").value

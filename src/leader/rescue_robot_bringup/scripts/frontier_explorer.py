@@ -48,6 +48,11 @@ class FrontierExplorer(Node):
         self.declare_parameter("map_stale_sec", 10.0)
         self.declare_parameter("robot_transform_stale_sec", 3.0)
         self.declare_parameter("maximum_step_distance_m", 0.60)
+        self.declare_parameter("checkpoint_detection", False)
+        self.checkpoint_detection = bool(self.get_parameter("checkpoint_detection").value)
+        self.detection_future = None
+        self.detection_waiting = False
+        self.detection_client = self.create_client(Trigger, "/leader/person_detector/checkpoint")
         self.declare_parameter("align_after_arrival", True)
         self.declare_parameter("dry_run", True)
         self.declare_parameter("area_width_m", 3.0)
@@ -58,6 +63,10 @@ class FrontierExplorer(Node):
         self.declare_parameter("goal_timeout_sec", 90.0)
         self.declare_parameter("failed_goal_exclusion_m", 1.0)
         self.declare_parameter("return_to_start", True)
+        self.declare_parameter("return_heading_offset_rad", math.pi)
+        self.return_heading_offset = float(self.get_parameter("return_heading_offset_rad").value)
+        if not math.isfinite(self.return_heading_offset):
+            raise ValueError("Return heading offset must be finite")
         self.declare_parameter("backup_action_name", "/backup")
         self.declare_parameter("backup_distance_m", 0.20)
         self.declare_parameter("backup_speed_mps", 0.05)
@@ -167,6 +176,12 @@ class FrontierExplorer(Node):
         self.goal_pending = False
         self.goal_active = False
         self.stopped = False
+        self.paused = False
+        self.completed_return = False
+        self.pause_stop_confirmed = False
+        self._pending_actions = set()
+        self._pending_selectors = set()
+        self.resume_target_pending = None
         self.no_frontier_since = None
         self.goal_number = max(0, len(self.visited_positions)-1)
         self.last_dry_goal = None
@@ -227,9 +242,13 @@ class FrontierExplorer(Node):
         request = SetParameters.Request()
         request.parameters = [Parameter("source_mode", value=source).to_parameter_msg()]
         future = self.selector_parameter_client.call_async(request)
-        future.add_done_callback(
-            lambda completed: self._on_command_source_result(completed, source, reason)
-        )
+        if not hasattr(self, "_pending_selectors"):
+            self._pending_selectors = set()
+        self._pending_selectors.add(future)
+        def received(completed):
+            self._pending_selectors.discard(completed)
+            self._on_command_source_result(completed, source, reason)
+        future.add_done_callback(received)
         return True
 
     def _on_command_source_result(self, future, source, reason):
@@ -240,7 +259,7 @@ class FrontierExplorer(Node):
                 f"Failed to set command selector to {source}: {exc}"
             )
             self._selector_enable_requested = False
-            if source == "NAV2":
+            if source == "NAV2" or getattr(self, "detection_waiting", False) or getattr(self, "paused", False):
                 self._stop("Could not acquire navigation command source")
             return
         if not results or not results[0].successful:
@@ -249,10 +268,16 @@ class FrontierExplorer(Node):
                 f"Command selector refused {source}: {detail}"
             )
             self._selector_enable_requested = False
-            if source == "NAV2":
+            if source == "NAV2" or getattr(self, "detection_waiting", False) or getattr(self, "paused", False):
                 self._stop("Command selector refused navigation ownership")
             return
         self.get_logger().info(f"Command selector set to {source}: {reason}")
+        if source == "STOP" and reason == "video outage pause" and getattr(self, "paused", False):
+            self.pause_stop_confirmed = True
+        if (source == "STOP" and reason == "stationary person detection"
+                and getattr(self, "detection_waiting", False) and not self.stopped):
+            self.detection_waiting = False
+            self.detection_future = self.detection_client.call_async(Trigger.Request())
         if source == "NAV2" and not self._nav2_goal_active:
             self._selector_enable_requested = False
             self._set_command_source(
@@ -419,7 +444,8 @@ class FrontierExplorer(Node):
         self.marker_pub.publish(markers)
 
     def _on_source_request(self, message):
-        if not self.dry_run and not self.stopped and message.data.upper() != "NAV2":
+        if not self.dry_run and (getattr(self, "paused", False) or
+                                 (not self.stopped and message.data.upper() != "NAV2")):
             self._stop("Operator changed command source; exploration stopped")
 
     def _stop_request(self, request, response):
@@ -428,8 +454,7 @@ class FrontierExplorer(Node):
         response.message = "Exploration stopped; restart the launch to explore again"
         return response
 
-    def _stop(self, reason):
-        self.stopped = True
+    def _cancel_motion(self, reason):
         self._nav2_goal_active = False
         if not self.dry_run:
             self._set_command_source("STOP", reason)
@@ -440,10 +465,79 @@ class FrontierExplorer(Node):
             for handle in (getattr(self, "path_handle", None), getattr(self, "orientation_handle", None)):
                 if handle is not None:
                     handle.cancel_goal_async()
+
+    def _stop(self, reason):
+        self.paused = False
+        self.stopped = True
+        self._cancel_motion(reason)
         self.status_pub.publish(String(data="STOPPED: " + reason))
         self.get_logger().warning(reason)
 
+    def _watch_action(self, future, callback, response=False):
+        # Drain old actions before resuming; a late acceptance must be cancelled.
+        if not hasattr(self, "_pending_actions"):
+            self._pending_actions = set()
+        self._pending_actions.add(future)
+        def finished(completed):
+            self._pending_actions.discard(completed)
+            if response and getattr(self, "paused", False):
+                try:
+                    handle = completed.result()
+                    if handle.accepted:
+                        self._watch_action(handle.get_result_async(), lambda _: None)
+                        handle.cancel_goal_async()
+                except Exception as error:
+                    self._stop(f"Could not drain paused action: {error}")
+                return
+            callback(completed)
+        future.add_done_callback(finished)
+
+    def _pause_for_video(self, reason):
+        if self.stopped:
+            return
+        self.resume_target_pending = None
+        if not self.returning_to_start:
+            if self.path_pending:
+                self.resume_target_pending = self.path_target
+            elif self.current_goal_xy is not None:
+                self.resume_target_pending = (*self.current_goal_xy, self.current_goal_yaw,
+                                              self.minimum_clearance, 0)
+        self.paused = True
+        self.stopped = True
+        self.pause_stop_confirmed = False
+        self._cancel_motion("video outage pause")
+        self.status_pub.publish(String(data="PAUSED_VIDEO: " + reason))
+        self.get_logger().warning("Waiting for live inputs to recover: " + reason)
+
+    def _pause_actions_settled(self):
+        detection = getattr(self, "detection_future", None)
+        return (self.pause_stop_confirmed and not self._pending_actions
+                and not self._pending_selectors
+                and (detection is None or detection.done()))
+
+    def _resume_after_video(self):
+        if not self.paused or not self._pause_actions_settled():
+            return False
+        # Preserve map, home, coverage, people registry and exploration progress.
+        self.goal_handle = self.path_handle = self.orientation_handle = self.backup_handle = None
+        self.goal_pending = self.goal_active = self.path_pending = False
+        self.detection_waiting = False
+        self.detection_future = None
+        self.retry_return_after_backup = self.stop_after_backup = False
+        self.retry_after = 0.0
+        self.no_frontier_since = None
+        self.no_frontier_reported = False
+        self.return_retry_pending = self.returning_to_start
+        self.paused = self.stopped = False
+        self.status_pub.publish(String(data="RESUMED: inputs stable; replanning from current pose"))
+        return True
+
+    def _return_heading(self):
+        yaw = self.start_pose[2] + getattr(self, "return_heading_offset", math.pi)
+        return math.atan2(math.sin(yaw), math.cos(yaw))
+
     def _complete(self, returned_to_start=False):
+        self.completed_return = returned_to_start
         # Completion means reachable goal-space coverage at the configured
         # clearance/resolution, not proof about unseen rooms behind obstacles.
         self.stopped = True
@@ -451,7 +545,9 @@ class FrontierExplorer(Node):
         if not self.dry_run:
             self._set_command_source("STOP", "reachable exploration goals covered")
         count = getattr(self, "successful_goal_count", max(0, len(self.visited_positions)-1))
-        return_text = "returned to start pose" if returned_to_start else "return to start disabled"
+        return_text = (f"returned to start position; final heading offset "
+                       f"{math.degrees(getattr(self, 'return_heading_offset', math.pi)):.0f} deg"
+                       if returned_to_start else "return to start disabled")
         text = (f"COMPLETE: {count} exploration goals reached; {return_text}; no eligible "
                 "frontier or unvisited observation point in the connected mapped space")
         self.status_pub.publish(String(data=text))
@@ -478,7 +574,7 @@ class FrontierExplorer(Node):
         self.goal_started_at = time.monotonic()
         self.path_target = target
         self.status_pub.publish(String(data="PLANNING_STEP: selecting a short waypoint on a Nav2 path"))
-        self.path_client.send_goal_async(request).add_done_callback(self._on_short_path_response)
+        self._watch_action(self.path_client.send_goal_async(request), self._on_short_path_response, response=True)
 
     def _on_short_path_response(self, future):
         try:
@@ -494,7 +590,7 @@ class FrontierExplorer(Node):
             self._short_path_failed("Planner rejected the path request")
             return
         self.path_handle = handle
-        handle.get_result_async().add_done_callback(self._on_short_path_result)
+        self._watch_action(handle.get_result_async(), self._on_short_path_result)
 
     def _short_path_failed(self, reason):
         self.path_pending = False
@@ -531,7 +627,7 @@ class FrontierExplorer(Node):
             clearance, size = self.path_target[3:]
             self.get_logger().info(f"Short step: ({x:.2f}, {y:.2f}); planned path step <= {self.maximum_step_distance:.2f}m")
             self._publish_markers(self.map_msg, [], (x, y, yaw, clearance, size))
-            arrival_yaw = self.start_pose[2] if self.returning_to_start and self.return_step_is_final else yaw
+            arrival_yaw = self._return_heading() if self.returning_to_start and self.return_step_is_final else yaw
             self._send_navigation_goal(x, y, yaw, clearance, size, arrival_yaw=arrival_yaw)
         except Exception as error:
             self._short_path_failed(f"Could not select a short path waypoint: {error}")
@@ -559,7 +655,7 @@ class FrontierExplorer(Node):
         self.goal_pending = True
         self.goal_started_at = time.monotonic()
         self.get_logger().info(f"Position reached; turning in place {math.degrees(angle):.1f} degrees")
-        self.orientation_client.send_goal_async(goal).add_done_callback(self._on_orientation_response)
+        self._watch_action(self.orientation_client.send_goal_async(goal), self._on_orientation_response, response=True)
 
     def _on_orientation_response(self, future):
         self.goal_pending = False
@@ -579,7 +675,7 @@ class FrontierExplorer(Node):
                 self._stop("Command selector unavailable for final rotation")
                 return
             self.status_pub.publish(String(data="ORIENTING: position reached; rotating in place"))
-            handle.get_result_async().add_done_callback(self._on_orientation_result)
+            self._watch_action(handle.get_result_async(), self._on_orientation_result)
         except Exception as error:
             self._stop(f"Could not start final rotation: {error}")
 
@@ -600,6 +696,43 @@ class FrontierExplorer(Node):
         self._finish_arrival()
 
     def _finish_arrival(self):
+        # Return transit is navigation only; observe at exploration stops.
+        if getattr(self, "checkpoint_detection", False) and not self.returning_to_start:
+            if self.stopped:
+                return
+            if not self.detection_client.service_is_ready():
+                self._stop("Checkpoint detector unavailable")
+                return
+            self.detection_waiting = True
+            self.detection_started_at = time.monotonic()
+            if not self._set_command_source("STOP", "stationary person detection"):
+                self._stop("Cannot stop for person detection")
+                return
+            self.status_pub.publish(String(data="DETECTING: checking 3 fresh frames at arrival"))
+            return
+        self._record_arrival()
+
+    def _poll_detection(self):
+        future = self.detection_future
+        if self.stopped:
+            return
+        if not future.done():
+            if time.monotonic() - self.detection_started_at > 15.0:
+                self._stop("Person detection response timed out")
+            return
+        self.detection_future = None
+        try:
+            result = future.result()
+            if not result.success:
+                self._stop(f"Person detection failed: {result.message}")
+                return
+        except Exception as error:
+            self._stop(f"Person detection failed: {error}")
+            return
+        self.get_logger().info(result.message)
+        self._record_arrival()
+
+    def _record_arrival(self):
         if self.returning_to_start:
             if not getattr(self, "return_step_is_final", True):
                 self.return_retry_pending = True
@@ -619,9 +752,11 @@ class FrontierExplorer(Node):
         if not self.action_client.server_is_ready():
             self.get_logger().warning("NavigateToPose is not ready; waiting before return to start")
             self.no_frontier_reported = False
+            self.return_retry_pending = True
             return
 
-        x, y, yaw = self.start_pose
+        x, y, _ = self.start_pose
+        yaw = self._return_heading()
         self.returning_to_start = True
         self.return_step_is_final = True
         try:
@@ -653,7 +788,7 @@ class FrontierExplorer(Node):
             f"Returning to exploration start: ({x:.2f}, {y:.2f}), yaw={yaw:.2f}"
         )
         future = self.action_client.send_goal_async(goal)
-        future.add_done_callback(self._on_goal_response)
+        self._watch_action(future, self._on_goal_response, response=True)
 
     def _start_collision_backup(self, resume_return=False):
         if not self.backup_client.server_is_ready():
@@ -682,7 +817,7 @@ class FrontierExplorer(Node):
         )
         self.status_pub.publish(String(data="BACKING_UP: checking reverse path with Nav2 costmap"))
         future = self.backup_client.send_goal_async(goal)
-        future.add_done_callback(self._on_backup_goal_response)
+        self._watch_action(future, self._on_backup_goal_response, response=True)
 
     def _on_backup_goal_response(self, future):
         self.goal_pending = False
@@ -704,7 +839,7 @@ class FrontierExplorer(Node):
         if not self._set_command_source("NAV2", "collision recovery backup accepted"):
             self._stop("Command selector unavailable for collision recovery")
             return
-        handle.get_result_async().add_done_callback(self._on_backup_goal_result)
+        self._watch_action(handle.get_result_async(), self._on_backup_goal_result)
 
     def _on_backup_goal_result(self, future):
         self.goal_active = False
@@ -758,6 +893,13 @@ class FrontierExplorer(Node):
     def _tick(self):
         if self.stopped or self.map_msg is None:
             return
+        if getattr(self, "detection_waiting", False):
+            if time.monotonic() - self.detection_started_at > 15.0:
+                self._stop("Timed out stopping for person detection")
+            return
+        if getattr(self, "detection_future", None) is not None:
+            self._poll_detection()
+            return
         if getattr(self, "path_pending", False):
             if time.monotonic()-self.goal_started_at > 15.0:
                 self._stop("Timed out computing a short navigation step")
@@ -775,7 +917,7 @@ class FrontierExplorer(Node):
             if time.monotonic() - self.map_received_at > self.map_stale_sec:
                 reason = ("Map became stale during return to start" if self.returning_to_start
                           else "Map became stale during navigation")
-                self._stop(reason)
+                self._pause_for_video(reason)
             elif time.monotonic() - self.goal_started_at > self.goal_timeout:
                 reason = ("Return-to-start navigation timed out" if self.returning_to_start
                           else "Frontier navigation timed out")
@@ -784,7 +926,7 @@ class FrontierExplorer(Node):
                 try:
                     self._robot_pose(self.map_frame)
                 except TransformException:
-                    self._stop("Robot transform unavailable during navigation")
+                    self._pause_for_video("Robot transform unavailable during navigation")
             return
         if time.monotonic() - self.map_received_at > self.map_stale_sec:
             self.get_logger().warning("DistanceMapSlice is stale; waiting for a fresh map")
@@ -814,6 +956,14 @@ class FrontierExplorer(Node):
                 f"area={self.area_height:.1f}m forward x {self.area_width:.1f}m wide, "
                 "start at rear-left corner"
             )
+
+        target = getattr(self, "resume_target_pending", None)
+        if target is not None:
+            if not self.path_client.server_is_ready():
+                return
+            self.resume_target_pending = None
+            self._request_short_path(target)
+            return
 
         clusters = self._unvisited_frontiers(
             self._find_frontier_clusters(msg, robot_x, robot_y))
@@ -898,7 +1048,7 @@ class FrontierExplorer(Node):
             f"{math.hypot(x - self.area_center[0], y - self.area_center[1]):.2f} m"
         )
         future = self.action_client.send_goal_async(goal_msg)
-        future.add_done_callback(self._on_goal_response)
+        self._watch_action(future, self._on_goal_response, response=True)
 
     def _on_goal_response(self, future):
         self.goal_pending = False
@@ -929,7 +1079,7 @@ class FrontierExplorer(Node):
         else:
             self.status_pub.publish(String(data=f"NAVIGATING: frontier {self.goal_number}"))
             self.get_logger().info(f"Frontier {self.goal_number} accepted by Nav2")
-        handle.get_result_async().add_done_callback(self._on_goal_result)
+        self._watch_action(handle.get_result_async(), self._on_goal_result)
 
     def _on_goal_result(self, future):
         self.goal_active = False

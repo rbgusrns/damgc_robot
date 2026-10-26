@@ -10,6 +10,7 @@ install(DIRECTORY rviz DESTINATION share/${PROJECT_NAME})
 install(PROGRAMS
   scripts/mapping_mode_manager.py
   scripts/imu_gyro_calibration.py
+  scripts/delivery_slice.py
   scripts/nvblox_slice_map.py
   scripts/depth_obstacle_scan.py
   scripts/arrow_key_teleop.py

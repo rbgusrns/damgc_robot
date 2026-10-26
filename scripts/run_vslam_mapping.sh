@@ -231,6 +231,10 @@ cleanup() {
     stop_container_process "${CONTAINER_AUTO_PID_FILE}" INT
   fi
 
+  if [[ -n "${CHECKPOINT_CONTAINER_NAME:-}" ]]; then
+    docker stop --time 3 "${CHECKPOINT_CONTAINER_NAME}" >/dev/null 2>&1 || true
+  fi
+
   # Let rosbag receive a clean SIGINT and write metadata before its topics or
   # container disappear.
   if (( BAG_STARTED )) && is_container_running; then
@@ -519,6 +523,7 @@ docker exec -d -u "${CONTAINER_USER}" \
   -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
   -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
   -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
+  -e DAMGC_SOLO_DELIVERY="${MAPPING_SOLO_DELIVERY:-0}" \
   -e DAMGC_MAPPING_MANUAL_ONLY="${MAPPING_MANUAL_ONLY}" \
   -e DAMGC_COOPERATIVE_ON_STARTUP="${MAPPING_COOPERATIVE_ON_STARTUP}" \
   -e DAMGC_MAPPING_RUN_ID="${RUN_ID}" \
@@ -721,10 +726,31 @@ else
 fi
 
 if [[ "${MAPPING_AUTOMATIC_EXPLORATION}" == "1" ]]; then
-  printf '[7/7] Automatic map-only mission: verify live inputs, scan, explore and return. Ctrl-C stops.\n'
+  if [[ "${MAPPING_CHECKPOINT_DETECTION:-0}" == "1" ]]; then
+    export CHECKPOINT_CONTAINER_NAME="damgc-survivor-detector-checkpoint-$$"
+    export DAMGC_REPO_ROOT="${REPO_ROOT}"
+    setsid bash -c '
+      set +u
+      source /opt/ros/humble/setup.bash
+      source "$DAMGC_REPO_ROOT/install/setup.bash"
+      exec ros2 launch "$DAMGC_REPO_ROOT/src/leader/rescue_robot_bringup/launch/checkpoint_survivor.launch.py"
+    ' >"${LOG_DIR}/checkpoint_survivor.log" 2>&1 &
+    HOST_PIDS+=("$!")
+  fi
+  if [[ "${MAPPING_SOLO_DELIVERY:-0}" == "1" ]]; then
+    setsid bash -c '
+      source /opt/ros/humble/setup.bash
+      source "$DAMGC_REPO_ROOT/install/setup.bash"
+      exec python3 "$DAMGC_REPO_ROOT/scripts/solo_grasp_host.py"
+    ' >"${LOG_DIR}/solo_grasp.log" 2>&1 &
+    HOST_PIDS+=("$!")
+  fi
+  printf '[7/7] Automatic mapping mission: verify live inputs, scan, explore and return. Ctrl-C stops.\n'
   docker exec -u "${CONTAINER_USER}" \
     -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
     -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
+    -e MAPPING_SOLO_DELIVERY="${MAPPING_SOLO_DELIVERY:-0}" \
+    -e MAPPING_CHECKPOINT_DETECTION="${MAPPING_CHECKPOINT_DETECTION:-0}" \
     -e MAPPING_START_POSE_FILE="${MAPPING_START_POSE_FILE:-}" \
     "${CONTAINER_NAME}" setsid --wait bash -lc '
       source /opt/ros/humble/setup.bash

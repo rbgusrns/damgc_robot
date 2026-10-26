@@ -424,3 +424,75 @@ def test_worker_rate_limit_skips_burst_frames_and_processes_a_newer_frame(monkey
     monkeypatch.setattr(detector_module.time, 'monotonic', lambda: next(clock))
     detector_module.PersonDetectorNode._worker_loop(harness)
     assert processed == [frames[0], frames[2]]
+
+
+def test_checkpoint_worker_processes_only_three_new_frames_and_idles():
+    from std_srvs.srv import Trigger
+    harness = SimpleNamespace(
+        _checkpoint_mode=True, _checkpoint_lock=threading.Lock(),
+        _checkpoint_remaining=0, _checkpoint_done=threading.Event(),
+        _checkpoint_started_ns=0, _checkpoint_busy=False, _checkpoint_failed=False,
+        _pending_image_lock=threading.Lock(), _pending_image=None,
+        _image_event=threading.Event(), _worker_shutdown=threading.Event(),
+        _inference_period_sec=0.001,
+        _stamp_to_nanoseconds=detector_module.PersonDetectorNode._stamp_to_nanoseconds,
+        _image_callback=Mock(return_value=True))
+    enqueue = lambda msg: detector_module.PersonDetectorNode._enqueue_image_callback(harness, msg)
+    worker = threading.Thread(target=detector_module.PersonDetectorNode._worker_loop, args=(harness,))
+    worker.start()
+    response = Trigger.Response()
+    request = threading.Thread(target=detector_module.PersonDetectorNode._checkpoint_request,
+                               args=(harness, Trigger.Request(), response))
+    try:
+        enqueue(stamped_image(time.time_ns() // 1_000_000))
+        time.sleep(0.02)
+        harness._image_callback.assert_not_called()
+        request.start()
+        deadline = time.monotonic() + 1
+        while not harness._checkpoint_busy and time.monotonic() < deadline:
+            time.sleep(0.001)
+        # Frames captured before the request must never count.
+        enqueue(stamped_image(harness._checkpoint_started_ns // 1_000_000 - 1))
+        time.sleep(0.02)
+        harness._image_callback.assert_not_called()
+        for count in range(1, 4):
+            enqueue(stamped_image(time.time_ns() // 1_000_000))
+            deadline = time.monotonic() + 1
+            while harness._image_callback.call_count < count and time.monotonic() < deadline:
+                time.sleep(0.002)
+            assert harness._image_callback.call_count == count
+            time.sleep(0.005)
+        request.join(timeout=1)
+        assert not request.is_alive()
+        assert response.success
+        for _ in range(10):
+            enqueue(stamped_image(time.time_ns() // 1_000_000))
+        time.sleep(0.02)
+        assert harness._image_callback.call_count == 3
+    finally:
+        harness._worker_shutdown.set()
+        harness._image_event.set()
+        harness._checkpoint_done.set()
+        worker.join(timeout=1)
+        if request.ident:
+            request.join(timeout=1)
+
+
+def test_checkpoint_timeout_and_overlap_are_not_reported_as_empty_success():
+    from std_srvs.srv import Trigger
+    harness = SimpleNamespace(
+        _checkpoint_mode=True, _checkpoint_lock=threading.Lock(),
+        _checkpoint_remaining=0, _checkpoint_done=Mock(),
+        _checkpoint_started_ns=0, _checkpoint_busy=False, _checkpoint_failed=False,
+        _worker_shutdown=threading.Event())
+    harness._checkpoint_done.wait.return_value = False
+    response = detector_module.PersonDetectorNode._checkpoint_request(
+        harness, Trigger.Request(), Trigger.Response())
+    assert not response.success
+    assert harness._checkpoint_remaining == 0
+    assert not harness._checkpoint_busy
+    harness._checkpoint_busy = True
+    response = detector_module.PersonDetectorNode._checkpoint_request(
+        harness, Trigger.Request(), Trigger.Response())
+    assert not response.success
+    assert 'already active' in response.message

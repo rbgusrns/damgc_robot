@@ -18,6 +18,8 @@ def generate_launch_description():
     params_file = LaunchConfiguration("params_file")
     tree_file = os.path.join(config_dir, "navigate_to_pose_nvblox.xml")
     through_tree_file = os.path.join(config_dir, "navigate_through_poses_nvblox.xml")
+    solo_delivery = os.environ.get('DAMGC_SOLO_DELIVERY') == '1'
+    slice_remap = [('/nvblox_node/static_map_slice', '/mapping/navigation_slice')] if solo_delivery else []
     nodes = [
         DeclareLaunchArgument("params_file", default_value=default_params_file),
         DeclareLaunchArgument("costmap_alias", default_value="true"),
@@ -34,6 +36,7 @@ def generate_launch_description():
             name="planner_server",
             output="screen",
             parameters=[params_file],
+            remappings=slice_remap,
         ),
         Node(
             package="nav2_controller",
@@ -41,7 +44,7 @@ def generate_launch_description():
             name="controller_server",
             output="screen",
             parameters=[params_file],
-            remappings=[("cmd_vel", "/nav2/cmd_vel")],
+            remappings=[("cmd_vel", "/nav2/cmd_vel")] + slice_remap,
         ),
         Node(
             package="nav2_behaviors",
@@ -49,7 +52,7 @@ def generate_launch_description():
             name="behavior_server",
             output="screen",
             parameters=[params_file],
-            remappings=[("cmd_vel", "/nav2/cmd_vel")],
+            remappings=[("cmd_vel", "/nav2/cmd_vel")] + slice_remap,
         ),
         Node(
             package="nav2_bt_navigator",
@@ -79,4 +82,7 @@ def generate_launch_description():
             }],
         ),
     ]
+    if solo_delivery:
+        nodes.insert(2, Node(package='rescue_robot_bringup', executable='delivery_slice.py',
+                             output='screen'))
     return LaunchDescription(nodes)

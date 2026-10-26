@@ -424,3 +424,21 @@ def test_reset_clears_all_state_and_restarts_public_id_at_one():
 def test_invalid_configuration_is_rejected(overrides):
     with pytest.raises(ValueError):
         RegistryConfig(**overrides)
+
+
+def test_checkpoint_three_hits_persist_between_navigation_stops():
+    registry = SurvivorRegistry(RegistryConfig(
+        confirm_min_hits=3, confirm_min_duration_sec=0.0,
+        tentative_max_gap_sec=12.0))
+    observe(registry, 1.0, position(3.0))
+    observe(registry, 1.5, position(3.0))
+    assert not registry.snapshots()
+    observe(registry, 2.0, position(3.0))
+    confirmed = registry.snapshots()[0]
+    registry.advance_time(30 * SECOND)
+    retained = registry.snapshots()[0]
+    assert retained.survivor_id == confirmed.survivor_id
+    assert retained.filtered_position == confirmed.filtered_position
+    observe(registry, 31.0, position(3.05))
+    assert len(registry.snapshots()) == 1
+    assert registry.snapshots()[0].survivor_id == confirmed.survivor_id
