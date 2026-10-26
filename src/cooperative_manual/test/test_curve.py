@@ -109,3 +109,56 @@ def test_straight_return_produces_reverse_follower_motion():
     out=follower.output(Pose2D(.62,0.,math.pi),.02,.1)
     assert -.04<=out.linear<0.
     assert abs(out.angular)<1e-8
+
+def test_follower_output_smooths_encoder_zero_pulses_and_stops_immediately():
+    from cooperative_manual.curve import FollowerSmoother,CurveOutput
+    smoother=FollowerSmoother()
+    previous=CurveOutput(0.,0.)
+    for i in range(200):
+        result=smoother.step(-.02,.04 if i%2 else 0.,.02,
+            lambda speed:CurveOutput(abs(speed),abs(speed)*2))
+        assert abs(result.linear-previous.linear)<=.000400001
+        assert abs(result.angular-previous.angular)<=.000800001
+        if i>50:assert result.linear>.005
+        previous=result
+    result=smoother.step(0.,.04,.02,lambda speed:CurveOutput(.04,.08))
+    assert result.linear==result.angular==0.
+    assert smoother.measured==0.
+
+
+def test_backward_straight_trail_and_signed_smoothing():
+    from cooperative_manual.curve import LeaderTrail,FollowerTrail,FollowerSmoother,CurveOutput,neutral_follower_pose
+    from cooperative_transport.motion import Pose2D
+    leader=LeaderTrail();leader.begin(Pose2D(0.,0.,0.))
+    follower=FollowerTrail();origin=neutral_follower_pose(Pose2D(0.,0.,0.),leader.geometry)
+    follower.reset(origin)
+    for i in range(1,21):leader.add(Pose2D(i*.005,0.,0.))
+    follower.receive(leader.packet('test'),1.)
+    assert follower.path[-1].x>origin.x+.09
+    assert follower.output(origin,.02,1.).linear<0
+    smoother=FollowerSmoother()
+    for _ in range(10):result=smoother.step(-.02,.02,.02,lambda v:CurveOutput(-v,0.))
+    assert result.linear<0
+
+
+def test_stationary_encoder_noise_does_not_start_follower():
+    from cooperative_manual.curve import FollowerSmoother,CurveOutput
+    smoother=FollowerSmoother()
+    for i in range(300):
+        result=smoother.step(.003,.0005 if i%2 else 0.,.02,
+            lambda v:CurveOutput(.02 if abs(v)>0 else 0.,0.))
+        assert result.linear==result.angular==0.
+
+
+def test_follower_acceleration_changes_gradually_with_step_corrections():
+    from cooperative_manual.curve import FollowerSmoother,CurveOutput
+    smoother=FollowerSmoother();last_v=last_a=0.
+    for i in range(500):
+        target=.03 if (i//50)%2==0 else .003
+        result=smoother.step(.02,.02,.02,lambda v:CurveOutput(target,0.))
+        acceleration=(result.linear-last_v)/.02
+        assert abs(acceleration)<=.01200001
+        assert abs(acceleration-last_a)<=.00080001
+        last_v,last_a=result.linear,acceleration
+    result=smoother.step(0.,.02,.02,lambda v:CurveOutput(.02,0.))
+    assert result.linear==result.angular==0.
