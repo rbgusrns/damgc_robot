@@ -24,6 +24,7 @@ install(PROGRAMS
 
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_paired_grasp test/test_paired_grasp.py)
   ament_add_pytest_test(
     test_leader_apriltag_drive_launch
     test/test_leader_apriltag_drive_launch.py

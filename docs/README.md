@@ -5,6 +5,9 @@
 
 ## 먼저 읽을 문서
 
+- [양쪽 자동 집기](PAIRED_GRASP_20261027.md) — 리더 시작 신호로 양쪽 태그 접근·집기, 양쪽 DONE 확인
+- [수동 직선 협동운반](MANUAL_STRAIGHT_TRANSPORT_HANDOFF.md) — cooperative_manual 설정·전용 키보드·정지 절차
+
 - [리더 단독 자동 집기 실기 결과](LEADER_GRASP_DEMO_2026-10-27.md) — 시작 서비스 한 번으로 태그 인식·20cm 접근·477 집기·DONE, 실행 및 취소 명령
 - [리더 그리퍼 보정값](LEADER_GRIPPER_CALIBRATION_2026-10-27.md) — 리더 RX-28 ID2, 열림1000·집기477 보정
 
