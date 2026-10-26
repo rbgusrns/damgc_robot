@@ -1,6 +1,6 @@
 """Persistent survivor registry ROS 2 wrapper."""
 
-from math import isfinite
+from math import hypot, isfinite
 import threading
 
 from geometry_msgs.msg import PoseArray
@@ -73,6 +73,12 @@ class SurvivorRegistryNode(Node):
         self._input_topic = str(self.declare_parameter(
             "input_topic", "/leader/survivor/map_positions"
         ).value).strip()
+        self._camera_positions_topic = str(self.declare_parameter(
+            "camera_positions_topic", "/leader/survivor/camera_positions"
+        ).value).strip()
+        self._near_confirm_distance_m = float(self.declare_parameter(
+            "near_confirm_distance_m", 2.0
+        ).value)
         self._tracks_topic = str(self.declare_parameter(
             "tracks_topic", "/leader/survivor/tracks"
         ).value).strip()
@@ -112,8 +118,16 @@ class SurvivorRegistryNode(Node):
 
         self._registry = SurvivorRegistry(config)
         self._registry_lock = threading.Lock()
+        self._camera_distances_lock = threading.Lock()
+        self._camera_distances_by_stamp = {}
         self._publisher = self.create_publisher(
             SurvivorTrackArray, self._tracks_topic, REGISTRY_QOS
+        )
+        self._camera_positions_subscription = self.create_subscription(
+            PoseArray,
+            self._camera_positions_topic,
+            self._camera_positions_callback,
+            POSITION_QOS,
         )
         self._subscription = self.create_subscription(
             PoseArray,
@@ -129,12 +143,15 @@ class SurvivorRegistryNode(Node):
         )
         self.get_logger().info(
             f"Registering {self._input_topic} on {self._tracks_topic} "
-            f"in {self._map_frame}; reset: {self._reset_service_name}"
+            f"in {self._map_frame}; one-hit range: "
+            f"{self._near_confirm_distance_m:.2f} m; "
+            f"reset: {self._reset_service_name}"
         )
 
     def _validate_ros_parameters(self):
         if not all((
             self._input_topic,
+            self._camera_positions_topic,
             self._tracks_topic,
             self._reset_service_name,
             self._map_frame,
@@ -143,12 +160,41 @@ class SurvivorRegistryNode(Node):
         if self._input_topic == self._tracks_topic:
             raise ValueError("input_topic and tracks_topic must differ")
         if (
+            not isfinite(self._near_confirm_distance_m)
+            or self._near_confirm_distance_m <= 0.0
+        ):
+            raise ValueError(
+                "near_confirm_distance_m must be finite and positive"
+            )
+        if (
             not isfinite(self._registry_publish_hz)
             or self._registry_publish_hz <= 0.0
         ):
             raise ValueError(
                 "registry_publish_hz must be finite and positive"
             )
+
+    @staticmethod
+    def _message_stamp_ns(message):
+        stamp = message.header.stamp
+        return stamp.sec * 1_000_000_000 + stamp.nanosec
+
+    def _camera_positions_callback(self, message):
+        stamp_ns = self._message_stamp_ns(message)
+        if stamp_ns <= 0:
+            return
+        distances = tuple(
+            hypot(hypot(pose.position.x, pose.position.y), pose.position.z)
+            if all(isfinite(value) for value in (
+                pose.position.x, pose.position.y, pose.position.z,
+            )) else None
+            for pose in message.poses
+        )
+        with self._camera_distances_lock:
+            self._camera_distances_by_stamp[stamp_ns] = distances
+            if len(self._camera_distances_by_stamp) > 32:
+                for old_stamp in sorted(self._camera_distances_by_stamp)[:-32]:
+                    del self._camera_distances_by_stamp[old_stamp]
 
     def _positions_callback(self, message):
         frame_id = message.header.frame_id.strip()
@@ -167,7 +213,7 @@ class SurvivorRegistryNode(Node):
         ):
             self._warn("Skipping map positions with an invalid timestamp")
             return
-        timestamp_ns = stamp.sec * 1_000_000_000 + stamp.nanosec
+        timestamp_ns = self._message_stamp_ns(message)
         detections = tuple(
             Position3D(
                 pose.position.x,
@@ -176,9 +222,23 @@ class SurvivorRegistryNode(Node):
             )
             for pose in message.poses
         )
+        with self._camera_distances_lock:
+            camera_distances = self._camera_distances_by_stamp.pop(
+                timestamp_ns, ()
+            )
+        immediate_detection_indices = tuple(
+            index
+            for index, distance in enumerate(camera_distances)
+            if distance is not None
+            and distance <= self._near_confirm_distance_m
+        )
         now = self.get_clock().now()
         with self._registry_lock:
-            result = self._registry.update(detections, timestamp_ns)
+            result = self._registry.update(
+                detections,
+                timestamp_ns,
+                immediate_detection_indices=immediate_detection_indices,
+            )
             if not result.accepted:
                 self._warn(
                     "Skipping duplicate or out-of-order map positions"

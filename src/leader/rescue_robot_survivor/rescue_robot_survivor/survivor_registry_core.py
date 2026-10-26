@@ -158,13 +158,27 @@ class SurvivorRegistry:
         self,
         detections: Iterable[Position3D],
         timestamp_ns: int,
+        immediate_detection_indices: Iterable[int] = (),
     ) -> UpdateResult:
-        """Validate and associate one timestamped detection array."""
+        """Validate and associate one timestamped detection array.
+
+        Detection indices in ``immediate_detection_indices`` are promoted on
+        their first observation. The ROS wrapper uses this for close-range
+        detections with a valid depth estimate.
+        """
         detection_list = tuple(detections)
-        valid_detections = tuple(
-            detection for detection in detection_list
+        valid_pairs = tuple(
+            (index, detection)
+            for index, detection in enumerate(detection_list)
             if isinstance(detection, Position3D) and detection.is_finite
         )
+        valid_detections = tuple(detection for _, detection in valid_pairs)
+        immediate_indices = set(immediate_detection_indices)
+        immediate_valid_indices = {
+            valid_index
+            for valid_index, (source_index, _) in enumerate(valid_pairs)
+            if source_index in immediate_indices
+        }
         invalid_count = len(detection_list) - len(valid_detections)
         if not self._valid_timestamp(timestamp_ns):
             return UpdateResult(False, 0, invalid_count)
@@ -176,6 +190,7 @@ class SurvivorRegistry:
 
         self.advance_time(timestamp_ns)
         unmatched = set(range(len(valid_detections)))
+        force_promote = set()
 
         confirmed_matches = self._match_confirmed(
             valid_detections, unmatched
@@ -193,6 +208,8 @@ class SurvivorRegistry:
             self._update_tentative(
                 track, valid_detections[detection_index], timestamp_ns
             )
+            if detection_index in immediate_valid_indices:
+                force_promote.add(track.internal_id)
             unmatched.remove(detection_index)
 
         for detection_index in sorted(
@@ -201,11 +218,13 @@ class SurvivorRegistry:
                 valid_detections[index], index
             ),
         ):
-            self._create_tentative(
+            internal_id = self._create_tentative(
                 valid_detections[detection_index], timestamp_ns
             )
+            if detection_index in immediate_valid_indices:
+                force_promote.add(internal_id)
 
-        self._promote_confirmed()
+        self._promote_confirmed(force_promote)
         self._last_input_stamp_ns = timestamp_ns
         return UpdateResult(
             True, len(valid_detections), invalid_count
@@ -342,7 +361,7 @@ class SurvivorRegistry:
 
     def _create_tentative(
         self, detection: Position3D, timestamp_ns: int
-    ) -> None:
+    ) -> int:
         internal_id = self._next_tentative_id
         self._next_tentative_id += 1
         self._tentative_tracks[internal_id] = _TentativeTrack(
@@ -352,18 +371,23 @@ class SurvivorRegistry:
             first_seen_ns=timestamp_ns,
             last_seen_ns=timestamp_ns,
         )
+        return internal_id
 
-    def _promote_confirmed(self) -> None:
+    def _promote_confirmed(self, force_internal_ids=()) -> None:
         minimum_duration_ns = self._seconds_to_ns(
             self._config.confirm_min_duration_sec
         )
+        force_internal_ids = set(force_internal_ids)
         ready = sorted(
             (
                 track for track in self._tentative_tracks.values()
                 if (
-                    track.hit_count >= self._config.confirm_min_hits
-                    and track.last_seen_ns - track.first_seen_ns
-                    >= minimum_duration_ns
+                    track.internal_id in force_internal_ids
+                    or (
+                        track.hit_count >= self._config.confirm_min_hits
+                        and track.last_seen_ns - track.first_seen_ns
+                        >= minimum_duration_ns
+                    )
                 )
             ),
             key=lambda track: track.internal_id,

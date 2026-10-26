@@ -14,6 +14,7 @@ install(PROGRAMS
   scripts/depth_obstacle_scan.py
   scripts/arrow_key_teleop.py
   scripts/costmap_topic_alias.py
+  scripts/frontier_search.py
   scripts/frontier_explorer.py
   scripts/initial_map_scan.py
   scripts/robot_self_filter.py
@@ -43,6 +44,7 @@ if(BUILD_TESTING)
     test_robot_self_filter
     test/test_robot_self_filter.py
   )
+  ament_add_pytest_test(test_frontier_search test/test_frontier_search.py)
   ament_add_pytest_test(
     test_frontier_explorer_goal_gate
     test/test_frontier_explorer_goal_gate.py

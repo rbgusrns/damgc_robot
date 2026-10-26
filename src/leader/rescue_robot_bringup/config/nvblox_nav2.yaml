@@ -5,7 +5,7 @@ bt_navigator:
     robot_base_frame: base_link
     odom_topic: /leader/odometry/local
     # Goal acknowledgement can be delayed by stereo/3D mapping load. Units: ms.
-    default_server_timeout: 1000
+    default_server_timeout: 5000
     bt_loop_duration: 50
     plugin_lib_names:
       - nav2_compute_path_to_pose_action_bt_node
@@ -33,7 +33,8 @@ planner_server:
       reverse_penalty: 1.5
       change_penalty: 0.2
       non_straight_penalty: 1.2
-      cost_penalty: 2.0
+      # Prefer the low-cost middle of the broad inflation field.
+      cost_penalty: 3.5
       analytic_expansion_ratio: 3.5
       analytic_expansion_max_length: 1.0
 
@@ -43,7 +44,7 @@ controller_server:
     controller_frequency: 10.0
     odom_topic: /leader/odometry/local
     # Goal acknowledgement can be delayed by stereo/3D mapping load. Units: ms.
-    default_server_timeout: 1000
+    default_server_timeout: 5000
     bt_loop_duration: 50
     progress_checker_plugin: progress_checker
     goal_checker_plugins: [general_goal_checker]
@@ -74,9 +75,9 @@ controller_server:
       regulated_linear_scaling_min_radius: 0.50
       regulated_linear_scaling_min_speed: 0.05
       use_cost_regulated_linear_velocity_scaling: true
-      cost_scaling_dist: 0.30
+      cost_scaling_dist: 0.45
       cost_scaling_gain: 0.50
-      inflation_cost_scaling_factor: 10.0
+      inflation_cost_scaling_factor: 3.0
       rotate_to_heading_min_angle: 0.785
       rotate_to_heading_angular_vel: 0.20
       max_angular_accel: 0.30
@@ -117,7 +118,7 @@ global_costmap:
       publish_frequency: 1.0
       transform_tolerance: 0.3
       footprint: "[[-0.060, -0.145], [0.060, -0.145], [0.3175, -0.070], [0.3175, 0.070], [0.060, 0.145], [-0.060, 0.145]]"
-      footprint_padding: 0.01
+      footprint_padding: 0.03
       plugins: [nvblox_layer, inflation_layer]
       nvblox_layer:
         plugin: nvblox::nav2::NvbloxCostmapLayer
@@ -128,8 +129,9 @@ global_costmap:
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
-        inflation_radius: 0.3
-        cost_scaling_factor: 10.0
+        # Broad, gradual costs keep the planner away from aisle walls.
+        inflation_radius: 0.80
+        cost_scaling_factor: 3.0
 
 local_costmap:
   local_costmap:
@@ -146,7 +148,7 @@ local_costmap:
       always_send_full_costmap: true
       transform_tolerance: 0.3
       footprint: "[[-0.060, -0.145], [0.060, -0.145], [0.3175, -0.070], [0.3175, 0.070], [0.060, 0.145], [-0.060, 0.145]]"
-      footprint_padding: 0.01
+      footprint_padding: 0.03
       plugins: [nvblox_layer, inflation_layer]
       nvblox_layer:
         plugin: nvblox::nav2::NvbloxCostmapLayer
@@ -157,5 +159,6 @@ local_costmap:
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
-        inflation_radius: 0.3
-        cost_scaling_factor: 10.0
+        # Broad, gradual costs keep the planner away from aisle walls.
+        inflation_radius: 0.80
+        cost_scaling_factor: 3.0

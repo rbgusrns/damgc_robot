@@ -32,6 +32,7 @@ def generate_launch_description():
         "association_radius_m",
         "reassociation_radius_m",
         "confirm_min_duration_sec",
+        "near_confirm_distance_m",
         "tentative_max_gap_sec",
         "visible_timeout_sec",
         "position_ema_alpha",

@@ -111,11 +111,10 @@ RViz를 이미 실행 중이었다면 변경된 `vslam_nvblox.rviz` 파일로 �
 
 미지 공간 탐색은 먼저 자동 주행을 끄고 목표 선택을 화면에서 확인한다.
 다음 launch는 매핑 중인 slice의 프론티어 후보(청록색), 자동 선택 후보(빨간 화살표),
-시작점 기준 2m 경계(초록색)를 표시한다. `dry_run` 기본값은 `true`라 자동 목표를
+선택한 탐색 목표를 표시한다. 기본값은 범위 제한이 없으며, 사각형/반경을 지정하면 초록 경계도 표시한다. `dry_run` 기본값은 `true`라 자동 목표를
 Nav2에 보내지 않는다. RViz의 `Nav2 Goal` 도구로 클릭한 목표는 경로와 계획을
-확인할 수 있다. 클릭한 목표가 활성화되면 frontier explorer가 selector를 `NAV2`로
-전환해 로봇을 움직이고, 액션이 성공·취소·실패로 끝나면 selector가 자동으로 `STOP`으로
-돌아간다. `dry_run`은 frontier 자동 목표에만 적용되며 RViz에서 클릭한 목표는 주행한다.
+확인할 수 있다. 클릭한 목표의 주행 source 전환과 종료 시 정지는 command selector가
+담당한다. 탐색 노드는 자신이 보낸 목표만 관리한다. `dry_run`은 frontier 자동 목표에만 적용되며 RViz에서 클릭한 목표는 주행한다.
 RealSense depth의 `clip_distance`는 기본 4m다. 멀리 있는 depth를 nvblox 입력에서
 제외해 맵에 적분하는 점과 맵 메모리, GPU 작업량을 줄이는 데 도움이 된다. 카메라의
 해상도와 프레임 발행량은 그대로이고, VSLAM은 이 설정의 영향을 받지 않는 infrared
@@ -282,8 +281,8 @@ toolbar의 **Nav2 Goal**을 누르고 알려진 자유 공간을 클릭한 뒤 �
 정하고 놓으면 주행을 시작한다. 자동 frontier 주행은 launch 기본값 `dry_run:=true`로
 미리보기만 한다.
 
-`frontier_explorer`는 action status에서 새 목표가 accepted/executing 상태가 된 것을
-확인한 다음 `/leader/command_selector`의 `source_mode`를 `NAV2`로 전환한다. 목표가
+`leader_command_selector`는 `enable_nav2_goal_selection=true`일 때 action status에서
+새 목표가 accepted/executing 상태가 된 것을 확인하고 `NAV2`로 전환한다. 목표가
 성공, 취소, abort되면 selector가 `STOP`으로 바뀌고 캐시된 속도 명령을 지운다.
 따라서 클릭 전에는 정지 상태이고, 한 번 클릭한 목표가 끝난 뒤에는 다음 목표를
 다시 클릭해야 한다. 처음에는 주변 costmap이 자유 공간으로 보이는 가까운 점을 고르고,
@@ -533,3 +532,18 @@ space로 중단됐으나, 수동 위치 조정 후 현재 odom (-0.44, -0.32)에
 진행 중 남은 FollowPath 목표를 취소하고 BT navigator만 deactivate/cleanup/
 configure/activate해 실행에 반영했다. 매핑은 유지했다. 이 설정은 목표 접수
 대기시간이며 장애물 충돌 판정이나 실제 경로 추종 성공을 보장하는 변경은 아니다.
+
+
+### 3×4m 공간의 자동 탐색 (2026-10-26)
+
+매핑을 먼저 실행한 상태에서 아래 launch를 별도 터미널에서 사용한다.
+전체 절차와 범위 배치는 [자율 탐색 실행 가이드](AUTONOMOUS_EXPLORATION.md)를 참고한다.
+
+```bash
+ros2 launch rescue_robot_bringup frontier_exploration.launch.py dry_run:=true start_rviz:=true
+```
+
+현재 로봇 위치에서 clearance를 만족하는 free cell이 사방으로 연결된 영역만 탐색한다.
+미리보기는 지도에 맞춰 계속 갱신된다. 시작 cell이 unknown/장애물 근처라 연결 영역을
+만들 수 없는 경우에는 목표를 생성하지 않는다. 후보 없음은 탐색 완료의 증거가 아니므로
+추가 관측을 기다린다. 실제 주행은 `dry_run:=false`로 다시 실행한다.

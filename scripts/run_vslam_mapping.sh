@@ -55,9 +55,15 @@ VSLAM_ONLY="${VSLAM_ONLY:-0}"
 SELF_FILTER_ENABLED="${SELF_FILTER_ENABLED:-1}"
 MAPPING_SOURCE_MODE="${MAPPING_SOURCE_MODE:-STOP}"
 MAPPING_INITIAL_SCAN="${MAPPING_INITIAL_SCAN:-0}"
+MAPPING_CAMERA_FPS="${MAPPING_CAMERA_FPS:-30}"
+if [[ "${MAPPING_CAMERA_FPS}" != "15" && "${MAPPING_CAMERA_FPS}" != "30" ]]; then
+  printf "MAPPING_CAMERA_FPS must be 15 or 30.\n" >&2
+  exit 1
+fi
 MAPPING_COOPERATIVE_ON_STARTUP="${MAPPING_COOPERATIVE_ON_STARTUP:-0}"
+MAPPING_MANUAL_ONLY="${MAPPING_MANUAL_ONLY:-0}"
 NAV2_GOAL_SELECTION_ARG="true"
-if [[ "${MAPPING_COOPERATIVE_ON_STARTUP}" == "1" ]]; then NAV2_GOAL_SELECTION_ARG="false"; fi
+if [[ "${MAPPING_COOPERATIVE_ON_STARTUP}" == "1" || "${MAPPING_MANUAL_ONLY}" == "1" ]]; then NAV2_GOAL_SELECTION_ARG="false"; fi
 HOST_XAUTHORITY="${XAUTHORITY:-/run/user/${UID}/gdm/Xauthority}"
 DEPTH_CLIP_DISTANCE_M="${DEPTH_CLIP_DISTANCE_M:-4.0}"
 STM32_I2C_DEVICE="${STM32_I2C_DEVICE:-/dev/i2c-7}"
@@ -93,6 +99,10 @@ if [[ "${MAPPING_SOURCE_MODE}" != "STOP" && \
 fi
 if [[ "${MAPPING_COOPERATIVE_ON_STARTUP}" != "0" && "${MAPPING_COOPERATIVE_ON_STARTUP}" != "1" ]]; then
   printf "MAPPING_COOPERATIVE_ON_STARTUP must be 0 or 1.\n" >&2
+  exit 1
+fi
+if [[ "${MAPPING_MANUAL_ONLY}" != "0" && "${MAPPING_MANUAL_ONLY}" != "1" ]]; then
+  printf "MAPPING_MANUAL_ONLY must be 0 or 1.\n" >&2
   exit 1
 fi
 STM32_I2C_WRITE_ARG="false"
@@ -160,6 +170,10 @@ finalize_bag() {
   done
 
   if [[ -f "${BAG_DIR}/metadata.yaml" ]]; then
+    if [[ "${MAPPING_SKIP_ANALYSIS:-0}" == "1" ]]; then
+      printf 'Bag saved; deferred trajectory analysis: %s\n' "${BAG_DIR}"
+      return
+    fi
     printf 'Analyzing recorded trajectories...\n'
     docker exec -u "${CONTAINER_USER}" \
       -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" \
@@ -326,6 +340,9 @@ setsid bash -lc "
     camera_namespace:=leader camera_name:=camera \\
     enable_color:=true enable_depth:=true \\
     enable_infra:=true enable_infra1:=true enable_infra2:=true \\
+    depth_module.depth_profile:=848x480x'${MAPPING_CAMERA_FPS}' \\
+    depth_module.infra_profile:=848x480x'${MAPPING_CAMERA_FPS}' \\
+    rgb_camera.color_profile:=640x480x'${MAPPING_CAMERA_FPS}' \\
     enable_sync:=true align_depth.enable:=true \\
     clip_distance:='${DEPTH_CLIP_DISTANCE_M}' \\
     enable_gyro:=false enable_accel:=false \\
@@ -451,6 +468,7 @@ docker exec -d -u "${CONTAINER_USER}" \
   -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
   -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
   -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
+  -e DAMGC_MAPPING_MANUAL_ONLY="${MAPPING_MANUAL_ONLY}" \
   -e DAMGC_COOPERATIVE_ON_STARTUP="${MAPPING_COOPERATIVE_ON_STARTUP}" \
   -e DAMGC_MAPPING_RUN_ID="${RUN_ID}" \
   -e DAMGC_MAPPING_SNAPSHOT="${CONTAINER_SNAPSHOT}" \

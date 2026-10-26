@@ -35,3 +35,15 @@ def test_bringup_declares_the_rpp_runtime_dependency():
 
     assert "nav2_regulated_pure_pursuit_controller" in dependencies
     assert "nav2_dwb_controller" not in dependencies
+
+
+def test_center_seeking_cost_field_matches_controller_distance_estimate():
+    config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    controller = config['controller_server']['ros__parameters']['FollowPath']
+    for name in ('local_costmap', 'global_costmap'):
+        inflation = config[name][name]['ros__parameters']['inflation_layer']
+        assert inflation['cost_scaling_factor'] == controller['inflation_cost_scaling_factor']
+        # A short 0.3m field has no gradient across the middle of a 1m aisle.
+        assert inflation['inflation_radius'] >= .60
+        assert inflation['cost_scaling_factor'] <= 5.
+    assert controller['use_collision_detection'] is True
