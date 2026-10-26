@@ -4,12 +4,14 @@ import io
 import json
 from pathlib import Path
 import sys
+import pytest
 from types import SimpleNamespace as NS
 
 ROOT=Path(__file__).resolve().parents[4]
 
 
-def test_post_return_components_and_host_rgb_are_started_in_order(tmp_path,monkeypatch):
+@pytest.mark.parametrize('checkpoint_only',[False,True])
+def test_post_return_components_and_host_rgb_are_started_in_order(tmp_path,monkeypatch,checkpoint_only):
     monkeypatch.syspath_prepend(str(ROOT/'scripts'))
     spec=importlib.util.spec_from_file_location('staged_supervisor',ROOT/'scripts/run_staged_solo_delivery.py')
     stage=importlib.util.module_from_spec(spec)
@@ -19,17 +21,22 @@ def test_post_return_components_and_host_rgb_are_started_in_order(tmp_path,monke
         patch.setattr(signal,'signal',lambda *args:None)
         spec.loader.exec_module(stage)
     log_dir=tmp_path/'vslam_mapping_fake';log_dir.mkdir()
+    monkeypatch.setattr(stage,'ROOT',tmp_path)
     calls=[];events=[];ticks=[0]
     class Process:
         def __init__(self,args,**kwargs):
             self.pid=100000+len(calls);self.args=args
             calls.append((args,kwargs));self.stdout=io.StringIO('Logs: '+str(log_dir)+'\n')
+            self.returncode=None
+            if 'scripts/mapping_snapshot.py save' in ' '.join(args):
+                snapshot=tmp_path/'data/maps'/log_dir.name;snapshot.mkdir(parents=True)
+                (snapshot/'manifest.json').write_text('{}');self.returncode=0;events.append('save')
             if 'solo_grasp_host.py' in ' '.join(args):
                 assert (log_dir/'return_context.json').exists();events.append('grasp_host')
             if 'realsense2_camera' in ' '.join(args):
                 assert (log_dir/'rgb_camera_requested').exists()
                 events.append('host_rgb');kwargs['stdout'].write('RealSense Node Is Up!\n')
-        def poll(self):return None
+        def poll(self):return self.returncode
         def wait(self,timeout=None):return 0
     class Thread:
         def __init__(self,target,**kwargs):self.target=target
@@ -40,6 +47,10 @@ def test_post_return_components_and_host_rgb_are_started_in_order(tmp_path,monke
             assert len(calls)==1
             (log_dir/'return_context.json').write_text(json.dumps({'returned':True}))
         elif ticks[0]==2:
+            if checkpoint_only:
+                assert events==['save']
+                assert (tmp_path/'data/maps/latest_mission').resolve()==tmp_path/'data/maps'/log_dir.name
+                stage.stop.set();return
             assert events==['grasp_host']
             (log_dir/'vision_stop_requested').touch();(log_dir/'rgb_camera_requested').touch()
         elif ticks[0]==3:
@@ -51,7 +62,10 @@ def test_post_return_components_and_host_rgb_are_started_in_order(tmp_path,monke
     monkeypatch.setattr(stage.threading,'Thread',Thread)
     monkeypatch.setattr(stage.time,'sleep',sleep)
     monkeypatch.setattr(stage.os,'killpg',lambda *args:None)
-    stage.main()
+    stage.main(checkpoint_only=checkpoint_only)
+    if checkpoint_only:
+        assert len(calls)==2 and events==['save']
+        return
     assert events==['grasp_host','host_rgb']
     assert len(calls)==5 # original mapping, grasp host, relay, coordinator, host RGB
     mapping_env=calls[0][1]['env']

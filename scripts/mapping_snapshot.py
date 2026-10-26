@@ -10,10 +10,15 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data, QoSProfile, DurabilityPolicy
 from nav_msgs.msg import Odometry, OccupancyGrid
 from nvblox_msgs.srv import FilePath
+from nvblox_msgs.msg import DistanceMapSlice
+from rescue_robot_interfaces.msg import SurvivorTrackArray
+from std_msgs.msg import String
+from rosidl_runtime_py.convert import message_to_ordereddict
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('operation', choices=['save', 'load'])
 parser.add_argument('directory')
+parser.add_argument('--mission-context')
 args = parser.parse_args()
 directory = Path(args.directory).resolve()
 rclpy.init()
@@ -22,6 +27,9 @@ pose = None
 grid = None
 stationary_since = None
 last_odom_received = None
+tracks = None
+nav_slice = None
+mode = None
 
 def odom(message):
     global pose, stationary_since, last_odom_received
@@ -37,8 +45,31 @@ def map_callback(message):
 node.create_subscription(Odometry, '/leader/odometry/local', odom, qos_profile_sensor_data)
 node.create_subscription(OccupancyGrid, '/mapping/projected_map', map_callback,
                          QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+def receive_tracks(message):
+    global tracks
+    tracks=message
+
+def receive_slice(message):
+    global nav_slice
+    nav_slice=message
+
+def receive_mode(message):
+    global mode
+    mode=message.data
+
+node.create_subscription(SurvivorTrackArray,'/leader/survivor/tracks',receive_tracks,
+                         QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL))
+node.create_subscription(DistanceMapSlice,'/nvblox_node/static_map_slice',receive_slice,qos_profile_sensor_data)
+node.create_subscription(String,'/leader/mapping/mode',receive_mode,
+                         QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL))
+control=node.create_publisher(String,'/leader/mapping/control',10)
 try:
     if args.operation == 'save':
+        context=None
+        if args.mission_context:
+            context=json.loads(Path(args.mission_context).read_text())
+            if not context.get('returned') or context.get('map_frame')!='odom':
+                raise RuntimeError('Mission checkpoint requires a completed odom-frame return')
         directory.mkdir(parents=True, exist_ok=False)
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
@@ -49,6 +80,19 @@ try:
             raise RuntimeError('Robot must be stationary with fresh local odometry')
         if pose.header.frame_id != 'odom':
             raise RuntimeError('Snapshot requires odom-frame pose')
+        if context is not None:
+            deadline=time.monotonic()+15
+            while time.monotonic()<deadline:
+                rclpy.spin_once(node,timeout_sec=.1)
+                if tracks is not None and nav_slice is not None:break
+            if tracks is None or tracks.header.frame_id!='odom' or nav_slice is None or nav_slice.header.frame_id!='odom':
+                raise RuntimeError('No matching survivor registry/navigation slice; checkpoint not committed')
+            while mode!='HOLD' and time.monotonic()<deadline:
+                control.publish(String(data='HOLD'));rclpy.spin_once(node,timeout_sec=.1)
+            if mode!='HOLD':raise RuntimeError('Map HOLD not acknowledged; checkpoint not committed')
+            # Let already-queued depth frames drain before recording the frozen view.
+            settle=time.monotonic()+2
+            while time.monotonic()<settle:rclpy.spin_once(node,timeout_sec=.1)
         p = pose.pose.pose
         q = p.orientation
         yaw = math.atan2(2*(q.w*q.z+q.x*q.y), 1-2*(q.y*q.y+q.z*q.z))
@@ -79,6 +123,15 @@ try:
         if not map_path.is_file() or map_path.stat().st_size == 0:
             raise RuntimeError('Saved map is empty')
         manifest['map_bytes'] = map_path.stat().st_size
+        if context is not None:
+            manifest['mission_checkpoint_version']=1
+            manifest['home_anchor']=dict(zip(('x','y','yaw_rad'),context['start_pose']))
+            manifest['return_context']=context
+            manifest['survivors_file']='survivors.json'
+            manifest['navigation_slice_file']='navigation_slice.json'
+            manifest['survivor_count']=len(tracks.tracks)
+            (directory/'survivors.json').write_text(json.dumps(message_to_ordereddict(tracks),indent=2)+'\n')
+            (directory/'navigation_slice.json').write_text(json.dumps(message_to_ordereddict(nav_slice))+'\n')
         if grid is not None:
             # Export the display projection for inspection. nvblox layers are authoritative.
             values = grid.data
@@ -96,7 +149,9 @@ try:
                 f'image: projection.pgm\nmode: trinary\nresolution: {grid.info.resolution}\n'
                 f'origin: [{origin.position.x}, {origin.position.y}, {grid_yaw}]\n'
                 'negate: 0\noccupied_thresh: 0.65\nfree_thresh: 0.196\n')
-        (directory/'manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
+        temporary=directory/'manifest.tmp'
+        temporary.write_text(json.dumps(manifest,indent=2)+'\n')
+        temporary.replace(directory/'manifest.json')
     print(json.dumps(manifest, indent=2), flush=True)
 finally:
     node.destroy_node()

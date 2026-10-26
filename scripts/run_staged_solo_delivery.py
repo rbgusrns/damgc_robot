@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run proven mapping untouched; create every delivery component only after return."""
+import argparse
 import fcntl
 import json
 import os
@@ -19,7 +20,7 @@ stop=threading.Event()
 for number in (signal.SIGINT,signal.SIGTERM):signal.signal(number,lambda *_:stop.set())
 
 
-def main():
+def main(checkpoint_only=False):
     env=dict(os.environ)
     for key in ('MAPPING_SOLO_DELIVERY','DAMGC_SOLO_DELIVERY','MAPPING_START_POSE_FILE','MAPPING_SNAPSHOT','MAPPING_COOPERATIVE_ON_STARTUP','MAPPING_MANUAL_ONLY'):
         env.pop(key,None)
@@ -53,6 +54,15 @@ def main():
                 context=json.loads((log_dir/'return_context.json').read_text())
                 if not context.get('returned'):raise RuntimeError('Return not completed')
                 started=True
+                if checkpoint_only:
+                    snapshot=ROOT/'data/maps'/log_dir.name
+                    state['snapshot']=snapshot
+                    target='/workspaces/isaac_ros-dev/data/maps/'+log_dir.name
+                    context_path='/workspaces/isaac_ros-dev/log/'+log_dir.name+'/return_context.json'
+                    container_start('echo $$ > '+shlex.quote('/workspaces/isaac_ros-dev/log/'+log_dir.name+'/checkpoint_save.pid')+'; exec python3 /workspaces/isaac_ros-dev/scripts/mapping_snapshot.py save '+shlex.quote(target)+' --mission-context '+shlex.quote(context_path),'checkpoint_save.log',log_dir)
+                    state['snapshot_process']=children[-1]
+                    print('CHECKPOINT: return complete; saving map, home and survivors BEFORE grasp',flush=True)
+                    continue
                 print('POST_RETURN: original mapping/return complete; starting grasp/delivery components now',flush=True)
                 host_log=open(log_dir/'solo_grasp.log','a',buffering=1);files.append(host_log)
                 command='source /opt/ros/humble/setup.bash; source install/setup.bash; exec python3 scripts/solo_grasp_host.py'
@@ -64,6 +74,18 @@ def main():
                                 'delivery_slice.log',log_dir)
                 container_start('echo $$ > '+delivery_pid+'; exec python3 /workspaces/isaac_ros-dev/scripts/post_return_delivery.py '+prefix+' --side-delivery',
                                 'post_return.log',log_dir)
+            if checkpoint_only and 'snapshot_process' in state and state['snapshot_process'].poll() is not None and 'saved_reported' not in state:
+                state['saved_reported']=True
+                snapshot=state['snapshot']
+                if state['snapshot_process'].returncode!=0 or not (snapshot/'manifest.json').exists():
+                    print('CHECKPOINT FAILED: see checkpoint_save.log; robot stays stopped; no grasp',flush=True)
+                else:
+                    latest=ROOT/'data/maps/latest_mission'
+                    if latest.exists() and not latest.is_symlink():raise RuntimeError('latest_mission exists as a real directory; refusing to replace it')
+                    temporary=latest.with_name('.latest_mission.tmp')
+                    temporary.unlink(missing_ok=True);temporary.symlink_to(snapshot.name);temporary.replace(latest)
+                    (log_dir/'vision_stop_requested').write_text('mission saved; stop idle detector\n')
+                    print('CHECKPOINT SAVED: '+str(snapshot)+'; STOP; no grasp started',flush=True)
             if started and not vision_stopped and (log_dir/'vision_stop_requested').exists():
                 name='damgc-survivor-detector-checkpoint-'+str(mapping.pid)
                 subprocess.run(['docker','stop','--time','3',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
@@ -96,7 +118,7 @@ def main():
         log_dir=state.get('log_dir')
         if log_dir is not None:
             for filename,expected in (('delivery.pid','post_return_delivery.py'),('relay.pid','delivery_slice.py'),
-                    ('navigation.pid','reverse_delivery_nav2.launch.py'),('footprint.pid','delivery_footprint.py')):
+                    ('navigation.pid','reverse_delivery_nav2.launch.py'),('footprint.pid','delivery_footprint.py'),('checkpoint_save.pid','mapping_snapshot.py')):
                 signal_owned_group(log_dir/filename,expected)
         for child in children:
             if child.poll() is None:
@@ -115,4 +137,5 @@ if __name__=='__main__':
     with lock_path.open('w') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:raise SystemExit('A staged solo mission is already running')
-        main()
+        parser=argparse.ArgumentParser();parser.add_argument('--checkpoint-only',action='store_true')
+        args=parser.parse_args();main(checkpoint_only=args.checkpoint_only)

@@ -762,6 +762,20 @@ if [[ "${MAPPING_AUTOMATIC_EXPLORATION}" == "1" ]]; then
   exit 0
 fi
 
+if [[ "${MAPPING_RESTORE_SURVIVORS:-0}" == "1" ]]; then
+  printf '[7/7] Restoring saved people; hold before cooperative grasp. No exploration.\n'
+  docker exec -u "${CONTAINER_USER}" \
+    -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
+    -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
+    "${CONTAINER_NAME}" setsid --wait bash -lc '
+      source /opt/ros/humble/setup.bash
+      source /workspaces/isaac_ros-dev/install_docker/setup.bash
+      echo "$$" > /tmp/damgc_vslam_mapping_auto.pid
+      exec python3 /workspaces/isaac_ros-dev/scripts/restore_saved_mission.py "$1"
+    ' _ "${CONTAINER_SNAPSHOT}" > >(tee "${LOG_DIR}/restored_mission.log") 2>&1
+  exit 0
+fi
+
 printf '[7/7] Starting arrow-key control. E/D changes speed; Space stops; Ctrl-C shuts everything down.\n'
 source_with_nounset_disabled "${REPO_ROOT}/install/setup.bash"
 if [[ "${MAPPING_INITIAL_SCAN}" == "1" ]]; then
