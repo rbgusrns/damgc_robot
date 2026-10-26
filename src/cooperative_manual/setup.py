@@ -12,4 +12,5 @@ setup(name='cooperative_manual', version='0.1.0', packages=['cooperative_manual'
       entry_points={'console_scripts':['manual_straight = cooperative_manual.node:main',
                                       'manual_curve = cooperative_manual.curve_node:main',
                                       'manual_curve_keys = cooperative_manual.curve_keyboard:main',
+                                      'opening_ceremony_keys = cooperative_manual.keyboard:opening_main',
                                       'manual_straight_keys = cooperative_manual.keyboard:main']})
