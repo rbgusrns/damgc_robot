@@ -4,6 +4,7 @@
     debug_image_topic: /leader/survivor/debug_image
     model_name: yolo11n.pt
     confidence_threshold: 0.5
+    inference_hz: 2.0
     device: auto
     aligned_depth_topic: /leader/camera/aligned_depth_to_color/image_raw
     depth_roi_width_ratio: 0.25

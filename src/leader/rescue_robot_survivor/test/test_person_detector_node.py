@@ -175,6 +175,7 @@ def test_depth_sync_wait_timeout_rejects_old_frame():
 
 def test_slow_inference_queue_keeps_only_latest_rgb():
     harness = SimpleNamespace(
+        _inference_period_sec=0.5,
         _pending_image_lock=threading.Lock(),
         _pending_image=None,
         _image_event=threading.Event(),
@@ -398,3 +399,28 @@ def test_pose_array_omits_invalid_person_without_origin_placeholder():
     assert len(positions.poses) == 2
     assert [pose.position.x for pose in positions.poses] == [-0.5, 0.6]
     assert all(pose.orientation.w == 1.0 for pose in positions.poses)
+
+
+def test_worker_rate_limit_skips_burst_frames_and_processes_a_newer_frame(monkeypatch):
+    frames = [stamped_image(1000), stamped_image(1100), stamped_image(1600)]
+    harness = SimpleNamespace(_pending_image_lock=threading.Lock(), _pending_image=None,
+                              _worker_shutdown=threading.Event(), _inference_period_sec=.5)
+    class IncomingFrames:
+        index = 0
+        def wait(self, timeout):
+            with harness._pending_image_lock:
+                harness._pending_image = frames[self.index]
+            self.index += 1
+        def clear(self):
+            pass
+    harness._image_event = IncomingFrames()
+    processed = []
+    def process(message):
+        processed.append(message)
+        if message is frames[2]:
+            harness._worker_shutdown.set()
+    harness._image_callback = process
+    clock = iter([1., 1.1, 1.6])
+    monkeypatch.setattr(detector_module.time, 'monotonic', lambda: next(clock))
+    detector_module.PersonDetectorNode._worker_loop(harness)
+    assert processed == [frames[0], frames[2]]

@@ -42,6 +42,9 @@ def generate_launch_description() -> LaunchDescription:
                 default_value=str(defaults["confidence_threshold"]),
             ),
             DeclareLaunchArgument(
+                "inference_hz", default_value=str(defaults["inference_hz"])
+            ),
+            DeclareLaunchArgument(
                 "device", default_value=str(defaults["device"])
             ),
             DeclareLaunchArgument(
@@ -107,6 +110,10 @@ def generate_launch_description() -> LaunchDescription:
                         "model_name": LaunchConfiguration("model_name"),
                         "confidence_threshold": ParameterValue(
                             LaunchConfiguration("confidence_threshold"),
+                            value_type=float,
+                        ),
+                        "inference_hz": ParameterValue(
+                            LaunchConfiguration("inference_hz"),
                             value_type=float,
                         ),
                         "device": LaunchConfiguration("device"),

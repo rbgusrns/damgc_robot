@@ -1,5 +1,6 @@
 """ROS 2 node that publishes YOLO11n detections with aligned depth."""
 
+import math
 import threading
 import time
 from collections import deque
@@ -88,6 +89,9 @@ class PersonDetectorNode(Node):
         self._confidence_threshold = float(
             self.declare_parameter("confidence_threshold", 0.5).value
         )
+        self._inference_hz = float(
+            self.declare_parameter("inference_hz", 2.0).value
+        )
         self._requested_device = str(
             self.declare_parameter("device", "auto").value
         ).strip()
@@ -140,6 +144,7 @@ class PersonDetectorNode(Node):
         )
 
         self._validate_parameters()
+        self._inference_period_sec = 1.0 / self._inference_hz
         if torch is None:
             raise RuntimeError(
                 "PyTorch is not installed. Install the NVIDIA "
@@ -208,6 +213,9 @@ class PersonDetectorNode(Node):
         self.get_logger().info(
             f"Confidence threshold: {self._confidence_threshold:.3f}"
         )
+        self.get_logger().info(
+            f"Maximum inference rate: {self._inference_hz:.2f} Hz"
+        )
         self.get_logger().info(f"Selected device: {self._device}")
         # Inference runs off the ROS executor so depth and incoming RGB keep
         # arriving while one frame is processed. Only the latest RGB is queued.
@@ -234,6 +242,7 @@ class PersonDetectorNode(Node):
             self._image_event.set()
 
     def _worker_loop(self) -> None:
+        last_inference_at = 0.0
         while not self._worker_shutdown.is_set():
             self._image_event.wait(timeout=0.1)
             if self._worker_shutdown.is_set():
@@ -243,6 +252,10 @@ class PersonDetectorNode(Node):
                 self._pending_image = None
                 self._image_event.clear()
             if message is not None:
+                now = time.monotonic()
+                if now - last_inference_at < self._inference_period_sec:
+                    continue
+                last_inference_at = now
                 self._image_callback(message)
 
     def _validate_parameters(self) -> None:
@@ -256,6 +269,8 @@ class PersonDetectorNode(Node):
             raise ValueError(
                 "confidence_threshold must be between 0.0 and 1.0"
             )
+        if not math.isfinite(self._inference_hz) or self._inference_hz <= 0.0:
+            raise ValueError("inference_hz must be a finite value greater than 0")
         if not self._requested_device:
             raise ValueError("device must not be empty")
         if not self._aligned_depth_topic:

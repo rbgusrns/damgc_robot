@@ -155,6 +155,7 @@ argument의 기본값으로 읽히므로 config 수정과 실행 시 override를
 | `debug_image_topic` | 위 출력 | debug 영상 토픽 변경 |
 | `model_name` | `yolo11n.pt` | 모델 이름 또는 로컬 weight 경로 |
 | `confidence_threshold` | `0.5` | 0.0–1.0 |
+| `inference_hz` | `2.0` | 최대 사람 인식 주기 (Hz); 초과 영상 프레임은 건너뜀 |
 | `device` | `auto` | `auto`, `cpu`, `0` 등 |
 | `aligned_depth_topic` | `/leader/camera/aligned_depth_to_color/image_raw` | RGB 정렬 depth |
 | `depth_roi_width_ratio` / `height_ratio` | `0.25` / `0.25` | bbox 중심 ROI 비율 |
