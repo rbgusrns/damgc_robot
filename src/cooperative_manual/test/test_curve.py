@@ -86,3 +86,26 @@ def test_reverse_curvature_estimate_uses_signed_distance():
 def test_sensor_reset_is_distinct_from_tracking_error():
     trail=LeaderTrail();trail.begin(Pose2D(0.,0.,0.))
     with pytest.raises(ValueError,match='discontinuity'):trail.add(Pose2D(1.,0.,0.))
+
+
+def test_follower_smoothing_limits_ramp_and_explicit_stop_is_immediate():
+    from cooperative_manual.curve import FollowerSmoother,CurveOutput
+    smoother=FollowerSmoother();previous=CurveOutput(0.,0.)
+    for _ in range(10):
+        out=smoother.step(-.02,.02,.05,lambda observed:CurveOutput(.04,.08))
+        assert abs(out.linear-previous.linear)<=.02*.05+1e-12
+        assert abs(out.angular-previous.angular)<=.04*.05+1e-12
+        assert abs(out.angular)<=2.5*abs(out.linear)
+        previous=out
+    stopped=smoother.step(0.,.02,.05,lambda _:pytest.fail('Stop must bypass tracking'))
+    assert stopped.linear==stopped.angular==0.
+    assert smoother.measured==0.
+
+
+def test_straight_return_produces_reverse_follower_motion():
+    trail=LeaderTrail();trail.begin(Pose2D(0.,0.,0.))
+    follower=FollowerTrail();follower.reset(Pose2D(.62,0.,math.pi))
+    trail.add(Pose2D(.01,0.,0.));follower.receive(trail.packet('return'),0.)
+    out=follower.output(Pose2D(.62,0.,math.pi),.02,.1)
+    assert -.04<=out.linear<0.
+    assert abs(out.angular)<1e-8

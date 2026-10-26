@@ -18,9 +18,9 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 # Latest leader main already calibrates its gripper at477 in manual_straight_terminal.sh.
 ros2 run cooperative_manual manual_curve --ros-args -r __ns:=/leader \
-  -p role:=leader -p motion_enabled:=true -p odom_topic:="${LEADER_ODOM_TOPIC:-/leader/odom/raw}" \
+  -p role:=leader -p motion_enabled:=true -p odom_topic:="${LEADER_ODOM_TOPIC:-/leader/odometry/local}" \
   -p gripper_enabled:=true -p close_raw:="${LEADER_CLOSE_RAW:-477}" -p gripper_settle:=9.0 \
   > /tmp/leader_manual_curve.log 2>&1 &
 curve_pid=$!
-printf '곡선 운반 실험 모드: 서브 curve 준비 후 e, ↑/w 당기기, ←/a·→/d 완만한 곡선. Space 정지.\n'
+printf '곡선 운반 실험 모드: 서브 curve 준비 후 e, ↑/w 직진 당기기, ←/a·→/d 한 키 곡선, ↓/s 반대 방향 직선, X 정지, Space 비상정지.\n'
 ros2 run cooperative_manual manual_curve_keys
