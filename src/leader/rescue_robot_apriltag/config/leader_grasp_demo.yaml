@@ -1,0 +1,62 @@
+# Follower gripper-only workflow; leader D435 mounting x=0.042 m in URDF.
+# Camera distance 0.20 m is a trial target pending leader hardware validation.
+/leader/apriltag_approach:
+  ros__parameters:
+    source_frame: camera_color_optical_frame
+    base_frame: base_link
+    tf_lookup_timeout: 0.0
+    tag_frame_pattern: "leader/tag36h11:{id}"
+    target_tag_id: 0
+    allowed_tag_ids: [0]
+    selection_mode: priority
+    align_tag_normal: false
+    observation_hold_time: 0.25
+    target_distance: 0.20
+    distance_tolerance: 0.02
+    lateral_tolerance: 0.02
+    angle_tolerance_deg: 5.0
+    tag_timeout: 0.60
+    stable_time: 0.8
+    publish_rate: 20.0
+    filter_window: 5
+    pre_align_distance: 0.35
+    final_target_distance: 0.242
+    final_position_tolerance: 0.008
+    final_yaw_tolerance_deg: 5.0
+    base_stable_time: 0.30
+    aligned_confirm_samples: 3
+    stabilizing_tag_loss_grace_sec: 0.60
+    final_approach_tag_loss_grace_sec: 0.60
+    blind_final_approach_enabled: false
+    post_align_odom_enabled: false
+    post_align_grasp_target_distance: 0.20
+    odom_topic: /leader/odom/raw
+/leader/approach_controller:
+  ros__parameters:
+    controller_enabled_on_startup: false
+    controller_publish_rate: 20.0
+    controller_pose_timeout: 0.35
+    linear_gain: 0.40
+    angular_gain: 0.80
+    lateral_gain: 0.50
+    max_raw_linear_speed: 0.04
+    max_raw_angular_speed: 0.15
+    near_max_angular_speed: 0.10
+    max_final_linear_speed: 0.03
+    max_final_angular_speed: 0.06
+    blind_final_speed: 0.015
+/leader/velocity_guard:
+  ros__parameters:
+    guard_enabled_on_startup: false
+    publish_rate: 50.0
+    command_timeout: 0.30
+    max_linear_speed: 0.04
+    max_angular_speed: 0.15
+    max_linear_acceleration: 0.05
+    max_angular_acceleration: 0.25
+    max_slew_dt: 0.10
+    axis_epsilon: 1.0e-9
+    allow_reverse: false
+    shutdown_stop_count: 3
+    command_topic: /leader/approach/cmd_vel_raw
+    safe_command_topic: /leader/approach/cmd_vel_safe

@@ -1027,3 +1027,13 @@ def test_non_final_loss_keeps_existing_immediate_lost_policy() -> None:
     AprilTagApproachNode._on_timer(harness)
 
     assert lost_cycles == [pytest.approx(10.1)]
+
+
+def test_center_demo_ignores_tag_face_yaw_and_stays_on_center_ray():
+    harness = make_base_publish_harness(RecordingBuffer(make_identity_transform()))
+    harness._align_tag_normal = False
+    camera_pose = make_pose(position=(1.0, 0.2, 0.0))
+    AprilTagApproachNode._publish_base_outputs(harness, camera_pose)
+    target = harness._final_target_pub.messages[-1].pose.position
+    assert target.y / target.x == pytest.approx(0.2)
+    assert camera_pose.header.stamp == harness._final_target_pub.messages[-1].header.stamp

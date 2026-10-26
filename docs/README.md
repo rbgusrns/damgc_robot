@@ -5,6 +5,9 @@
 
 ## 먼저 읽을 문서
 
+- [리더 단독 자동 집기 실기 결과](LEADER_GRASP_DEMO_2026-10-27.md) — 시작 서비스 한 번으로 태그 인식·20cm 접근·477 집기·DONE, 실행 및 취소 명령
+- [리더 그리퍼 보정값](LEADER_GRIPPER_CALIBRATION_2026-10-27.md) — 리더 RX-28 ID2, 열림1000·집기477 보정
+
 1. [개발 계획서](Plan.md) — 2026년 7월 13일~9월 14일의 목표, 역할, 9주 일정과 평가 기준
 2. [개발 현황 및 로드맵](STATUS_AND_ROADMAP.md) — 2026년 9월 14일까지 반영한 구현 상태, 주차 게이트와 우선순위
 3. [Visual SLAM 준비 및 검증 절차](VISUAL_SLAM_SETUP.md) — 현재 입력·TF 점검, rosbag 기록과 SLAM 연동 순서

@@ -228,6 +228,8 @@ class AprilTagApproachNode(Node):
         self.declare_parameter("lateral_tolerance", 0.02)
         self.declare_parameter("angle_tolerance_deg", 5.0)
         self.declare_parameter("tag_timeout", 1.0)
+        self.declare_parameter("align_tag_normal", True)
+        self.declare_parameter("observation_hold_time", 0.25)
         self.declare_parameter("stable_time", 0.8)
         self.declare_parameter("publish_rate", 20.0)
         self.declare_parameter("filter_window", 5)
@@ -287,6 +289,10 @@ class AprilTagApproachNode(Node):
             self.get_parameter("angle_tolerance_deg").value
         )
         self._tag_timeout = float(self.get_parameter("tag_timeout").value)
+        self._align_tag_normal = bool(self.get_parameter("align_tag_normal").value)
+        self._observation_hold_time = float(self.get_parameter("observation_hold_time").value)
+        if not 0 < self._observation_hold_time <= self._tag_timeout:
+            raise ValueError("observation_hold_time must be positive and <= tag_timeout")
         self._stable_time = float(self.get_parameter("stable_time").value)
         self._publish_rate = float(self.get_parameter("publish_rate").value)
         self._filter_window = int(self.get_parameter("filter_window").value)
@@ -554,7 +560,12 @@ class AprilTagApproachNode(Node):
                 self._publish_blind_cycle(now_seconds)
                 return
 
-        if not is_new_observation:
+        center_demo = not getattr(self, "_align_tag_normal", True)
+        held_age = now_seconds - selected.stamp_nanoseconds / 1e9
+        if center_demo and not 0 <= held_age <= self._observation_hold_time:
+            self._publish_lost(now_seconds)
+            return
+        if not is_new_observation and not center_demo:
             publish_grace = getattr(
                 self, "_publish_final_approach_grace", None
             )
@@ -562,6 +573,7 @@ class AprilTagApproachNode(Node):
                 return
         if (
             not is_new_observation
+            and not center_demo
             and self._final_sample_age(now_seconds) >= self._blind_last_tag_max_age
         ):
             self._publish_lost(now_seconds)
@@ -1207,32 +1219,28 @@ class AprilTagApproachNode(Node):
             metrics = compute_base_metrics(
                 base_pose.pose.position.x, base_pose.pose.position.y
             )
-            orientation = base_pose.pose.orientation
-            normal_x, normal_y = rotate_tag_z_to_base_xy(
-                (
-                    orientation.x,
-                    orientation.y,
-                    orientation.z,
-                    orientation.w,
+            if getattr(self, "_align_tag_normal", True):
+                orientation = base_pose.pose.orientation
+                normal_x, normal_y = rotate_tag_z_to_base_xy(
+                    (orientation.x, orientation.y, orientation.z, orientation.w)
                 )
-            )
-            normal_x, normal_y = select_robot_facing_normal(
-                base_pose.pose.position.x,
-                base_pose.pose.position.y,
-                normal_x,
-                normal_y,
-            )
-            normal_x, normal_y = self._normal_filter.add(
-                normal_x,
-                normal_y,
-                stamp.sec * 1_000_000_000 + stamp.nanosec,
-            )
-            normal_x, normal_y = select_robot_facing_normal(
-                base_pose.pose.position.x,
-                base_pose.pose.position.y,
-                normal_x,
-                normal_y,
-            )
+                normal_x, normal_y = select_robot_facing_normal(
+                    base_pose.pose.position.x, base_pose.pose.position.y,
+                    normal_x, normal_y,
+                )
+                normal_x, normal_y = self._normal_filter.add(
+                    normal_x, normal_y,
+                    stamp.sec * 1_000_000_000 + stamp.nanosec,
+                )
+                normal_x, normal_y = select_robot_facing_normal(
+                    base_pose.pose.position.x, base_pose.pose.position.y,
+                    normal_x, normal_y,
+                )
+            else:
+                # Use the same center ray for staging and final approach,
+                # as in the follower gripper-only demonstration.
+                normal_x = -base_pose.pose.position.x
+                normal_y = -base_pose.pose.position.y
             geometry = compute_target_geometry(
                 base_pose.pose.position.x,
                 base_pose.pose.position.y,

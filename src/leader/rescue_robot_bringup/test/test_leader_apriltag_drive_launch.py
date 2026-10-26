@@ -44,7 +44,7 @@ def test_integrated_launch_exposes_safe_gripper_and_lift_defaults():
     assert 'DeclareLaunchArgument("gripper_enabled", default_value="true")' in source
     assert 'DeclareLaunchArgument("rx64_speed", default_value="50")' in source
     assert 'DeclareLaunchArgument("gripper_open_raw", default_value="1000")' in source
-    assert 'DeclareLaunchArgument("gripper_close_raw", default_value="480")' in source
+    assert 'DeclareLaunchArgument("gripper_close_raw", default_value="477")' in source
     assert 'DeclareLaunchArgument("lift_enabled", default_value="true")' in source
     assert 'DeclareLaunchArgument("lift_raw", default_value="300")' in source
     assert 'DeclareLaunchArgument("gripper_lost_rx64_raw", default_value="600")' in source

@@ -92,7 +92,7 @@ def generate_launch_description():
             DeclareLaunchArgument("gripper_baudrate", default_value="115200"),
             DeclareLaunchArgument("rx64_speed", default_value="50"),
             DeclareLaunchArgument("gripper_open_raw", default_value="1000"),
-            DeclareLaunchArgument("gripper_close_raw", default_value="480"),
+            DeclareLaunchArgument("gripper_close_raw", default_value="477"),
             DeclareLaunchArgument("lift_enabled", default_value="true"),
             DeclareLaunchArgument("lift_raw", default_value="300"),
             DeclareLaunchArgument("gripper_lost_rx64_raw", default_value="600"),
@@ -192,6 +192,7 @@ def generate_launch_description():
                     "port": LaunchConfiguration("gripper_port"),
                     "baudrate": LaunchConfiguration("gripper_baudrate"),
                     "rx64_speed": LaunchConfiguration("rx64_speed"),
+                    "lift_enabled": LaunchConfiguration("lift_enabled"),
                     # Keep the shared child defaults unchanged, but prevent the
                     # integrated Leader launch from writing an arbitrary startup
                     # pose or enabling torque before a targeted command exists.

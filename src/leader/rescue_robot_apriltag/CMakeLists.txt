@@ -10,6 +10,7 @@ install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY docs DESTINATION share/${PROJECT_NAME}/docs)
 install(PROGRAMS
   scripts/camera_info_qos_bridge.py
+  scripts/camera_pair_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 install(PROGRAMS

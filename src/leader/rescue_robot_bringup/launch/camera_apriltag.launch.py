@@ -68,6 +68,8 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_infra", default_value="false"),
         DeclareLaunchArgument("enable_imu", default_value="false"),
         DeclareLaunchArgument("enable_approach", default_value="false"),
+        DeclareLaunchArgument("tag_image_topic", default_value="/leader/camera/color/image_rect"),
+        DeclareLaunchArgument("tag_camera_info_topic", default_value="/leader/camera/color/camera_info"),
         DeclareLaunchArgument(
             "approach_config",
             default_value=os.path.join(apriltag_share, "config", "approach.yaml"),
@@ -139,8 +141,8 @@ def generate_launch_description():
             name="apriltag",
             parameters=[os.path.join(apriltag_share, "config", "apriltag_leader.yaml")],
             remappings=[
-                ("image_rect", "/leader/camera/color/image_rect"),
-                ("camera_info", "/leader/camera/color/camera_info"),
+                ("image_rect", LaunchConfiguration("tag_image_topic")),
+                ("camera_info", LaunchConfiguration("tag_camera_info_topic")),
             ],
             output="screen",
         ),
