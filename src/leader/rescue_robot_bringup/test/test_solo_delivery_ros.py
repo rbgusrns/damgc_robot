@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace as NS
 import math
+import json
 
 import pytest
 rclpy=pytest.importorskip('rclpy')
@@ -23,7 +24,9 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[4]/'scripts'))
 from solo_delivery import SoloDelivery
 
 
-def test_map_and_visual_hold_precede_grasp_then_reverse_to_survivor(tmp_path):
+@pytest.mark.parametrize('camera_ready',[False,True])
+@pytest.mark.parametrize('side_delivery',[False,True])
+def test_map_and_visual_hold_precede_grasp_then_reverse_to_survivor(tmp_path,side_delivery,camera_ready):
     rclpy.init()
     delivery=SoloDelivery()
     fake=Node('solo_fake_hardware')
@@ -39,7 +42,7 @@ def test_map_and_visual_hold_precede_grasp_then_reverse_to_survivor(tmp_path):
     def visual(request,response):
         state['visual']=True;response.success=True;return response
     def grasp(request,response):
-        assert state['held'] and state['visual'] and state['hold_mode']
+        assert state['held'] and state['visual'] and state['hold_mode'] and state.get('rgb_ready')
         state['grasp']=True;response.success=True
         status.publish(String(data='DONE: fake motor ACK'))
         return response
@@ -64,13 +67,16 @@ def test_map_and_visual_hold_precede_grasp_then_reverse_to_survivor(tmp_path):
         result=ComputePathToPose.Result();result.path=NavPath()
         result.path.header.frame_id='odom'
         x,y=state['position']
-        result.path.poses=[delivery.pose(x,y,math.pi),handle.request.goal]
+        result.path.poses=[delivery.pose(x,y,explorer.robot_yaw),handle.request.goal]
         handle.succeed();return result
     def follow(handle):
+        assert state.get('transport_ready')
         assert state['grasp'] and state['held'] and state['visual']
         pose=handle.request.path.poses[-1].pose.position
         assert pose.x>=state['position'][0] # body yaw pi: increasing world x is reverse
         state['position']=(pose.x,pose.y);state['steps']+=1
+        q=handle.request.path.poses[-1].pose.orientation
+        explorer.robot_yaw=math.atan2(2*q.w*q.z,1-2*q.z*q.z)
         handle.succeed();return FollowPath.Result()
     planner=ActionServer(fake,ComputePathToPose,'/compute_path_to_pose',execute_callback=plan)
     follower=ActionServer(fake,FollowPath,'/follow_path',execute_callback=follow)
@@ -81,8 +87,23 @@ def test_map_and_visual_hold_precede_grasp_then_reverse_to_survivor(tmp_path):
     msg.resolution=.05;msg.origin.x=-3.;msg.origin.y=-3.;msg.unknown_value=-1000.
     msg.data=[1.]*(120*120);delivery.slice=msg
     try:
-        delivery.run(executor,explorer,tmp_path)
+        def prepare_grasp():
+            assert state['held'] and state['visual'] and state['hold_mode'] and not state['grasp']
+            if not camera_ready:raise RuntimeError('RGB camera not ready')
+            state['rgb_ready']=True
+        def prepare_transport():
+            assert state['held'] and state['visual'] and state['grasp']
+            state['transport_ready']=True
+        delivery.run(executor,explorer,tmp_path,prepare_transport=prepare_transport,prepare_grasp=prepare_grasp,side_delivery=side_delivery)
+        if not camera_ready:
+            assert not state['grasp'] and state['steps']==0
+            assert 'RGB camera not ready' in (tmp_path/'solo_delivery_result.json').read_text()
+            return
         assert state['grasp'] and state['steps']>=2
+        result=json.loads((tmp_path/'solo_delivery_result.json').read_text())
+        if side_delivery:
+            assert math.isclose(result['box_distance_to_person_m'],.55,abs_tol=.05)
+            assert 'final_yaw' in result
         assert math.hypot(state['position'][0]-2,state['position'][1]) >= .55
         assert state['position'][0] >= 1.15
         assert 'error' not in (tmp_path/'solo_delivery_result.json').read_text()

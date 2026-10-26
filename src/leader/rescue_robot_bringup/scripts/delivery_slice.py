@@ -21,7 +21,9 @@ def remove_attached_payload(msg, pose, front, half):
     c, s = math.cos(pose[2]), math.sin(pose[2])
     bx, by = c*x+s*y, -s*x+c*y
     # Anchored once at the confirmed pickup, never cleared along the route.
-    inside = (bx >= .10) & (bx <= front) & (np.abs(by) <= half)
+    # Include cells intersecting the measured payload boundary, not only cell centres.
+    padding = result.resolution / math.sqrt(2.)
+    inside = (bx >= .10-padding) & (bx <= front+padding) & (np.abs(by) <= half+padding)
     known = np.isfinite(values) & (values != result.unknown_value)
     values[inside & known & (values <= 0.)] = 1.
     result.data = values.ravel().tolist()

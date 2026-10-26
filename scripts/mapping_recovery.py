@@ -44,8 +44,8 @@ class VideoRecovery:
             explorer._stop(f'Live inputs/actions did not recover within {self.timeout_sec:g} seconds')
             return
         fresh_samples = all(monitor.counts[key] - self.counts_at_pause.get(key, 0) >= 3
-                            for key in ('depth', 'filtered_depth', 'visual_odometry',
-                                        'local_odometry', 'map'))
+                            for key in getattr(monitor, 'required_streams',
+                                ('depth', 'filtered_depth', 'visual_odometry', 'local_odometry', 'map')))
         problems = monitor.problems(explorer, image_age_limit=2.0)
         if problems or not fresh_samples or not explorer._pause_actions_settled():
             self.stable_since = None

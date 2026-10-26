@@ -18,6 +18,7 @@ class SoloGraspHost(Node):
         self.future = None
         self.started = False
         self.begin = 0.
+        self.retry_after = 0.
         self.pub = self.create_publisher(String, '/leader/solo/grasp/status',
                                         QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.stop = self.create_publisher(String, '/leader/command_selector/request', 10)
@@ -65,6 +66,7 @@ class SoloGraspHost(Node):
         if self.phase not in ('LAUNCHING','STARTING','RUNNING'):return
         if self.process.poll() is not None or time.monotonic()-self.begin>150:
             self.cancel(None,Trigger.Response());return
+        if time.monotonic()<self.retry_after:return
         if self.phase == 'LAUNCHING' and self.start_client.service_is_ready() and self.cancel_client.service_is_ready():
             self.future=self.start_client.call_async(Trigger.Request())
             self.status('STARTING: requesting validated grasp task')
@@ -73,14 +75,19 @@ class SoloGraspHost(Node):
                 if not self.future.result().success:raise RuntimeError(self.future.result().message)
                 # DONE can race the start reply; do not overwrite an eventual terminal state.
                 self.status('RUNNING: open, align, stop and grasp')
-            except Exception:self.cancel(None,Trigger.Response())
+            except Exception as error:
+                self.get_logger().error('Grasp start rejected: '+str(error))
+                if 'unavailable' in str(error) and time.monotonic()-self.begin<120:
+                    self.retry_after=time.monotonic()+2.
+                    self.status('LAUNCHING: waiting for grasp task internal service discovery')
+                else:self.cancel(None,Trigger.Response())
 
 
 def main():
     rclpy.init();node=SoloGraspHost()
     try:rclpy.spin(node)
     except KeyboardInterrupt:
-        node.cancel(None,Trigger.Response())
+        if rclpy.ok() and node.phase!='DONE':node.cancel(None,Trigger.Response())
         for _ in range(5):
             if rclpy.ok():rclpy.spin_once(node,timeout_sec=.1)
     finally:

@@ -27,9 +27,12 @@ from mapping_recovery import VideoRecovery
 
 
 class LiveInputs(Node):
-    def __init__(self, image_timeout_sec=10.0):
+    def __init__(self, image_timeout_sec=10.0, require_visual_odometry=True):
         super().__init__('mapping_autorun')
         self.image_timeout_sec = image_timeout_sec
+        self.required_streams = ('depth', 'filtered_depth', 'local_odometry', 'map')
+        if require_visual_odometry:
+            self.required_streams += ('visual_odometry',)
         self.latest = {}
         self.counts = defaultdict(int)
         self.known_cells = 0
@@ -71,7 +74,7 @@ class LiveInputs(Node):
             problems.append('checkpoint detector: waiting for model/service')
         now = time.monotonic()
         ros_now = self.get_clock().now().nanoseconds
-        for key in ('depth', 'filtered_depth', 'visual_odometry', 'local_odometry', 'map'):
+        for key in self.required_streams:
             if key not in self.latest or self.counts[key] < 3:
                 problems.append(f'{key}: waiting for frames')
                 continue
@@ -120,7 +123,8 @@ def main():
                 signal_handler_options=SignalHandlerOptions.NO)
     if not 0 < args.image_timeout_sec < 300:
         raise ValueError('Image timeout must be positive and below 300 seconds')
-    monitor = LiveInputs(args.image_timeout_sec)
+    monitor = LiveInputs(args.image_timeout_sec,
+                         require_visual_odometry=os.environ.get('MAPPING_SOLO_DELIVERY') != '1')
     explorer = FrontierExplorer()
     delivery = None
     if os.environ.get('MAPPING_SOLO_DELIVERY') == '1':
@@ -207,6 +211,14 @@ def main():
                 monitor.get_logger().info(last_status)
             if (explorer.stopped and not explorer.paused
                     and last_status.startswith(('COMPLETE:', 'STOPPED:'))):
+                if explorer.completed_return and os.environ.get('MAPPING_POST_RETURN') == '1':
+                    context = {'start_pose': list(explorer.start_pose), 'map_frame': explorer.map_frame,
+                               'successful_goal_count': explorer.successful_goal_count,
+                               'returned': True}
+                    context_path = mapping_log.parent / 'return_context.json'
+                    temporary = context_path.with_suffix('.tmp')
+                    temporary.write_text(json.dumps(context))
+                    temporary.replace(context_path)
                 if delivery is not None and explorer.completed_return:
                     delivery.run(executor, explorer, mapping_log.parent)
                 else:

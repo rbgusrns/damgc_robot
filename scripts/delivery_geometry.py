@@ -14,6 +14,23 @@ def delivery_goal(robot, person, stand_off=.7):
             math.atan2(math.sin(yaw+math.pi), math.cos(yaw+math.pi)))
 
 
+def delivery_side_goals(home, person, box_center=.35, side_clearance=.55, yaw_offsets=(0.,)):
+    """Put the payload centre beside the person on either mapped side of the approach."""
+    if not all(math.isfinite(v) for v in (*home[:2],*person[:2],box_center,side_clearance)) or box_center<=0 or side_clearance<=0:
+        raise ValueError('Invalid side-delivery geometry')
+    if math.hypot(person[0]-home[0],person[1]-home[1])<1e-6:
+        raise ValueError('No approach direction')
+    yaw=math.atan2(person[1]-home[1],person[0]-home[0])+math.pi
+    yaw=math.atan2(math.sin(yaw),math.cos(yaw))
+    goals=[]
+    for offset in yaw_offsets:
+        angle=math.atan2(math.sin(yaw+offset),math.cos(yaw+offset))
+        c,s=math.cos(angle),math.sin(angle)
+        goals.extend((person[0]-box_center*c-sign*side_clearance*s,
+                      person[1]-box_center*s+sign*side_clearance*c,angle) for sign in (-1,1))
+    return goals
+
+
 def reverse_prefix(poses, maximum=.6):
     if len(poses) < 2 or maximum <= 0:
         raise ValueError('No reverse path')
@@ -40,7 +57,7 @@ def reverse_prefix(poses, maximum=.6):
     return output
 
 
-def footprint_known_clear(grid, poses, front=.40, half=.145, rear=.06, padding=.02):
+def footprint_known_clear(grid, poses, front=.40, half=.145, rear=.06, padding=.02, polygon=None):
     """Require every loaded-footprint cell to be known and free, including unknown borders."""
     resolution = grid['resolution']
     if resolution <= 0:
@@ -66,7 +83,12 @@ def footprint_known_clear(grid, poses, front=.40, half=.145, rear=.06, padding=.
             for ix in range(lo_x, hi_x+1):
                 wx, wy = ox+(ix+.5)*resolution-x, oy+(iy+.5)*resolution-y
                 bx, by = c*wx+s*wy, -s*wx+c*wy
-                if -rear-padding <= bx <= front+padding and abs(by) <= half+padding:
+                inside = (-rear-padding <= bx <= front+padding and abs(by) <= half+padding)
+                if polygon is not None:
+                    inside = all((b[0]-a[0])*(by-a[1])-(b[1]-a[1])*(bx-a[0]) >=
+                                 -padding*math.hypot(b[0]-a[0],b[1]-a[1])
+                                 for a,b in zip(polygon,polygon[1:]+polygon[:1]))
+                if inside:
                     if not (0 <= ix < width and 0 <= iy < height):
                         return False
                     distance = data[iy*width+ix]
@@ -80,3 +102,7 @@ def reverse_command(linear, angular):
         raise ValueError('Forward/nonfinite delivery command rejected')
     scale = min(1., .03/max(abs(linear), 1e-9), .15/max(abs(angular), 1e-9))
     return min(0.,linear)*scale, angular*scale
+
+
+LOADED_FOOTPRINT = [(-.06,-.145),(.06,-.145),(.40,-.05),
+                    (.40,.05),(.06,.145),(-.06,.145)]

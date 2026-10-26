@@ -59,9 +59,30 @@ def test_payload_removal_does_not_clear_unknown_or_cells_outside_pickup():
     exec(compile(ast.Module(body=[fn],type_ignores=[]),str(script),'exec'),namespace)
     msg=NS(width=20,height=20,resolution=.05,origin=NS(x=-.5,y=-.5),data=[1.]*400,unknown_value=-1000.)
     inside=10*20+14;unknown=10*20+15;outside=10*20+19
+    # The box edge intersects a cell whose centre lies just beyond the box.
+    boundary=11*20+18
+    lateral_wall=13*20+18
+    msg.data[boundary]=-.05;msg.data[lateral_wall]=-.05
     msg.data[inside]=0.;msg.data[unknown]=-1000.;msg.data[outside]=0.
     result=namespace['remove_attached_payload'](msg,(0.,0.,0.),.4,.05)
     assert result.data[inside] == 1.
+    assert result.data[boundary] == 1.
+    assert result.data[lateral_wall] == -.05
     assert result.data[unknown] == -1000.
     assert result.data[outside] == 0.
     assert msg.data[inside] == 0.
+
+
+def test_side_delivery_puts_box_beside_person_on_opposite_sides():
+    person=(3.,-1.)
+    goals=g.delivery_side_goals((0.,0.),person)
+    offsets=[]
+    for x,y,yaw in goals:
+        c,s=math.cos(yaw),math.sin(yaw)
+        bx,by=x+.35*c,y+.35*s
+        dx,dy=bx-person[0],by-person[1]
+        assert math.isclose(math.hypot(dx,dy),.55)
+        assert math.isclose(dx*c+dy*s,0.,abs_tol=1e-9)
+        offsets.append(dx*(-s)+dy*c)
+    assert offsets[0]*offsets[1]<0
+    with pytest.raises(ValueError):g.delivery_side_goals(person,person)

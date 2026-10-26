@@ -309,7 +309,9 @@ def test_rviz_config_preserves_raw_and_adds_registry_display():
 
     assert parsed["Visualization Manager"]["Global Options"][
         "Fixed Frame"
-    ] == "odom"
+    ] == "map" # The legacy 3D view uses map; the active demo uses the 2D odom view.
+    demo = yaml.safe_load((workspace_root / "rviz/nvblox_2d_view.rviz").read_text())
+    assert demo["Visualization Manager"]["Global Options"]["Fixed Frame"] == "odom"
     assert "Name: NvbloxMesh" in source
     assert "Name: Survivor Raw" in source
     assert "Value: /leader/survivor/map_markers" in source

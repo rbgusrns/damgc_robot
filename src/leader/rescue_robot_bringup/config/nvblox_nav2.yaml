@@ -35,7 +35,8 @@ planner_server:
       reverse_penalty: 1.5
       change_penalty: 0.2
       non_straight_penalty: 1.2
-      cost_penalty: 2.0
+      # Prefer the broad low-cost corridor between walls over a shorter wall-hugging path.
+      cost_penalty: 3.5
       analytic_expansion_ratio: 3.5
       analytic_expansion_max_length: 1.0
 
@@ -85,7 +86,7 @@ controller_server:
       use_cost_regulated_linear_velocity_scaling: true
       cost_scaling_dist: 0.30
       cost_scaling_gain: 0.50
-      inflation_cost_scaling_factor: 10.0
+      inflation_cost_scaling_factor: 3.0
       rotate_to_heading_min_angle: 0.785
       rotate_to_heading_angular_vel: 0.20
       max_angular_accel: 0.30
@@ -140,8 +141,9 @@ global_costmap:
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
-        inflation_radius: 0.3
-        cost_scaling_factor: 10.0
+        # A broad, gentle gradient makes the middle of free corridors cheaper.
+        inflation_radius: 0.80
+        cost_scaling_factor: 3.0
 
 local_costmap:
   local_costmap:
@@ -169,5 +171,6 @@ local_costmap:
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         enabled: true
-        inflation_radius: 0.3
-        cost_scaling_factor: 10.0
+        # A broad, gentle gradient makes the middle of free corridors cheaper.
+        inflation_radius: 0.80
+        cost_scaling_factor: 3.0

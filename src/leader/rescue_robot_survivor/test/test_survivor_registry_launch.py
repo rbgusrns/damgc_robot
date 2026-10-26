@@ -28,6 +28,8 @@ def test_yaml_has_complete_registry_defaults():
     parameters = config["/leader/survivor_registry"]["ros__parameters"]
     assert parameters == {
         "input_topic": "/leader/survivor/map_positions",
+        "camera_positions_topic": "/leader/survivor/camera_positions",
+        "near_confirm_distance_m": 2.0,
         "tracks_topic": "/leader/survivor/tracks",
         "reset_service": "/leader/survivor/registry/reset",
         "map_frame": "map",

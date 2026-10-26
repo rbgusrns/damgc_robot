@@ -43,10 +43,9 @@ def test_recovered_cost_field_matches_controller_distance_estimate():
     for name in ('local_costmap', 'global_costmap'):
         inflation = config[name][name]['ros__parameters']['inflation_layer']
         assert inflation['cost_scaling_factor'] == controller['inflation_cost_scaling_factor']
-        # The recovered profile uses the pre-autonomy 0.3 m inflation field.
-        # The controller must estimate distances using that same field.
+        # The broad corridor cost field must match the controller distance estimate.
         assert inflation['inflation_radius'] >= controller['cost_scaling_dist']
-        assert inflation['inflation_radius'] == .30
+        assert inflation['inflation_radius'] == .80
     assert controller['use_collision_detection'] is True
 
 

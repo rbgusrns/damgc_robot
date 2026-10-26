@@ -113,3 +113,16 @@ def test_map_or_pose_pause_enters_same_recovery_protocol():
     recovery.poll(monitor, explorer, 11)
     recovery.poll(monitor, explorer, 13)
     explorer._resume_after_video.assert_called_once()
+
+
+def test_solo_recovery_does_not_wait_for_unused_visual_odometry():
+    monitor, explorer = harness()
+    monitor.required_streams = ('depth', 'filtered_depth', 'local_odometry', 'map')
+    recovery = VideoRecovery()
+    recovery.poll(monitor, explorer, 0)
+    for key in monitor.required_streams:
+        monitor.counts[key] += 3
+    recovery.poll(monitor, explorer, 1)
+    recovery.poll(monitor, explorer, 3)
+    explorer._resume_after_video.assert_called_once()
+    assert monitor.counts['visual_odometry'] == 10

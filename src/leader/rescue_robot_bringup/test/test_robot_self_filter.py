@@ -49,6 +49,7 @@ def test_fixed_box_ray_intervals_are_cached_and_filter_only_intersections():
     geometry = {}
 
     fake = SimpleNamespace(
+        _holding=False,
         _geometry_key=None,
         _filter_geometry=None,
         _quat_rotate=RobotSelfFilter._quat_rotate,
