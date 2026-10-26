@@ -23,6 +23,7 @@
 16. [리더 VSLAM/Nav2 실물 진행 기록](LEADER_NAVIGATION_PROGRESS_2026-10-03.md) — 그리퍼 self-filter/footprint, 속도별 실물 목표 주행, bag 측정과 남은 방향 편차 진단
 17. [Survivor Eye State 시스템 설계](SURVIVOR_EYE_STATE_SYSTEM.md) — Stage 1·2 구현, 실제 D435 시험 결과와 Stage 3~6 계획
 18. [Survivor Eye State 개발 이력](SURVIVOR_EYE_STATE_DEVELOPMENT.md) — standalone YOLO11n-cls 데이터 검증·학습·평가·추론 및 단계별 개발 기록
+19. [자율 탐색의 제한 영역 설정과 검증](../src/leader/rescue_robot_bringup/docs/AUTONOMOUS_EXPLORATION.md) — 시작점에서 전방 3m·우측 3m인 영역을 설정하고 순차 탐색
 
 ## 문서 목록
 

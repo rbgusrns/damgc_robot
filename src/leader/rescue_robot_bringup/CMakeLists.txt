@@ -49,6 +49,14 @@ if(BUILD_TESTING)
     test_frontier_explorer_goal_gate
     test/test_frontier_explorer_goal_gate.py
   )
+  ament_add_pytest_test(
+    test_frontier_tf_reception
+    test/test_frontier_tf_reception.py
+  )
+  ament_add_pytest_test(
+    test_mapping_runtime
+    test/test_mapping_runtime.py
+  )
 endif()
 
 ament_package()

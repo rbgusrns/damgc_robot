@@ -4,13 +4,51 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'scripts'))
-from frontier_search import frontier_clusters
+from frontier_search import frontier_clusters, short_path_goal
+import math
+import pytest
+
+
+def test_short_waypoint_follows_bent_path_not_a_straight_line():
+    x, y, yaw, final = short_path_goal([(0., 0., 0.), (0., .5, 0.), (.5, .5, 0.)], (0., 0.), .6)
+    assert (x, y) == pytest.approx((.1, .5))
+    assert not final
+    assert math.hypot(x, y) <= .6
+
+
+def test_short_waypoint_keeps_reverse_path_body_heading():
+    x, y, yaw, final = short_path_goal([(0., 0., math.pi), (1., 0., math.pi)], (0., 0.), .6)
+    assert x == pytest.approx(.6)
+    assert yaw == pytest.approx(math.pi)
+    assert not final
+
+
+def test_short_path_returns_actual_endpoint_and_final_flag():
+    assert short_path_goal([(0., 0., 0.), (.2, 0., .3)], (0., 0.), .6) == (.2, 0., .3, True)
+
+
+def test_short_path_rejects_invalid_inputs():
+    for path, distance in (([], .6), ([(float('nan'), 0., 0.)], .6), ([(1., 0., 0.)], 0.)):
+        with pytest.raises(ValueError):
+            short_path_goal(path, (0., 0.), distance)
 
 
 def grid(rows):
     return SimpleNamespace(width=len(rows[0]), height=len(rows), resolution=1.,
                            origin=SimpleNamespace(x=0., y=0.), unknown_value=-999.,
                            data=[v for row in rows for v in row])
+
+
+def test_area_is_not_a_wall_for_reaching_an_interior_frontier():
+    rows = [[0.]*7]+[[0.]+[1.]*5+[0.] for _ in range(5)]+[[0.]*7]
+    for row in (2, 3, 4):
+        rows[row][3] = 0.
+    rows[3][5] = -999.
+    clusters = frontier_clusters(grid(rows), (2.5, 3.5), (3.5, 3.5), 0., .36, .4, 1,
+                                 width=5., height=3.)
+    points = [point for cluster in clusters for point in cluster]
+    assert any(point[0] > 3.5 for point in points)
+    assert all(1. <= point[0] <= 6. and 2. <= point[1] <= 5. for point in points)
 
 
 def search(msg, robot=(1.5, 2.5), **kwargs):
@@ -34,6 +72,40 @@ def test_rectangle_excludes_frontiers_and_unknown_beyond_its_boundary():
     msg = grid([[1, 1, 1, 1, -999, -999]] * 6)
     assert search(msg)
     assert search(msg, width=2., height=4.) == []
+
+
+def test_forward_right_square_rotates_with_heading_and_starts_at_rear_left_corner():
+    resolution = .1
+    width = height = 80
+    origin_x, origin_y = -4., -1.
+    yaw = 3.141592653589793 / 2
+    rows = []
+    for r in range(height):
+        row = []
+        for c in range(width):
+            x = origin_x + (c + .5) * resolution
+            y = origin_y + (r + .5) * resolution
+            local_x = y
+            local_y = -x
+            in_area = 0. <= local_x <= 3. and -3. <= local_y <= 0.
+            row.append(1. if in_area and local_x < 2.5 else -999.)
+        rows.append(row)
+    msg = grid(rows)
+    msg.resolution = resolution
+    msg.origin = SimpleNamespace(x=origin_x, y=origin_y)
+
+    clusters = frontier_clusters(
+        msg, (0., 0.), (0., 0.), 0., .36, .4, 1,
+        width=3., height=3., offset_x=1.5, offset_y=-1.5, area_yaw=yaw)
+
+    goals = [point for cluster in clusters for point in cluster]
+    assert goals
+    for x, y, *_ in goals:
+        local_x = y
+        local_y = -x
+        assert 0. <= local_x <= 3.
+        assert -3. <= local_y <= 0.
+    assert all(point[1] > 2.3 for point in goals)
 
 
 def test_robot_in_unknown_does_not_jump_to_free_island():

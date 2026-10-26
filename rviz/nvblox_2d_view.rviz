@@ -38,7 +38,7 @@ Visualization Manager:
       Color Scheme: map
       Draw Behind: false
       Enabled: true
-      Name: 3D projected obstacles
+      Name: 2D projected obstacles
       Topic:
         Depth: 1
         Durability Policy: Transient Local
@@ -156,6 +156,17 @@ Visualization Manager:
       Value: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
+      Name: Frontier Explorer
+      Namespaces: {}
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /frontier_explorer/markers
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
       Name: Survivor detections
       Namespaces: {}
       Topic:
@@ -207,8 +218,8 @@ Visualization Manager:
       Scale: 97.15924072265625
       Target Frame: odom
       Value: TopDownOrtho (rviz_default_plugins)
-      X: 0
-      Y: 0
+      X: 1.5
+      Y: -1.5
     Saved: ~
 Window Geometry:
   Displays:

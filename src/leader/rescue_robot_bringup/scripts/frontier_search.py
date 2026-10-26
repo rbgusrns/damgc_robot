@@ -6,12 +6,33 @@ CARDINAL = ((-1, 0), (1, 0), (0, -1), (0, 1))
 NEIGHBORS = tuple((r, c) for r in (-1, 0, 1) for c in (-1, 0, 1) if r or c)
 
 
+def short_path_goal(poses, robot, maximum_distance):
+    """Select a step by path length, retaining the planner's body orientation."""
+    poses = list(poses)
+    if (not poses or not math.isfinite(maximum_distance) or maximum_distance <= 0
+            or not all(math.isfinite(value) for pose in poses for value in pose)):
+        raise ValueError('A finite path and positive step distance are required')
+    previous = (robot[0], robot[1], poses[0][2])
+    remaining = maximum_distance
+    for x, y, yaw in poses:
+        distance = math.hypot(x-previous[0], y-previous[1])
+        if distance > remaining and distance > 1e-9:
+            ratio = remaining/distance
+            turn = math.atan2(math.sin(yaw-previous[2]), math.cos(yaw-previous[2]))
+            heading = previous[2]+ratio*turn
+            return (previous[0]+ratio*(x-previous[0]),
+                    previous[1]+ratio*(y-previous[1]), heading, False)
+        remaining -= distance
+        previous = (x, y, yaw)
+    return (*previous, True)
+
+
 def frontier_clusters(msg, robot, center, radius, clearance, minimum_distance,
-                      minimum_cluster, width=0., height=0., offset_x=0., offset_y=0., include_observed=False, connection_clearance=None, minimum_unknown_area=0., stats=None):
+                      minimum_cluster, width=0., height=0., offset_x=0., offset_y=0., include_observed=False, connection_clearance=None, minimum_unknown_area=0., stats=None, area_yaw=0.):
     """Return reachable free boundary cells; never connect diagonally through walls.
 
     Rectangle coordinates follow the slice frame, relative to the initial pose.
-    Bounds constrain candidate cells and the flood fill, not Nav2's planned path.
+    Bounds constrain observation candidates. Reachability may pass outside them.
     """
     if stats is not None:
         stats.update(reachable_cells=0, eligible_cells=0)
@@ -27,14 +48,19 @@ def frontier_clusters(msg, robot, center, radius, clearance, minimum_distance,
     def inside(x, y):
         if radius > 0 and math.hypot(x-center[0], y-center[1]) > radius:
             return False
-        return not width or (abs(x-center[0]-offset_x) <= width/2 and
-                             abs(y-center[1]-offset_y) <= height/2)
+        if not width:
+            return True
+        dx, dy = x-center[0], y-center[1]
+        local_x = math.cos(area_yaw)*dx + math.sin(area_yaw)*dy
+        local_y = -math.sin(area_yaw)*dx + math.cos(area_yaw)*dy
+        return (abs(local_x-offset_x) <= width/2 and
+                abs(local_y-offset_y) <= height/2)
     traversal_clearance = clearance if connection_clearance is None else connection_clearance
     free = set()
     for r in range(h):
         for c in range(w):
             v = data[r*w+c]
-            if not unknown(v) and v >= traversal_clearance and inside(*xy(r, c)):
+            if not unknown(v) and v >= traversal_clearance:
                 free.add((r, c))
     seed = (math.floor((robot[1]-msg.origin.y)/res),
             math.floor((robot[0]-msg.origin.x)/res))
@@ -73,7 +99,8 @@ def frontier_clusters(msg, robot, center, radius, clearance, minimum_distance,
                 queue.append(cell)
     if stats is not None:
         stats.update(reachable_cells=len(reached),
-                     eligible_cells=sum(data[r*w+c] >= clearance for r, c in reached))
+                     eligible_cells=sum(data[r*w+c] >= clearance and inside(*xy(r, c))
+                                        for r, c in reached))
     relevant_unknown = None
     if minimum_unknown_area > 0:
         relevant_unknown = set()
@@ -98,6 +125,8 @@ def frontier_clusters(msg, robot, center, radius, clearance, minimum_distance,
         if not (0 < r < h-1 and 0 < c < w-1):
             continue
         x, y = xy(r, c)
+        if not inside(x, y):
+            continue
         if data[r*w+c] < clearance:
             continue
         if math.hypot(x-robot[0], y-robot[1]) < minimum_distance:

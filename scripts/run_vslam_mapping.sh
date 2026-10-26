@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-REPO_ROOT="/home/maze/damgc_robot"
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTAINER_NAME="${ISAAC_CONTAINER_NAME:-isaac_ros_dev-$(uname -m)-container}"
 MAPPING_IMAGE="${ISAAC_MAPPING_IMAGE:-damgc-vslam-mapping:humble}"
 MAPPING_DOCKERFILE="${REPO_ROOT}/docker/vslam_mapping.Dockerfile"
@@ -18,6 +18,7 @@ LAUNCHER_PID_FILE="${RUNTIME_ROOT}/launcher.pid"
 CONTAINER_VSLAM_PID_FILE="/tmp/damgc_vslam_mapping_vslam.pid"
 CONTAINER_RVIZ_PID_FILE="/tmp/damgc_vslam_mapping_rviz.pid"
 CONTAINER_BAG_PID_FILE="/tmp/damgc_vslam_mapping_bag.pid"
+CONTAINER_AUTO_PID_FILE="/tmp/damgc_vslam_mapping_auto.pid"
 BAG_DIR="${REPO_ROOT}/data/${RUN_PREFIX}_${RUN_ID}"
 CONTAINER_BAG_DIR="/workspaces/isaac_ros-dev/data/${RUN_PREFIX}_${RUN_ID}"
 
@@ -44,6 +45,7 @@ HOST_PIDS=()
 CONTAINER_STARTED_BY_US=0
 CONTAINER_USER=""
 CLEANING_UP=0
+LAUNCHER_OWNED=0
 BAG_STARTED=0
 
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
@@ -55,6 +57,20 @@ VSLAM_ONLY="${VSLAM_ONLY:-0}"
 SELF_FILTER_ENABLED="${SELF_FILTER_ENABLED:-1}"
 MAPPING_SOURCE_MODE="${MAPPING_SOURCE_MODE:-STOP}"
 MAPPING_INITIAL_SCAN="${MAPPING_INITIAL_SCAN:-0}"
+MAPPING_AUTOMATIC_EXPLORATION="${MAPPING_AUTOMATIC_EXPLORATION:-0}"
+MAPPING_RECORD_BAG="${MAPPING_RECORD_BAG:-1}"
+if [[ "${MAPPING_RECORD_BAG}" != "0" && "${MAPPING_RECORD_BAG}" != "1" ]]; then
+  printf 'MAPPING_RECORD_BAG must be 0 or 1.\n' >&2
+  exit 1
+fi
+if [[ "${MAPPING_AUTOMATIC_EXPLORATION}" != "0" && "${MAPPING_AUTOMATIC_EXPLORATION}" != "1" ]]; then
+  printf 'MAPPING_AUTOMATIC_EXPLORATION must be 0 or 1.\n' >&2
+  exit 1
+fi
+if [[ "${MAPPING_AUTOMATIC_EXPLORATION}" == "1" && ( "${MAPPING_INITIAL_SCAN}" != "1" || "${MAPPING_MODE}" != "3D" || "${VSLAM_ONLY}" == "1" ) ]]; then
+  printf 'Automatic exploration requires fresh nvblox mapping and initial scan.\n' >&2
+  exit 1
+fi
 MAPPING_CAMERA_FPS="${MAPPING_CAMERA_FPS:-30}"
 if [[ "${MAPPING_CAMERA_FPS}" != "15" && "${MAPPING_CAMERA_FPS}" != "30" ]]; then
   printf "MAPPING_CAMERA_FPS must be 15 or 30.\n" >&2
@@ -111,6 +127,12 @@ if [[ "${STM32_I2C_WRITE_ENABLED}" == "1" ]]; then
 fi
 
 mkdir -p "${RUNTIME_ROOT}" "${LOG_DIR}"
+# Acquire ownership before installing cleanup traps or touching shared PID files.
+exec 9>"${RUNTIME_ROOT}/launcher.lock"
+if ! flock -n 9; then
+  printf 'A mapping session is already running; no processes were changed.\n' >&2
+  exit 1
+fi
 
 is_container_running() {
   [[ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER_NAME}" 2>/dev/null || true)" == "true" ]]
@@ -133,7 +155,8 @@ stop_container_process() {
 
   container_pid="$(docker exec "${CONTAINER_NAME}" sh -c "cat '${pid_file}' 2>/dev/null" 2>/dev/null || true)"
   if [[ "${container_pid}" =~ ^[0-9]+$ ]]; then
-    docker exec "${CONTAINER_NAME}" kill "-${signal}" "${container_pid}" >/dev/null 2>&1 || true
+    docker exec "${CONTAINER_NAME}" python3 /workspaces/isaac_ros-dev/scripts/mapping_processes.py \
+      signal "${container_pid}" "${signal}" >/dev/null 2>&1 || true
   fi
 }
 
@@ -143,7 +166,8 @@ container_process_running() {
 
   container_pid="$(docker exec "${CONTAINER_NAME}" sh -c "cat '${pid_file}' 2>/dev/null" 2>/dev/null || true)"
   [[ "${container_pid}" =~ ^[0-9]+$ ]] && \
-    docker exec "${CONTAINER_NAME}" kill -0 "${container_pid}" >/dev/null 2>&1
+    docker exec "${CONTAINER_NAME}" python3 /workspaces/isaac_ros-dev/scripts/mapping_processes.py \
+      alive "${container_pid}" >/dev/null 2>&1
 }
 
 finalize_bag() {
@@ -177,7 +201,7 @@ finalize_bag() {
     printf 'Analyzing recorded trajectories...\n'
     docker exec -u "${CONTAINER_USER}" \
       -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" \
-      "${CONTAINER_NAME}" bash -lc '
+      "${CONTAINER_NAME}" setsid --wait bash -lc '
         source /opt/ros/humble/setup.bash
         source /workspaces/isaac_ros-dev/install_docker/setup.bash
         python3 /workspaces/isaac_ros-dev/scripts/analyze_vslam_bag.py "$1"
@@ -193,7 +217,7 @@ finalize_bag() {
 }
 
 cleanup() {
-  if (( CLEANING_UP )); then
+  if (( CLEANING_UP || ! LAUNCHER_OWNED )); then
     return
   fi
   CLEANING_UP=1
@@ -201,6 +225,11 @@ cleanup() {
   set +e
 
   printf '\nStopping mapping stack...\n'
+
+  # The coordinator owns exploration actions. Stop it before stopping sensors.
+  if is_container_running; then
+    stop_container_process "${CONTAINER_AUTO_PID_FILE}" INT
+  fi
 
   # Let rosbag receive a clean SIGINT and write metadata before its topics or
   # container disappear.
@@ -213,7 +242,7 @@ cleanup() {
   for pid in "${HOST_PIDS[@]}"; do
     # Each host launch runs in its own session, so signal its complete process
     # group rather than leaving camera/bridge child nodes behind.
-    kill -INT -- "-${pid}" >/dev/null 2>&1 || true
+    python3 "${REPO_ROOT}/scripts/mapping_processes.py" signal "${pid}" INT >/dev/null 2>&1 || true
   done
 
   if is_container_running; then
@@ -225,17 +254,23 @@ cleanup() {
     fi
   fi
 
-  sleep 1
+  sleep 3
   for pid in "${HOST_PIDS[@]}"; do
-    kill -TERM -- "-${pid}" >/dev/null 2>&1 || true
+    python3 "${REPO_ROOT}/scripts/mapping_processes.py" signal "${pid}" TERM >/dev/null 2>&1 || true
+    python3 "${REPO_ROOT}/scripts/mapping_processes.py" signal "${pid}" KILL >/dev/null 2>&1 || true
     wait "${pid}" >/dev/null 2>&1 || true
   done
 
   if is_container_running && (( ! CONTAINER_STARTED_BY_US )); then
     stop_container_process "${CONTAINER_RVIZ_PID_FILE}" TERM
     stop_container_process "${CONTAINER_VSLAM_PID_FILE}" TERM
+    stop_container_process "${CONTAINER_AUTO_PID_FILE}" TERM
+    sleep 1
+    stop_container_process "${CONTAINER_RVIZ_PID_FILE}" KILL
+    stop_container_process "${CONTAINER_VSLAM_PID_FILE}" KILL
+    stop_container_process "${CONTAINER_AUTO_PID_FILE}" KILL
     docker exec "${CONTAINER_NAME}" rm -f \
-      "${CONTAINER_RVIZ_PID_FILE}" "${CONTAINER_VSLAM_PID_FILE}" "${CONTAINER_BAG_PID_FILE}" \
+      "${CONTAINER_RVIZ_PID_FILE}" "${CONTAINER_VSLAM_PID_FILE}" "${CONTAINER_BAG_PID_FILE}" "${CONTAINER_AUTO_PID_FILE}" \
       >/dev/null 2>&1 || true
   fi
 
@@ -243,7 +278,9 @@ cleanup() {
   printf 'Stopped. Logs: %s\n' "${LOG_DIR}"
 }
 
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [[ -f "${LAUNCHER_PID_FILE}" ]]; then
   existing_pid="$(<"${LAUNCHER_PID_FILE}")"
@@ -253,7 +290,9 @@ if [[ -f "${LAUNCHER_PID_FILE}" ]]; then
   fi
   rm -f "${LAUNCHER_PID_FILE}"
 fi
+python3 "${REPO_ROOT}/scripts/mapping_processes.py" conflicts
 printf '%s\n' "$$" > "${LAUNCHER_PID_FILE}"
+LAUNCHER_OWNED=1
 
 if [[ ! -t 0 ]]; then
   printf 'Run this script from an interactive terminal for arrow-key input.\n' >&2
@@ -367,6 +406,18 @@ setsid bash -lc "
 HOST_PIDS+=("$!")
 
 printf '[4/7] Preparing Isaac ROS container...\n'
+if ! is_container_running && docker container inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
+  existing_image="$(docker inspect -f '{{.Image}}' "${CONTAINER_NAME}")"
+  requested_image="$(docker image inspect -f '{{.Id}}' "${MAPPING_IMAGE}")"
+  existing_workspace="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/workspaces/isaac_ros-dev"}}{{.Source}}{{end}}{{end}}' "${CONTAINER_NAME}")"
+  if [[ "${existing_image}" != "${requested_image}" || "${existing_workspace}" != "${REPO_ROOT}" ]]; then
+    printf 'Stopped container does not match the mapping image/workspace; refusing to reuse it.\n' >&2
+    exit 1
+  fi
+  printf '  starting the existing stopped mapping container...\n'
+  docker start "${CONTAINER_NAME}" >/dev/null
+  CONTAINER_STARTED_BY_US=1
+fi
 if ! is_container_running; then
   if [[ -z "${DISPLAY:-}" ]] || ! command -v gnome-terminal >/dev/null 2>&1; then
     printf 'A graphical terminal is required to start the Isaac ROS container.\n' >&2
@@ -437,7 +488,7 @@ while [[ -z "${CONTAINER_USER}" ]]; do
 done
 printf '  container user: %s\n' "${CONTAINER_USER}"
 
-if ! docker exec -u "${CONTAINER_USER}" -e DAMGC_MAPPING_MODE="${MAPPING_MODE}" "${CONTAINER_NAME}" bash -lc '
+if ! docker exec -u "${CONTAINER_USER}" -e DAMGC_MAPPING_MODE="${MAPPING_MODE}" "${CONTAINER_NAME}" setsid --wait bash -lc '
   source /opt/ros/humble/setup.bash
   source /workspaces/isaac_ros-dev/install_docker/setup.bash
   ros2 pkg prefix rescue_robot_bringup >/dev/null
@@ -451,7 +502,7 @@ if ! docker exec -u "${CONTAINER_USER}" -e DAMGC_MAPPING_MODE="${MAPPING_MODE}" 
   printf 'The container is missing a required ROS package or install_docker overlay.\n' >&2
   exit 1
 fi
-if [[ "${VSLAM_ONLY}" != "1" ]] && ! docker exec -u "${CONTAINER_USER}" "${CONTAINER_NAME}" bash -lc '
+if [[ "${VSLAM_ONLY}" != "1" ]] && ! docker exec -u "${CONTAINER_USER}" "${CONTAINER_NAME}" setsid --wait bash -lc '
   source /opt/ros/humble/setup.bash
   ros2 pkg prefix nav2_planner >/dev/null
   ros2 pkg prefix nav2_controller >/dev/null
@@ -477,7 +528,7 @@ docker exec -d -u "${CONTAINER_USER}" \
   -e DAMGC_VSLAM_ONLY="${VSLAM_ONLY}" \
   -e DAMGC_SELF_FILTER_ENABLED="${SELF_FILTER_ENABLED}" \
   -e DAMGC_MAPPING_INITIAL_SCAN="${MAPPING_INITIAL_SCAN}" \
-  "${CONTAINER_NAME}" bash -lc '
+  "${CONTAINER_NAME}" setsid --wait bash -lc '
     log_path="$1"
     source /opt/ros/humble/setup.bash
     source /workspaces/isaac_ros-dev/install_docker/setup.bash
@@ -515,7 +566,7 @@ else
     -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
     -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
     -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
-    "${CONTAINER_NAME}" bash -lc '
+    "${CONTAINER_NAME}" setsid --wait bash -lc '
       log_path="$1"
       source /opt/ros/humble/setup.bash
       source /workspaces/isaac_ros-dev/install_docker/setup.bash
@@ -554,6 +605,7 @@ if [[ "${MAPPING_MODE}" == "2D" ]]; then
 else
   wait_for_topic "/leader/camera/infra1/image_rect_raw" 45
   wait_for_topic "/visual_slam/tracking/odometry" 120
+  wait_for_topic "/nvblox_node/static_map_slice" 60
 fi
 
 if [[ -n "${CONTAINER_SNAPSHOT}" ]]; then
@@ -562,7 +614,7 @@ if [[ -n "${CONTAINER_SNAPSHOT}" ]]; then
     -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
     -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
     -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
-    "${CONTAINER_NAME}" bash -lc '
+    "${CONTAINER_NAME}" setsid --wait bash -lc '
       source /opt/ros/humble/setup.bash
       source /workspaces/isaac_ros-dev/install_docker/setup.bash
       /usr/bin/python3 /workspaces/isaac_ros-dev/scripts/mapping_snapshot.py load "$1"
@@ -572,19 +624,40 @@ fi
 if [[ "${VSLAM_ONLY}" != "1" ]]; then
   printf 'Checking Nav2 lifecycle readiness...\n'
   for nav2_node in planner_server controller_server behavior_server bt_navigator; do
-    nav2_state="$(timeout 15 ros2 lifecycle get "/${nav2_node}" 2>/dev/null || true)"
-    if [[ "${nav2_state}" == "inactive [2]" ]]; then
-      timeout 15 ros2 lifecycle set "/${nav2_node}" activate
-      nav2_state="$(timeout 15 ros2 lifecycle get "/${nav2_node}" 2>/dev/null || true)"
-    fi
+    # The lifecycle manager owns activation. During GPU-heavy startup, a
+    # lifecycle service can take longer than the old one-shot 15 s query; do
+    # not race the manager by manually activating nodes from this script.
+    nav2_deadline=$((SECONDS + 120))
+    nav2_state=""
+    until [[ "${nav2_state}" == "active [3]" ]]; do
+      nav2_state="$(timeout 10 ros2 lifecycle get "/${nav2_node}" 2>/dev/null || true)"
+      if [[ "${nav2_state}" == "active [3]" ]]; then
+        break
+      fi
+      # A failed lifecycle manager has stopped sequencing transitions. Recover
+      # only that condition; never race a manager which is still bringing up.
+      if grep -Fq 'Failed to bring up all requested nodes. Aborting bringup.' "${LOG_DIR}/vslam_nvblox.log"; then
+        if [[ "${nav2_state}" == "unconfigured [1]" ]]; then
+          timeout 15 ros2 lifecycle set "/${nav2_node}" configure >>"${LOG_DIR}/nav2_recovery.log" 2>&1 || true
+        elif [[ "${nav2_state}" == "inactive [2]" ]]; then
+          timeout 15 ros2 lifecycle set "/${nav2_node}" activate >>"${LOG_DIR}/nav2_recovery.log" 2>&1 || true
+        fi
+      fi
+      if (( SECONDS >= nav2_deadline )); then
+        break
+      fi
+      sleep 2
+    done
     if [[ "${nav2_state}" != "active [3]" ]]; then
       printf 'Nav2 node %s is not active (%s); see %s/vslam_nvblox.log\n' \
         "${nav2_node}" "${nav2_state}" "${LOG_DIR}" >&2
       exit 1
     fi
+    printf '  active: %s\n' "${nav2_node}"
   done
 fi
 
+if [[ "${MAPPING_RECORD_BAG}" == "1" ]]; then
 printf '[6/7] Starting metrics rosbag...\n'
 docker exec "${CONTAINER_NAME}" rm -f "${CONTAINER_BAG_PID_FILE}" >/dev/null 2>&1 || true
 docker exec -d -u "${CONTAINER_USER}" \
@@ -592,7 +665,7 @@ docker exec -d -u "${CONTAINER_USER}" \
   -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
   -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" \
   -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
-  "${CONTAINER_NAME}" bash -lc '
+  "${CONTAINER_NAME}" setsid --wait bash -lc '
     bag_path="$1"
     log_path="$2"
     source /opt/ros/humble/setup.bash
@@ -600,9 +673,6 @@ docker exec -d -u "${CONTAINER_USER}" \
     echo "$$" > /tmp/damgc_vslam_mapping_bag.pid
     exec ros2 bag record --output "${bag_path}" \
       --include-hidden-topics \
-      /scan \
-      /map \
-      /map_metadata \
       /mapping/projected_map \
       /mapping/planned_goal \
       /nav2/cmd_vel \
@@ -618,37 +688,18 @@ docker exec -d -u "${CONTAINER_USER}" \
       /leader/stm32_rx/sequence_drops \
       /leader/stm32_rx/crc_errors \
       /leader/odom/raw \
-      /leader/imu/data_raw \
       /leader/imu/data_calibrated \
       /leader/odometry/local \
       /leader/odometry/global \
-      /local_costmap/costmap \
-      /global_costmap/costmap \
       /nvblox_node/static_map_slice \
-      /cooperation/transport/control \
-      /cooperation/transport/leader \
-      /cooperation/transport/follower \
-      /cooperation/transport/leader/status \
-      /cooperation/transport/follower/status \
-      /cooperation/transport/leader/path \
-      /cooperation/transport/follower/path \
-      /leader/cooperation/cmd_vel \
-      /follower/mission/cmd_vel \
-      /follower/odom/raw \
-      /plan \
-      /received_global_plan \
-      /lookahead_point \
-      /lookahead_collision_arc \
       /visual_slam/tracking/odometry \
-      /visual_slam/vis/slam_odometry \
-      /visual_slam/slam_odometry_with_covariance \
       /visual_slam/status \
       /tf \
       /tf_static >>"${log_path}" 2>&1
   ' _ "${CONTAINER_BAG_DIR}" "${container_log_dir}/rosbag.log"
 BAG_STARTED=1
 
-bag_deadline=$((SECONDS + 15))
+bag_deadline=$((SECONDS + 60))
 until container_process_running "${CONTAINER_BAG_PID_FILE}" && \
   grep -Fq 'Recording...' "${LOG_DIR}/rosbag.log" 2>/dev/null && \
   grep -Fq "Subscribed to topic '${recording_ready_topic}'" \
@@ -665,6 +716,24 @@ printf '  recording: %s\n' "${BAG_DIR}"
 # recorder time to finish subscribing to their VSLAM/odometry streams.
 printf '  capturing a 5-second stationary baseline...\n'
 sleep 5
+else
+  printf '[6/7] Lightweight mapping: rosbag recording disabled.\n'
+fi
+
+if [[ "${MAPPING_AUTOMATIC_EXPLORATION}" == "1" ]]; then
+  printf '[7/7] Automatic map-only mission: verify live inputs, scan, explore and return. Ctrl-C stops.\n'
+  docker exec -u "${CONTAINER_USER}" \
+    -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID}" -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY}" \
+    -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION}" -e FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS}" \
+    -e MAPPING_START_POSE_FILE="${MAPPING_START_POSE_FILE:-}" \
+    "${CONTAINER_NAME}" setsid --wait bash -lc '
+      source /opt/ros/humble/setup.bash
+      source /workspaces/isaac_ros-dev/install_docker/setup.bash
+      echo "$$" > /tmp/damgc_vslam_mapping_auto.pid
+      exec python3 /workspaces/isaac_ros-dev/scripts/mapping_autorun.py --mapping-log "$1"
+    ' _ "${container_log_dir}/vslam_nvblox.log" > >(tee "${LOG_DIR}/automatic_exploration.log") 2>&1
+  exit 0
+fi
 
 printf '[7/7] Starting arrow-key control. E/D changes speed; Space stops; Ctrl-C shuts everything down.\n'
 source_with_nounset_disabled "${REPO_ROOT}/install/setup.bash"
